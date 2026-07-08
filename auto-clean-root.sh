@@ -13,7 +13,7 @@ set -euo pipefail
 #   ./sind-infra-clean-zoneidentifier.sh
 # -----------------------------------------------------------------------------
 
-PROJECT_ROOT="/home/daniel/Code/sind-infra"
+PROJECT_ROOT="/home/daniel/Code"
 
 # Intervalo entre ciclos completos, em segundos.
 INTERVAL_SECONDS=6
