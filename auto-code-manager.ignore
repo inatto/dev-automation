@@ -4,6 +4,7 @@
 *.zip
 *:Zone.Identifier
 
+.env
 node_modules/
 .venv/
 venv/
