@@ -12,7 +12,7 @@ DDL_EXPORT_DIR="$CODE_ROOT/sind-infra/sind-oracle/exports/ddl"
 
 INTERVAL=2
 ZONE_EVERY=4
-BACKUP_EVERY=6
+BACKUP_EVERY=10
 STABLE_WAIT=2
 
 log() {
@@ -229,35 +229,16 @@ zip_one_ddl_file() {
   [ -f "$src" ] || return 0
 
   if [ -f "$zip_file" ] && [ "$zip_file" -nt "$src" ]; then
-    log "DDL ZIP atualizado, apagando SQL já compactado: $(basename "$src")"
-    rm -f -- "$src" || {
-      log "ERRO apagando SQL já compactado: $src"
-      return 1
-    }
+    log "DDL ZIP atualizado, pulando: $(basename "$zip_file")"
     return 0
   fi
 
   log "Compactando DDL: $(basename "$src") -> $(basename "$zip_file")"
 
-  if (
+  (
     cd "$(dirname "$src")" || exit 1
     zip -q -j "$(basename "$zip_file")" "$(basename "$src")"
-  ); then
-    if [ -s "$zip_file" ]; then
-      rm -f -- "$src" || {
-        log "ERRO apagando SQL após compactar: $src"
-        return 1
-      }
-      log "OK DDL compactado e SQL apagado: $(basename "$zip_file")"
-      return 0
-    fi
-
-    log "ERRO DDL: ZIP não foi criado ou ficou vazio: $zip_file"
-    return 1
-  fi
-
-  log "ERRO DDL: falhou compactação de $src"
-  return 1
+  )
 }
 
 zip_ddl_exports() {
