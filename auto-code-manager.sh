@@ -204,18 +204,56 @@ clean_zone() {
   find "$CODE_ROOT" -type f -name "*:Zone.Identifier" -print -delete 2>/dev/null || true
 }
 
-make_clean_ignore() {
-  local clean_ignore="$1"
+make_rsync_filter() {
+  local filter_file="$1"
 
-  clean_file_to_stdout "$IGNORE_FILE" > "$clean_ignore" || true
+  : > "$filter_file"
 
-  {
-    echo "*.zip"
-    echo "*.log"
-    echo "*:Zone.Identifier"
-  } >> "$clean_ignore"
+  # Lê o auto-code-manager.ignore como a fonte única da verdade.
+  # Nada de diretório hardcoded no script: se está no ignore, sai do backup.
+  # Suporta também exceção no padrão: !caminho/arquivo.zip
+  # Exemplos:
+  #   apex/                         -> remove qualquer pasta apex em qualquer nível
+  #   sind-oracle/apex/             -> remove esse caminho a partir da raiz do projeto
+  #   *.zip                         -> remove zips
+  #   !sind-oracle/exports/ddl/*.zip -> repermite esses zips, se você quiser
+  while IFS= read -r pattern || [ -n "$pattern" ]; do
+    [ -n "$pattern" ] || continue
 
-  sort -u "$clean_ignore" -o "$clean_ignore"
+    local action="-"
+    if [[ "$pattern" == !* ]]; then
+      action="+"
+      pattern="${pattern:1}"
+      [ -n "$pattern" ] || continue
+    fi
+
+    # Diretório: transforma em regra recursiva forte do rsync.
+    if [[ "$pattern" == */ ]]; then
+      local dir_pattern="${pattern%/}"
+
+      if [[ "$dir_pattern" == */* ]]; then
+        # Caminho relativo à raiz do projeto.
+        echo "$action /$dir_pattern/***" >> "$filter_file"
+      else
+        # Nome de diretório simples: vale em qualquer nível.
+        echo "$action $dir_pattern/***" >> "$filter_file"
+        echo "$action **/$dir_pattern/***" >> "$filter_file"
+      fi
+    else
+      if [[ "$pattern" == */* ]]; then
+        # Caminho relativo à raiz do projeto.
+        echo "$action /$pattern" >> "$filter_file"
+      else
+        # Arquivo/padrão simples: vale em qualquer nível.
+        echo "$action $pattern" >> "$filter_file"
+        echo "$action **/$pattern" >> "$filter_file"
+      fi
+    fi
+  done < <(clean_file_to_stdout "$IGNORE_FILE")
+
+  # Exclusões técnicas fixas do próprio gerenciador, não de projeto.
+  echo "- *:Zone.Identifier" >> "$filter_file"
+  echo "- **/*:Zone.Identifier" >> "$filter_file"
 }
 
 zip_one_ddl_file() {
@@ -259,7 +297,7 @@ zip_ddl_exports() {
 
 backup_project() {
   local project="$1"
-  local project_dir tmp_dir final tmp_zip clean_ignore rc=0
+  local project_dir tmp_dir final tmp_zip filter_file rc=0
 
   project_dir="$CODE_ROOT/$project"
 
@@ -275,34 +313,27 @@ backup_project() {
   tmp_dir="/tmp/auto-code-manager-$project-$$"
   final="$CODE_ROOT/$project.zip"
   tmp_zip="$CODE_ROOT/.$project.zip.tmp"
-  clean_ignore="/tmp/auto-code-manager-ignore-$project-$$.txt"
+  filter_file="/tmp/auto-code-manager-filter-$project-$$.txt"
 
   rm -rf -- "$tmp_dir" || true
-  rm -f -- "$tmp_zip" "$clean_ignore" || true
+  rm -f -- "$tmp_zip" "$filter_file" || true
 
   if ! mkdir -p "$tmp_dir"; then
     log "ERRO backup: não conseguiu criar tmp_dir: $tmp_dir"
     return 1
   fi
 
-  make_clean_ignore "$clean_ignore"
+  make_rsync_filter "$filter_file"
 
   log "Backup autorizado: $project -> $final"
 
-  if [ "$project" = "sind-infra" ]; then
-    rsync -a \
-      --include='sind-oracle/exports/ddl/*.zip' \
-      --exclude-from="$clean_ignore" \
-      "$project_dir/" "$tmp_dir/" || rc=$?
-  else
-    rsync -a \
-      --exclude-from="$clean_ignore" \
-      "$project_dir/" "$tmp_dir/" || rc=$?
-  fi
+  rsync -a \
+    --filter="merge $filter_file" \
+    "$project_dir/" "$tmp_dir/" || rc=$?
 
   if [ "$rc" -ne 0 ]; then
     log "ERRO backup: rsync falhou para $project (rc=$rc)"
-    rm -rf -- "$tmp_dir" "$clean_ignore" || true
+    rm -rf -- "$tmp_dir" "$filter_file" || true
     return "$rc"
   fi
 
@@ -313,19 +344,19 @@ backup_project() {
 
   if [ "$rc" -ne 0 ]; then
     log "ERRO backup: zip falhou para $project (rc=$rc)"
-    rm -rf -- "$tmp_dir" "$clean_ignore" || true
+    rm -rf -- "$tmp_dir" "$filter_file" || true
     rm -f -- "$tmp_zip" || true
     return "$rc"
   fi
 
   if ! mv -f -- "$tmp_zip" "$final"; then
     log "ERRO backup: mv falhou para $final"
-    rm -rf -- "$tmp_dir" "$clean_ignore" || true
+    rm -rf -- "$tmp_dir" "$filter_file" || true
     rm -f -- "$tmp_zip" || true
     return 1
   fi
 
-  rm -rf -- "$tmp_dir" "$clean_ignore" || true
+  rm -rf -- "$tmp_dir" "$filter_file" || true
 
   log "OK backup: $final"
   return 0
