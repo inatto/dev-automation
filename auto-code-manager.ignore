@@ -1,0 +1,13 @@
+public/
+node_modules/
+.venv/
+venv/
+dist/
+build/
+.output/
+.astro/
+.cache/
+tmp/
+temp/
+*.zip
+*.log
