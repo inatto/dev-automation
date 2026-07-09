@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CODE_ROOT="/home/daniel/Code"
-GLOBAL_IGNORE="$CODE_ROOT/auto-code-manager.ignore"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-INTERVAL_SECONDS=6
-BACKUP_EVERY_SECONDS=300
-ZONE_EVERY_SECONDS=30
-STABLE_WAIT_SECONDS=2
+CODE_ROOT="/home/daniel/Code"
+IGNORE_FILE="$SCRIPT_DIR/auto-code-manager.ignore"
+
+INTERVAL=6
+BACKUP_EVERY=300
+ZONE_EVERY=30
+STABLE_WAIT=2
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -16,6 +18,7 @@ log() {
 line() {
   echo "────────────────────────────────────────────────────────────"
 }
+
 
 downloads_dir() {
   if command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
@@ -41,14 +44,15 @@ downloads_dir() {
   echo ""
 }
 
-is_stable_file() {
+
+stable_file() {
   local file="$1"
   local s1 s2
 
   [ -f "$file" ] || return 1
 
   s1="$(stat -c %s "$file" 2>/dev/null || echo 0)"
-  sleep "$STABLE_WAIT_SECONDS"
+  sleep "$STABLE_WAIT"
   [ -f "$file" ] || return 1
   s2="$(stat -c %s "$file" 2>/dev/null || echo 0)"
 
@@ -65,13 +69,11 @@ project_for_zip() {
     project="$(basename "$dir")"
 
     case "$project" in
-      .backups|.cache|.idea) continue ;;
+      .cache|.idea) continue ;;
     esac
 
     if [[ "$zip_name" == "$project.zip" || "$zip_name" == "$project"-*.zip || "$zip_name" == "$project"_*.zip ]]; then
-      if [ ${#project} -gt ${#best} ]; then
-        best="$project"
-      fi
+      [ ${#project} -gt ${#best} ] && best="$project"
     fi
   done
 
@@ -96,15 +98,15 @@ import_downloads() {
     zip_name="$(basename "$zip_file")"
     project="$(project_for_zip "$zip_name")"
 
-    if [ -z "$project" ]; then
+    [ -n "$project" ] || {
       log "Ignorando ZIP sem projeto: $zip_name"
       continue
-    fi
+    }
 
-    if ! is_stable_file "$zip_file"; then
+    stable_file "$zip_file" || {
       log "Ainda baixando/gravando: $zip_name"
       continue
-    fi
+    }
 
     project_dir="$CODE_ROOT/$project"
     target="$project_dir/$zip_name"
@@ -115,90 +117,78 @@ import_downloads() {
     unzip -oq -- "$target" -d "$project_dir"
     rm -f -- "$target"
 
-    log "OK: $zip_name extraído."
+    log "OK importado: $zip_name"
   done
 }
 
-clean_zone_identifier() {
+clean_zone() {
   log "Limpando Zone.Identifier em $CODE_ROOT"
-
   find "$CODE_ROOT" -type f -name "*:Zone.Identifier" -print -delete 2>/dev/null || true
 }
 
-add_ignore_file() {
-  local file="$1"
-  local output="$2"
+make_clean_ignore() {
+  local clean_file="$1"
 
-  [ -f "$file" ] || return
+  touch "$IGNORE_FILE"
 
   sed -E \
+    -e 's/\r$//' \
     -e 's/^[[:space:]]+//' \
     -e 's/[[:space:]]+$//' \
     -e '/^[[:space:]]*$/d' \
     -e '/^[[:space:]]*#/d' \
-    -e '/^[[:space:]]*!/d' \
-    "$file" >> "$output" || true
-}
-
-make_exclude_file() {
-  local project_dir="$1"
-  local output="$2"
-
-  rm -f -- "$output"
+    "$IGNORE_FILE" > "$clean_file"
 
   {
-    echo ".git/"
     echo "*.zip"
     echo "*.log"
     echo "*:Zone.Identifier"
-  } > "$output"
+  } >> "$clean_file"
 
-  add_ignore_file "$GLOBAL_IGNORE" "$output"
-  add_ignore_file "$project_dir/.gitignore" "$output"
-
-  sort -u "$output" -o "$output"
+  sort -u "$clean_file" -o "$clean_file"
 }
 
 backup_project() {
   local project_dir="$1"
-  local project tmp_dir exclude_file final_zip tmp_zip
+  local project tmp_dir final tmp_zip clean_ignore
 
   project="$(basename "$project_dir")"
 
   case "$project" in
-    .backups|.cache|.idea) return ;;
+    .cache|.idea) return ;;
   esac
 
   tmp_dir="/tmp/auto-code-manager-$project-$$"
-  exclude_file="/tmp/auto-code-manager-$project.ignore"
-  final_zip="$CODE_ROOT/$project.zip"
+  final="$CODE_ROOT/$project.zip"
   tmp_zip="$CODE_ROOT/.$project.zip.tmp"
+  clean_ignore="/tmp/auto-code-manager-ignore-$$.txt"
 
   rm -rf -- "$tmp_dir"
-  rm -f -- "$tmp_zip" "$exclude_file"
+  rm -f -- "$tmp_zip" "$clean_ignore"
   mkdir -p "$tmp_dir"
 
-  make_exclude_file "$project_dir" "$exclude_file"
+  make_clean_ignore "$clean_ignore"
 
-  log "Backup $project -> $final_zip"
+  log "Backup $project -> $final"
+  log "Usando ignore: $IGNORE_FILE"
 
-  rsync -a --exclude-from="$exclude_file" "$project_dir/" "$tmp_dir/"
+  rsync -a \
+    --exclude-from="$clean_ignore" \
+    "$project_dir/" "$tmp_dir/"
 
   (
     cd "$tmp_dir"
     zip -qr "$tmp_zip" .
   )
 
-  mv -f -- "$tmp_zip" "$final_zip"
+  mv -f -- "$tmp_zip" "$final"
 
-  rm -rf -- "$tmp_dir" "$exclude_file"
+  rm -rf -- "$tmp_dir" "$clean_ignore"
 
-  log "OK backup: $final_zip"
+  log "OK backup: $final"
 }
 
 backup_all() {
-  local dir
-
   log "Gerando backups em $CODE_ROOT"
 
   for dir in "$CODE_ROOT"/*; do
@@ -216,24 +206,24 @@ stop() {
 
 trap stop INT TERM
 
-if [ ! -d "$CODE_ROOT" ]; then
+[ -d "$CODE_ROOT" ] || {
   echo "ERRO: CODE_ROOT não existe: $CODE_ROOT" >&2
   exit 1
-fi
+}
 
-touch "$GLOBAL_IGNORE"
+touch "$IGNORE_FILE"
 
 line
 echo "Auto Code Manager"
 line
-echo "CODE_ROOT:        $CODE_ROOT"
-echo "GLOBAL_IGNORE:    $GLOBAL_IGNORE"
-echo "Downloads:        $(downloads_dir)"
-echo "Backup:           $CODE_ROOT/nome-do-projeto.zip"
-echo "Intervalo:        ${INTERVAL_SECONDS}s"
-echo "Backup a cada:    ${BACKUP_EVERY_SECONDS}s"
-echo "Zone a cada:      ${ZONE_EVERY_SECONDS}s"
-echo "Para parar:       Ctrl+C"
+echo "CODE_ROOT:   $CODE_ROOT"
+echo "IGNORE_FILE: $IGNORE_FILE"
+echo "Downloads:   $(downloads_dir)"
+echo "Backups:     $CODE_ROOT/nome-do-projeto.zip"
+echo "Intervalo:   ${INTERVAL}s"
+echo "Backup cada: ${BACKUP_EVERY}s"
+echo "Zone cada:   ${ZONE_EVERY}s"
+echo "Para parar:  Ctrl+C"
 line
 
 cycle=1
@@ -248,16 +238,18 @@ while true; do
 
   import_downloads
 
-  if [ $((now - last_zone)) -ge "$ZONE_EVERY_SECONDS" ]; then
-    clean_zone_identifier
+  if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
+    clean_zone
     last_zone="$now"
   fi
 
-  if [ $((now - last_backup)) -ge "$BACKUP_EVERY_SECONDS" ]; then
+  if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
     backup_all
     last_backup="$now"
+  else
+    log "Backup ainda não venceu."
   fi
 
   cycle=$((cycle + 1))
-  sleep "$INTERVAL_SECONDS"
+  sleep "$INTERVAL"
 done
