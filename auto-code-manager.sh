@@ -7,9 +7,9 @@ CODE_ROOT="/home/daniel/Code"
 IGNORE_FILE="$SCRIPT_DIR/auto-code-manager.ignore"
 PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
 
-INTERVAL=6
-BACKUP_EVERY=30
-ZONE_EVERY=30
+INTERVAL=2
+ZONE_EVERY=4
+BACKUP_EVERY=6
 STABLE_WAIT=2
 
 log() {
@@ -233,11 +233,12 @@ backup_all() {
   log "Gerando backups somente dos projetos autorizados em:"
   log "  $PROJECTS_FILE"
 
-  while IFS= read -r project; do
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    log "Projeto autorizado para backup: $project"
     backup_project "$project"
   done < <(clean_file_to_stdout "$PROJECTS_FILE")
 }
-
 stop() {
   echo
   line
