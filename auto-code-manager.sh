@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CODE_ROOT="/home/daniel/Code"
 IGNORE_FILE="$SCRIPT_DIR/auto-code-manager.ignore"
+PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
 
 INTERVAL=6
 BACKUP_EVERY=300
@@ -18,7 +19,6 @@ log() {
 line() {
   echo "────────────────────────────────────────────────────────────"
 }
-
 
 downloads_dir() {
   if command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
@@ -44,7 +44,6 @@ downloads_dir() {
   echo ""
 }
 
-
 stable_file() {
   local file="$1"
   local s1 s2
@@ -59,23 +58,72 @@ stable_file() {
   [ "$s1" = "$s2" ] && [ "$s1" -gt 0 ]
 }
 
+ensure_files() {
+  if [ ! -f "$IGNORE_FILE" ]; then
+    cat > "$IGNORE_FILE" <<'EOF'
+.git/
+.idea/
+*.log
+*.zip
+*:Zone.Identifier
+
+node_modules/
+.venv/
+venv/
+env/
+dist/
+build/
+.astro/
+.cache/
+.output/
+.output*/
+public/
+temp/
+tmp/
+EOF
+    log "Criado: $IGNORE_FILE"
+  fi
+
+  if [ ! -f "$PROJECTS_FILE" ]; then
+    cat > "$PROJECTS_FILE" <<'EOF'
+site-inst
+EOF
+    log "Criado: $PROJECTS_FILE"
+  fi
+}
+
+clean_file_to_stdout() {
+  local file="$1"
+
+  [ -f "$file" ] || return
+
+  sed -E \
+    -e 's/\r$//' \
+    -e 's/^[[:space:]]+//' \
+    -e 's/[[:space:]]+$//' \
+    -e '/^[[:space:]]*$/d' \
+    -e '/^[[:space:]]*#/d' \
+    "$file"
+}
+
+is_allowed_project() {
+  local project="$1"
+
+  clean_file_to_stdout "$PROJECTS_FILE" | grep -Fxq "$project"
+}
+
 project_for_zip() {
   local zip_name="$1"
-  local dir project best=""
+  local project best=""
 
-  for dir in "$CODE_ROOT"/*; do
-    [ -d "$dir" ] || continue
-
-    project="$(basename "$dir")"
-
-    case "$project" in
-      .cache|.idea) continue ;;
-    esac
+  while IFS= read -r project; do
+    [ -n "$project" ] || continue
+    [ -d "$CODE_ROOT/$project" ] || continue
 
     if [[ "$zip_name" == "$project.zip" || "$zip_name" == "$project"-*.zip || "$zip_name" == "$project"_*.zip ]]; then
       [ ${#project} -gt ${#best} ] && best="$project"
     fi
-  done
+  done < <(clean_file_to_stdout "$PROJECTS_FILE")
 
   echo "$best"
 }
@@ -98,15 +146,15 @@ import_downloads() {
     zip_name="$(basename "$zip_file")"
     project="$(project_for_zip "$zip_name")"
 
-    [ -n "$project" ] || {
-      log "Ignorando ZIP sem projeto: $zip_name"
+    if [ -z "$project" ]; then
+      log "Ignorando ZIP sem projeto autorizado: $zip_name"
       continue
-    }
+    fi
 
-    stable_file "$zip_file" || {
+    if ! stable_file "$zip_file"; then
       log "Ainda baixando/gravando: $zip_name"
       continue
-    }
+    fi
 
     project_dir="$CODE_ROOT/$project"
     target="$project_dir/$zip_name"
@@ -127,36 +175,27 @@ clean_zone() {
 }
 
 make_clean_ignore() {
-  local clean_file="$1"
+  local clean_ignore="$1"
 
-  touch "$IGNORE_FILE"
-
-  sed -E \
-    -e 's/\r$//' \
-    -e 's/^[[:space:]]+//' \
-    -e 's/[[:space:]]+$//' \
-    -e '/^[[:space:]]*$/d' \
-    -e '/^[[:space:]]*#/d' \
-    "$IGNORE_FILE" > "$clean_file"
+  clean_file_to_stdout "$IGNORE_FILE" > "$clean_ignore"
 
   {
     echo "*.zip"
     echo "*.log"
     echo "*:Zone.Identifier"
-  } >> "$clean_file"
+  } >> "$clean_ignore"
 
-  sort -u "$clean_file" -o "$clean_file"
+  sort -u "$clean_ignore" -o "$clean_ignore"
 }
 
 backup_project() {
-  local project_dir="$1"
-  local project tmp_dir final tmp_zip clean_ignore
+  local project="$1"
+  local project_dir tmp_dir final tmp_zip clean_ignore
 
-  project="$(basename "$project_dir")"
+  is_allowed_project "$project" || return
 
-  case "$project" in
-    .cache|.idea) return ;;
-  esac
+  project_dir="$CODE_ROOT/$project"
+  [ -d "$project_dir" ] || return
 
   tmp_dir="/tmp/auto-code-manager-$project-$$"
   final="$CODE_ROOT/$project.zip"
@@ -170,7 +209,6 @@ backup_project() {
   make_clean_ignore "$clean_ignore"
 
   log "Backup $project -> $final"
-  log "Usando ignore: $IGNORE_FILE"
 
   rsync -a \
     --exclude-from="$clean_ignore" \
@@ -189,12 +227,13 @@ backup_project() {
 }
 
 backup_all() {
-  log "Gerando backups em $CODE_ROOT"
+  local project
 
-  for dir in "$CODE_ROOT"/*; do
-    [ -d "$dir" ] || continue
-    backup_project "$dir"
-  done
+  log "Gerando backups dos projetos autorizados"
+
+  while IFS= read -r project; do
+    backup_project "$project"
+  done < <(clean_file_to_stdout "$PROJECTS_FILE")
 }
 
 stop() {
@@ -206,24 +245,25 @@ stop() {
 
 trap stop INT TERM
 
-[ -d "$CODE_ROOT" ] || {
+if [ ! -d "$CODE_ROOT" ]; then
   echo "ERRO: CODE_ROOT não existe: $CODE_ROOT" >&2
   exit 1
-}
+fi
 
-touch "$IGNORE_FILE"
+ensure_files
 
 line
 echo "Auto Code Manager"
 line
-echo "CODE_ROOT:   $CODE_ROOT"
-echo "IGNORE_FILE: $IGNORE_FILE"
-echo "Downloads:   $(downloads_dir)"
-echo "Backups:     $CODE_ROOT/nome-do-projeto.zip"
-echo "Intervalo:   ${INTERVAL}s"
-echo "Backup cada: ${BACKUP_EVERY}s"
-echo "Zone cada:   ${ZONE_EVERY}s"
-echo "Para parar:  Ctrl+C"
+echo "CODE_ROOT:     $CODE_ROOT"
+echo "IGNORE_FILE:   $IGNORE_FILE"
+echo "PROJECTS_FILE: $PROJECTS_FILE"
+echo "Downloads:     $(downloads_dir)"
+echo "Backups:       $CODE_ROOT/nome-do-projeto.zip"
+echo "Intervalo:     ${INTERVAL}s"
+echo "Backup cada:   ${BACKUP_EVERY}s"
+echo "Zone cada:     ${ZONE_EVERY}s"
+echo "Para parar:    Ctrl+C"
 line
 
 cycle=1
