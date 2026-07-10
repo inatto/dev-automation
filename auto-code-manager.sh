@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/sind-infra/deploy
-# Mantém o loop vivo: erros de importação/backup são logados e o próximo ciclo continua.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,26 +21,19 @@ line() {
   echo "────────────────────────────────────────────────────────────"
 }
 
-run_or_log() {
-  local desc="$1"
-  shift
-
-  if ! "$@"; then
-    local rc=$?
-    log "ERRO em $desc (rc=$rc): $*"
-    return "$rc"
-  fi
-
-  return 0
-}
-
 downloads_dir() {
-  if command -v cmd.exe >/dev/null 2>&1 && command -v wslpath >/dev/null 2>&1; then
-    local win_profile
-    win_profile="$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r' || true)"
+  local win_profile=""
+  local wsl_profile=""
+
+  if command -v cmd.exe >/dev/null 2>&1 &&
+     command -v wslpath >/dev/null 2>&1; then
+
+    win_profile="$(
+      cmd.exe /c "echo %USERPROFILE%" 2>/dev/null |
+      tr -d '\r'
+    )"
 
     if [ -n "$win_profile" ]; then
-      local wsl_profile
       wsl_profile="$(wslpath "$win_profile" 2>/dev/null || true)"
 
       if [ -d "$wsl_profile/Downloads" ]; then
@@ -62,53 +53,23 @@ downloads_dir() {
 
 stable_file() {
   local file="$1"
-  local s1 s2
+  local size_before
+  local size_after
 
   [ -f "$file" ] || return 1
 
-  s1="$(stat -c %s "$file" 2>/dev/null || echo 0)"
+  size_before="$(stat -c %s "$file" 2>/dev/null || echo 0)"
   sleep "$STABLE_WAIT"
+
   [ -f "$file" ] || return 1
-  s2="$(stat -c %s "$file" 2>/dev/null || echo 0)"
 
-  [ "$s1" = "$s2" ] && [ "$s1" -gt 0 ]
+  size_after="$(stat -c %s "$file" 2>/dev/null || echo 0)"
+
+  [ "$size_before" = "$size_after" ] &&
+    [ "$size_before" -gt 0 ]
 }
 
-ensure_files() {
-  if [ ! -f "$IGNORE_FILE" ]; then
-    cat > "$IGNORE_FILE" <<'EOT'
-.git/
-.idea/
-*.log
-*.zip
-*:Zone.Identifier
-
-node_modules/
-.venv/
-venv/
-env/
-dist/
-build/
-.astro/
-.cache/
-.output/
-.output*/
-public/
-temp/
-tmp/
-EOT
-    log "Criado: $IGNORE_FILE"
-  fi
-
-  if [ ! -f "$PROJECTS_FILE" ]; then
-    cat > "$PROJECTS_FILE" <<'EOT'
-site-inst
-EOT
-    log "Criado: $PROJECTS_FILE"
-  fi
-}
-
-clean_file_to_stdout() {
+clean_file() {
   local file="$1"
 
   [ -f "$file" ] || return 0
@@ -117,26 +78,37 @@ clean_file_to_stdout() {
     -e 's/\r$//' \
     -e 's/^[[:space:]]+//' \
     -e 's/[[:space:]]+$//' \
-    -e '/^[[:space:]]*$/d' \
-    -e '/^[[:space:]]*#/d' \
+    -e '/^$/d' \
+    -e '/^#/d' \
     "$file"
+}
+
+ensure_files() {
+  [ -f "$IGNORE_FILE" ] || touch "$IGNORE_FILE"
+
+  if [ ! -f "$PROJECTS_FILE" ]; then
+    echo "site-inst" > "$PROJECTS_FILE"
+  fi
 }
 
 project_for_zip() {
   local zip_name="$1"
-  local dir project best=""
+  local dir
+  local project
+  local best=""
 
   for dir in "$CODE_ROOT"/*; do
     [ -d "$dir" ] || continue
 
     project="$(basename "$dir")"
 
-    case "$project" in
-      .cache|.idea) continue ;;
-    esac
+    if [[ "$zip_name" == "$project.zip" ||
+          "$zip_name" == "$project"-*.zip ||
+          "$zip_name" == "$project"_*.zip ]]; then
 
-    if [[ "$zip_name" == "$project.zip" || "$zip_name" == "$project"-*.zip || "$zip_name" == "$project"_*.zip ]]; then
-      [ ${#project} -gt ${#best} ] && best="$project"
+      if [ "${#project}" -gt "${#best}" ]; then
+        best="$project"
+      fi
     fi
   done
 
@@ -145,236 +117,278 @@ project_for_zip() {
 
 import_one_zip() {
   local zip_file="$1"
-  local zip_name project project_dir target
+  local zip_name project project_dir temp_dir source_dir
+  local total_files checked_files rel destination
 
   zip_name="$(basename "$zip_file")"
   project="$(project_for_zip "$zip_name")"
 
   if [ -z "$project" ]; then
-    log "Ignorando ZIP sem pasta/projeto correspondente: $zip_name"
+    log "Ignorando ZIP sem projeto: $zip_name"
     return 0
   fi
 
   if ! stable_file "$zip_file"; then
-    log "Ainda baixando/gravando: $zip_name"
+    log "ZIP ainda está sendo gravado: $zip_name"
     return 0
   fi
 
   project_dir="$CODE_ROOT/$project"
-  target="$project_dir/$zip_name"
+  temp_dir="$(mktemp -d "/tmp/auto-code-import-${project}-XXXXXX")"
 
-  log "Importando $zip_name -> $project_dir"
+  line
+  log "IMPORTAÇÃO INICIADA"
+  log "ZIP:        $zip_file"
+  log "Projeto:    $project"
+  log "Destino:    $project_dir"
+  log "Temporário: $temp_dir"
 
-  if ! mv -f -- "$zip_file" "$target"; then
-    log "ERRO importando: falhou mv de $zip_name"
+  if ! unzip -tq "$zip_file" >/dev/null 2>&1; then
+    log "ERRO: ZIP inválido ou corrompido. O ZIP foi mantido."
+    rm -rf -- "$temp_dir"
     return 1
   fi
 
-  if ! unzip -oq -- "$target" -d "$project_dir"; then
-    log "ERRO importando: falhou unzip de $target"
+  log "Extraindo ZIP para a pasta temporária..."
+  if ! unzip -oq -- "$zip_file" -d "$temp_dir"; then
+    log "ERRO: falha ao extrair. O ZIP foi mantido."
+    rm -rf -- "$temp_dir"
     return 1
   fi
 
-  rm -f -- "$target" || true
-  log "OK importado: $zip_name"
-  return 0
+  if [ -d "$temp_dir/$project" ]; then
+    source_dir="$temp_dir/$project"
+    log "Raiz do ZIP identificada: $project/"
+  else
+    source_dir="$temp_dir"
+    log "ZIP sem pasta raiz do projeto; usando a raiz do ZIP."
+  fi
+
+  total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
+
+  if [ "$total_files" -eq 0 ]; then
+    log "ERRO: nenhum arquivo foi extraído. O ZIP foi mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
+  log "Arquivos extraídos: $total_files"
+  find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
+
+  log "Copiando para o destino..."
+  if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
+    log "ERRO: falha ao copiar. O ZIP foi mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
+  log "Conferindo arquivo por arquivo no destino..."
+  checked_files=0
+
+  while IFS= read -r -d '' rel; do
+    destination="$project_dir/$rel"
+
+    if [ ! -f "$destination" ]; then
+      log "ERRO: arquivo não apareceu no destino: $destination"
+      log "ZIP mantido: $zip_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+
+    if ! cmp -s -- "$source_dir/$rel" "$destination"; then
+      log "ERRO: arquivo no destino está diferente: $destination"
+      log "ZIP mantido: $zip_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+
+    checked_files=$((checked_files + 1))
+    log "CONFIRMADO [$checked_files/$total_files]: $destination"
+  done < <(find "$source_dir" -type f -printf '%P\0')
+
+  if [ "$checked_files" -ne "$total_files" ]; then
+    log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
+  rm -rf -- "$temp_dir"
+
+  log "Todos os $checked_files arquivos foram conferidos no destino."
+  log "Apagando ZIP original de Downloads..."
+
+  if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
+    log "ERRO: arquivos importados, mas o ZIP não foi apagado: $zip_file"
+    return 1
+  fi
+
+  log "IMPORTAÇÃO CONCLUÍDA"
+  log "Destino confirmado: $project_dir"
+  log "ZIP apagado: $zip_file"
+  line
 }
 
 import_downloads() {
-  local dl
-  dl="$(downloads_dir)"
+  local downloads
 
-  if [ -z "$dl" ] || [ ! -d "$dl" ]; then
+  downloads="$(downloads_dir)"
+
+  if [ -z "$downloads" ] || [ ! -d "$downloads" ]; then
     log "Downloads não encontrado."
-    return 0
+    return
   fi
 
-  log "Verificando Downloads: $dl"
+  log "Verificando Downloads: $downloads"
 
-  find "$dl" -maxdepth 1 -type f -iname "*.zip" -print0 2>/dev/null |
   while IFS= read -r -d '' zip_file; do
-    import_one_zip "$zip_file" || log "Continuando apesar de erro ao importar: $(basename "$zip_file")"
-  done
-
-  return 0
+    import_one_zip "$zip_file" ||
+      log "Falha ao importar: $(basename "$zip_file")"
+  done < <(
+    find "$downloads" \
+      -maxdepth 1 \
+      -type f \
+      -iname "*.zip" \
+      -print0 2>/dev/null
+  )
 }
 
 clean_zone() {
   log "Limpando Zone.Identifier em $CODE_ROOT"
-  find "$CODE_ROOT" -type f -name "*:Zone.Identifier" -print -delete 2>/dev/null || true
+
+  find "$CODE_ROOT" \
+    -type f \
+    -name "*:Zone.Identifier" \
+    -delete 2>/dev/null ||
+    true
 }
 
 make_rsync_filter() {
-  local filter_file="$1"
+  local output="$1"
+  local pattern
+  local action
+  local directory
 
-  : > "$filter_file"
+  : > "$output"
 
-  # Lê o auto-code-manager.ignore como a fonte única da verdade.
-  # Nada de diretório hardcoded no script: se está no ignore, sai do backup.
-  # Suporta também exceção no padrão: !caminho/arquivo.zip
-  # Exemplos:
-  #   apex/                         -> remove qualquer pasta apex em qualquer nível
-  #   sind-oracle/apex/             -> remove esse caminho a partir da raiz do projeto
-  #   *.zip                         -> remove zips
-  #   !sind-oracle/exports/ddl/*.zip -> repermite esses zips, se você quiser
   while IFS= read -r pattern || [ -n "$pattern" ]; do
     [ -n "$pattern" ] || continue
 
-    local action="-"
+    action="-"
+
     if [[ "$pattern" == !* ]]; then
       action="+"
       pattern="${pattern:1}"
-      [ -n "$pattern" ] || continue
     fi
 
-    # Diretório: transforma em regra recursiva forte do rsync.
     if [[ "$pattern" == */ ]]; then
-      local dir_pattern="${pattern%/}"
+      directory="${pattern%/}"
 
-      if [[ "$dir_pattern" == */* ]]; then
-        # Caminho relativo à raiz do projeto.
-        echo "$action /$dir_pattern/***" >> "$filter_file"
+      if [[ "$directory" == */* ]]; then
+        echo "$action /$directory/***" >> "$output"
       else
-        # Nome de diretório simples: vale em qualquer nível.
-        echo "$action $dir_pattern/***" >> "$filter_file"
-        echo "$action **/$dir_pattern/***" >> "$filter_file"
+        echo "$action $directory/***" >> "$output"
+        echo "$action **/$directory/***" >> "$output"
       fi
+    elif [[ "$pattern" == */* ]]; then
+      echo "$action /$pattern" >> "$output"
     else
-      if [[ "$pattern" == */* ]]; then
-        # Caminho relativo à raiz do projeto.
-        echo "$action /$pattern" >> "$filter_file"
-      else
-        # Arquivo/padrão simples: vale em qualquer nível.
-        echo "$action $pattern" >> "$filter_file"
-        echo "$action **/$pattern" >> "$filter_file"
-      fi
+      echo "$action $pattern" >> "$output"
+      echo "$action **/$pattern" >> "$output"
     fi
-  done < <(clean_file_to_stdout "$IGNORE_FILE")
+  done < <(clean_file "$IGNORE_FILE")
 
-  # Exclusões técnicas fixas do próprio gerenciador, não de projeto.
-  echo "- *:Zone.Identifier" >> "$filter_file"
-  echo "- **/*:Zone.Identifier" >> "$filter_file"
-}
-
-zip_one_ddl_file() {
-  local src="$1"
-  local zip_file="${src%.*}.zip"
-
-  case "$src" in
-    *.zip|*:Zone.Identifier) return 0 ;;
-  esac
-
-  [ -f "$src" ] || return 0
-
-  if [ -f "$zip_file" ] && [ "$zip_file" -nt "$src" ]; then
-    log "DDL ZIP atualizado, pulando: $(basename "$zip_file")"
-    return 0
-  fi
-
-  log "Compactando DDL: $(basename "$src") -> $(basename "$zip_file")"
-
-  (
-    cd "$(dirname "$src")" || exit 1
-    zip -q -j "$(basename "$zip_file")" "$(basename "$src")"
-  )
+  echo "- *:Zone.Identifier" >> "$output"
+  echo "- **/*:Zone.Identifier" >> "$output"
 }
 
 zip_ddl_exports() {
-  if [ ! -d "$DDL_EXPORT_DIR" ]; then
-    log "DDL_EXPORT_DIR não existe, pulando: $DDL_EXPORT_DIR"
-    return 0
-  fi
+  local file
+  local zip_file
 
-  log "Compactando arquivos DDL antes do backup do sind-infra: $DDL_EXPORT_DIR"
+  [ -d "$DDL_EXPORT_DIR" ] || return 0
 
-  find "$DDL_EXPORT_DIR" -maxdepth 1 -type f ! -iname "*.zip" ! -name "*:Zone.Identifier" -print0 2>/dev/null |
-  while IFS= read -r -d '' ddl_file; do
-    zip_one_ddl_file "$ddl_file" || log "ERRO compactando DDL, continuando: $(basename "$ddl_file")"
-  done
+  log "Compactando DDLs em $DDL_EXPORT_DIR"
 
-  return 0
+  while IFS= read -r -d '' file; do
+    zip_file="${file%.*}.zip"
+
+    if [ -f "$zip_file" ] && [ "$zip_file" -nt "$file" ]; then
+      continue
+    fi
+
+    (
+      cd "$(dirname "$file")" || exit 1
+      zip -q -j "$(basename "$zip_file")" "$(basename "$file")"
+    ) || log "ERRO compactando DDL: $(basename "$file")"
+
+  done < <(
+    find "$DDL_EXPORT_DIR" \
+      -maxdepth 1 \
+      -type f \
+      ! -iname "*.zip" \
+      ! -name "*:Zone.Identifier" \
+      -print0 2>/dev/null
+  )
 }
 
 backup_project() {
   local project="$1"
-  local project_dir tmp_dir final tmp_zip filter_file rc=0
-
-  project_dir="$CODE_ROOT/$project"
+  local project_dir="$CODE_ROOT/$project"
+  local temp_dir
+  local temp_zip
+  local final_zip
+  local filter_file
 
   if [ ! -d "$project_dir" ]; then
-    log "Projeto autorizado não existe, ignorando backup: $project_dir"
+    log "Projeto não existe: $project_dir"
     return 0
   fi
 
   if [ "$project" = "sind-infra" ]; then
-    zip_ddl_exports || log "Continuando backup do sind-infra apesar de erro na compactação dos DDLs."
+    zip_ddl_exports
   fi
 
-  tmp_dir="/tmp/auto-code-manager-$project-$$"
-  final="$CODE_ROOT/$project.zip"
-  tmp_zip="$CODE_ROOT/.$project.zip.tmp"
-  filter_file="/tmp/auto-code-manager-filter-$project-$$.txt"
-
-  rm -rf -- "$tmp_dir" || true
-  rm -f -- "$tmp_zip" "$filter_file" || true
-
-  if ! mkdir -p "$tmp_dir"; then
-    log "ERRO backup: não conseguiu criar tmp_dir: $tmp_dir"
-    return 1
-  fi
+  temp_dir="$(mktemp -d "/tmp/auto-code-backup-${project}-XXXXXX")"
+  filter_file="$(mktemp "/tmp/auto-code-filter-${project}-XXXXXX")"
+  temp_zip="/tmp/${project}-backup-$$.zip"
+  final_zip="$CODE_ROOT/$project.zip"
 
   make_rsync_filter "$filter_file"
 
-  log "Backup autorizado: $project -> $final"
+  log "Gerando backup: $project -> $final_zip"
 
-  rsync -a \
+  if ! rsync -a \
     --filter="merge $filter_file" \
-    "$project_dir/" "$tmp_dir/" || rc=$?
+    "$project_dir/" \
+    "$temp_dir/"; then
 
-  if [ "$rc" -ne 0 ]; then
-    log "ERRO backup: rsync falhou para $project (rc=$rc)"
-    rm -rf -- "$tmp_dir" "$filter_file" || true
-    return "$rc"
-  fi
-
-  (
-    cd "$tmp_dir" || exit 1
-    zip -qr "$tmp_zip" .
-  ) || rc=$?
-
-  if [ "$rc" -ne 0 ]; then
-    log "ERRO backup: zip falhou para $project (rc=$rc)"
-    rm -rf -- "$tmp_dir" "$filter_file" || true
-    rm -f -- "$tmp_zip" || true
-    return "$rc"
-  fi
-
-  if ! mv -f -- "$tmp_zip" "$final"; then
-    log "ERRO backup: mv falhou para $final"
-    rm -rf -- "$tmp_dir" "$filter_file" || true
-    rm -f -- "$tmp_zip" || true
+    log "ERRO no rsync do projeto: $project"
+    rm -rf -- "$temp_dir" "$filter_file"
     return 1
   fi
 
-  rm -rf -- "$tmp_dir" "$filter_file" || true
+  if ! (
+    cd "$temp_dir" &&
+    zip -qr "$temp_zip" .
+  ); then
+    log "ERRO ao compactar projeto: $project"
+    rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+    return 1
+  fi
 
-  log "OK backup: $final"
-  return 0
+  mv -f -- "$temp_zip" "$final_zip"
+  rm -rf -- "$temp_dir" "$filter_file"
+
+  log "OK backup: $final_zip"
 }
 
 backup_all() {
   local project
 
-  log "Gerando backups somente dos projetos autorizados em:"
-  log "  $PROJECTS_FILE"
-
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    log "Projeto autorizado para backup: $project"
-    backup_project "$project" || log "ERRO no backup de $project; loop vai continuar."
-  done < <(clean_file_to_stdout "$PROJECTS_FILE")
-
-  return 0
+    backup_project "$project"
+  done < <(clean_file "$PROJECTS_FILE")
 }
 
 stop() {
@@ -387,7 +401,7 @@ stop() {
 trap stop INT TERM
 
 if [ ! -d "$CODE_ROOT" ]; then
-  echo "ERRO: CODE_ROOT não existe: $CODE_ROOT" >&2
+  echo "ERRO: diretório não existe: $CODE_ROOT" >&2
   exit 1
 fi
 
@@ -396,17 +410,11 @@ ensure_files
 line
 echo "Auto Code Manager"
 line
-echo "CODE_ROOT:      $CODE_ROOT"
-echo "IGNORE_FILE:    $IGNORE_FILE"
-echo "PROJECTS_FILE:  $PROJECTS_FILE"
-echo "DDL_EXPORT_DIR: $DDL_EXPORT_DIR"
-echo "Downloads:      $(downloads_dir)"
-echo "Backups:        somente projetos listados em auto-code-manager.projects"
-echo "Importação:     todos os ZIPs que batem com pasta em /home/daniel/Code"
-echo "Intervalo:      ${INTERVAL}s"
-echo "Backup cada:    ${BACKUP_EVERY}s"
-echo "Zone cada:      ${ZONE_EVERY}s"
-echo "Para parar:     Ctrl+C"
+echo "CODE_ROOT:     $CODE_ROOT"
+echo "Downloads:     $(downloads_dir)"
+echo "Intervalo:     ${INTERVAL}s"
+echo "Backup cada:   ${BACKUP_EVERY}s"
+echo "Zone cada:     ${ZONE_EVERY}s"
 line
 
 cycle=1
@@ -419,15 +427,15 @@ while true; do
   line
   log "Ciclo #$cycle"
 
-  import_downloads || log "ERRO em import_downloads; loop vai continuar."
+  import_downloads
 
   if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
-    clean_zone || log "ERRO em clean_zone; loop vai continuar."
+    clean_zone
     last_zone="$now"
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
-    backup_all || log "ERRO em backup_all; loop vai continuar."
+    backup_all
     last_backup="$now"
   else
     log "Backup ainda não venceu."
