@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-
+#cd /home/daniel/Code/sind-infra/deploy/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CODE_ROOT="/home/daniel/Code"
