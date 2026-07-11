@@ -8,11 +8,15 @@ MODE="check"
 usage() {
   cat <<USAGE
 Uso:
-  ./publicar-dominio.sh --check [arquivo.conf]
+  ./publicar-dominio.sh [--check] [arquivo.conf]
   ./publicar-dominio.sh --apply [arquivo.conf]
 
---check  Faz todas as validações sem alterar o servidor (padrão).
---apply  Publica de fato, com backup e rollback automático.
+Sem opção ou com --check:
+  sincroniza o espelho local do Nginx, gera o arquivo local e mostra o diff,
+  mas não altera o servidor.
+
+Com --apply:
+  executa o mesmo fluxo e, após confirmação, publica somente este domínio.
 USAGE
 }
 
@@ -21,12 +25,23 @@ case "${1:-}" in
   --apply) MODE="apply"; shift ;;
   -h|--help) usage; exit 0 ;;
   "") ;;
-  *) echo "ERRO: opção inválida: $1" >&2; usage; exit 1 ;;
+  *)
+    if [[ "${1:-}" == *.conf ]]; then
+      CONFIG_FILE="$1"
+      shift
+    else
+      echo "ERRO: opção inválida: $1" >&2
+      usage
+      exit 1
+    fi
+    ;;
 esac
 
 if [[ $# -gt 0 ]]; then
   CONFIG_FILE="$1"
+  shift
 fi
+[[ $# -eq 0 ]] || { echo "ERRO: argumentos excedentes." >&2; usage; exit 1; }
 
 [[ -f "$CONFIG_FILE" ]] || { echo "ERRO: configuração não encontrada: $CONFIG_FILE" >&2; exit 1; }
 # shellcheck source=/dev/null
@@ -41,6 +56,7 @@ die()  { printf '[ERRO] %s\n' "$*" >&2; exit 1; }
 : "${REMOTE_HOST:?Defina REMOTE_HOST}"
 : "${SSH_KEY:?Defina SSH_KEY}"
 : "${SITE_NAME:?Defina SITE_NAME}"
+: "${APP_NAME:?Defina APP_NAME}"
 : "${UPSTREAM_HOST:?Defina UPSTREAM_HOST}"
 : "${UPSTREAM_PORT:?Defina UPSTREAM_PORT}"
 : "${SSL_EMAIL:?Defina SSL_EMAIL}"
@@ -50,17 +66,23 @@ die()  { printf '[ERRO] %s\n' "$*" >&2; exit 1; }
 [[ ${#DOMAINS[@]} -gt 0 ]] || die "Informe ao menos um domínio em DOMAINS"
 [[ "$UPSTREAM_PORT" =~ ^[0-9]+$ ]] || die "UPSTREAM_PORT deve ser numérica"
 [[ "$SITE_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || die "SITE_NAME contém caracteres inválidos"
+[[ "$APP_NAME" =~ ^[A-Za-z0-9._-]+$ ]] || die "APP_NAME contém caracteres inválidos"
+command -v rsync >/dev/null || die "rsync não encontrado no WSL"
+command -v ssh >/dev/null || die "ssh não encontrado no WSL"
+command -v scp >/dev/null || die "scp não encontrado no WSL"
 
 PRIMARY_DOMAIN="${DOMAINS[0]}"
 CERT_NAME="$PRIMARY_DOMAIN"
 DOMAIN_LIST="${DOMAINS[*]}"
 REMOTE_AVAILABLE="/etc/nginx/sites-available"
 REMOTE_ENABLED="/etc/nginx/sites-enabled"
-LOCAL_AVAILABLE="$DEPLOY_DIR/$LOCAL_SERVER_DIR/etc/nginx/sites-available"
+LOCAL_SERVER_PATH="$(cd "$DEPLOY_DIR" && realpath -m "$LOCAL_SERVER_DIR")"
+LOCAL_NGINX_DIR="$LOCAL_SERVER_PATH/etc/nginx"
+LOCAL_AVAILABLE="$LOCAL_NGINX_DIR/sites-available"
 LOCAL_FILE="$LOCAL_AVAILABLE/$SITE_NAME"
 TMP_DIR="$(mktemp -d)"
-HTTP_FILE="$TMP_DIR/$SITE_NAME.http"
-HTTPS_FILE="$TMP_DIR/$SITE_NAME.https"
+PREVIOUS_LOCAL_FILE="$TMP_DIR/$SITE_NAME.before"
+GENERATED_FILE="$TMP_DIR/$SITE_NAME.generated"
 REMOTE_TMP="/tmp/${SITE_NAME}.deploy.$$"
 REMOTE_BACKUP_DIR="/tmp/${SITE_NAME}.backup.$$"
 LOCK_FILE="/tmp/publicar-dominio.lock"
@@ -73,6 +95,7 @@ SSH_OPTS=(
   -o ConnectTimeout=15
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=6
+  -o TCPKeepAlive=yes
 )
 
 remote() {
@@ -97,7 +120,7 @@ rollback() {
       if sudo test -e '$REMOTE_BACKUP_DIR/available'; then
         sudo cp -a '$REMOTE_BACKUP_DIR/available' '$REMOTE_AVAILABLE/$SITE_NAME'
       fi
-      if sudo test -e '$REMOTE_BACKUP_DIR/enabled'; then
+      if sudo test -e '$REMOTE_BACKUP_DIR/enabled' || sudo test -L '$REMOTE_BACKUP_DIR/enabled'; then
         sudo cp -a '$REMOTE_BACKUP_DIR/enabled' '$REMOTE_ENABLED/$SITE_NAME'
       fi
       sudo nginx -t
@@ -115,33 +138,43 @@ validate_domain() {
 }
 for domain in "${DOMAINS[@]}"; do validate_domain "$domain"; done
 
-render_http() {
-  cat > "$HTTP_FILE" <<NGINX
-server {
-    listen 80;
-    listen [::]:80;
+sync_nginx_from_server() {
+  mkdir -p "$LOCAL_NGINX_DIR"
 
-    server_name $DOMAIN_LIST;
-
-    client_max_body_size ${CLIENT_MAX_BODY_SIZE:-20m};
-
-    location / {
-        proxy_pass http://$UPSTREAM_HOST:$UPSTREAM_PORT;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout ${PROXY_READ_TIMEOUT:-60s};
-    }
-}
-NGINX
+  # sites-enabled e modules-enabled são links/estado de ativação do servidor.
+  # Eles são exibidos, mas não são espelhados para evitar links inválidos no WSL.
+  rsync -avz --delete \
+    --no-owner \
+    --no-group \
+    --exclude 'sites-enabled/' \
+    --exclude 'modules-enabled/' \
+    -e "ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o TCPKeepAlive=yes" \
+    --rsync-path="sudo rsync" \
+    "$REMOTE_USER@$REMOTE_HOST:/etc/nginx/" \
+    "$LOCAL_NGINX_DIR/"
 }
 
-render_https() {
-  cat > "$HTTPS_FILE" <<NGINX
+show_remote_inventory() {
+  remote "
+    set -e
+    echo
+    echo 'SITES DISPONÍVEIS (/etc/nginx/sites-available)'
+    echo '------------------------------------------------------------'
+    sudo find '$REMOTE_AVAILABLE' -maxdepth 1 -mindepth 1 -printf '%f\n' | sort
+
+    echo
+    echo 'SITES HABILITADOS (/etc/nginx/sites-enabled)'
+    echo '------------------------------------------------------------'
+    for item in '$REMOTE_ENABLED'/*; do
+      [ -e \"\$item\" ] || [ -L \"\$item\" ] || continue
+      printf '%-38s -> %s\n' \"\$(basename \"\$item\")\" \"\$(readlink -f \"\$item\" 2>/dev/null || echo ARQUIVO)\"
+    done | sort
+  "
+}
+
+render_config() {
+  if [[ "${ISSUE_SSL:-true}" == "true" ]] && remote "sudo test -s '/etc/letsencrypt/live/$CERT_NAME/fullchain.pem' && sudo test -s '/etc/letsencrypt/live/$CERT_NAME/privkey.pem'"; then
+    cat > "$GENERATED_FILE" <<NGINX
 server {
     listen 80;
     listen [::]:80;
@@ -161,6 +194,7 @@ server {
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
 
+    add_header X-Site-App "$APP_NAME" always;
     client_max_body_size ${CLIENT_MAX_BODY_SIZE:-20m};
 
     location / {
@@ -176,15 +210,59 @@ server {
     }
 }
 NGINX
+  else
+    cat > "$GENERATED_FILE" <<NGINX
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name $DOMAIN_LIST;
+
+    add_header X-Site-App "$APP_NAME" always;
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE:-20m};
+
+    location / {
+        proxy_pass http://$UPSTREAM_HOST:$UPSTREAM_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout ${PROXY_READ_TIMEOUT:-60s};
+    }
+}
+NGINX
+  fi
 }
 
-install_config() {
-  local source_file="$1"
-  scp "${SSH_OPTS[@]}" "$source_file" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_TMP" >/dev/null
+install_local_generated_file() {
+  mkdir -p "$LOCAL_AVAILABLE"
+  if [[ -f "$LOCAL_FILE" ]]; then
+    cp -a "$LOCAL_FILE" "$PREVIOUS_LOCAL_FILE"
+  else
+    : > "$PREVIOUS_LOCAL_FILE"
+  fi
+  install -m 0644 "$GENERATED_FILE" "$LOCAL_FILE"
+}
 
-  # Marca antes da primeira alteração para garantir rollback até em falha no nginx -t.
+show_diff() {
+  echo
+  echo "ARQUIVO LOCAL GERADO"
+  echo "------------------------------------------------------------"
+  echo "$LOCAL_FILE"
+  echo
+  echo "ALTERAÇÕES PROPOSTAS"
+  echo "------------------------------------------------------------"
+  if diff -u "$PREVIOUS_LOCAL_FILE" "$LOCAL_FILE"; then
+    echo "(sem alterações; arquivo já está no padrão desejado)"
+  fi
+}
+
+push_local_site() {
+  scp "${SSH_OPTS[@]}" "$LOCAL_FILE" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_TMP" >/dev/null
   CHANGED_REMOTE="true"
-
   remote "
     set -e
     sudo install -m 0644 '$REMOTE_TMP' '$REMOTE_AVAILABLE/$SITE_NAME'
@@ -194,17 +272,33 @@ install_config() {
   "
 }
 
-log "Validação segura de $SITE_NAME"
-echo "Modo     : $MODE"
-echo "Servidor : $REMOTE_USER@$REMOTE_HOST"
-echo "Domínios : $DOMAIN_LIST"
-echo "Upstream : http://$UPSTREAM_HOST:$UPSTREAM_PORT"
-echo "SSL      : ${ISSUE_SSL:-true}"
+verify_site_identity() {
+  local expected="$APP_NAME"
+  local received
+
+  if [[ "${ISSUE_SSL:-true}" == "true" ]]; then
+    received="$(remote "curl -skI --max-time 20 --resolve '$PRIMARY_DOMAIN:443:127.0.0.1' 'https://$PRIMARY_DOMAIN/' | tr -d '\r' | awk -F': ' 'tolower(\$1) == \"x-site-app\" {print \$2; exit}'")"
+  else
+    received="$(remote "curl -sI --max-time 20 -H 'Host: $PRIMARY_DOMAIN' 'http://127.0.0.1/' | tr -d '\r' | awk -F': ' 'tolower(\$1) == \"x-site-app\" {print \$2; exit}'")"
+  fi
+
+  [[ "$received" == "$expected" ]] || die "O domínio respondeu pelo site errado. Esperado X-Site-App=$expected; recebido=${received:-ausente}"
+  ok "Identidade confirmada: X-Site-App=$received"
+}
+
+log "Publicação segura de $SITE_NAME"
+echo "Modo          : $MODE"
+echo "Servidor      : $REMOTE_USER@$REMOTE_HOST"
+echo "Espelho local : $LOCAL_NGINX_DIR"
+echo "Domínios      : $DOMAIN_LIST"
+echo "Aplicativo    : $APP_NAME"
+echo "Upstream      : http://$UPSTREAM_HOST:$UPSTREAM_PORT"
+echo "SSL           : ${ISSUE_SSL:-true}"
 
 log "Validando conexão, ferramentas e estado atual"
 remote "true"
 ok "SSH conectado"
-remote "command -v nginx >/dev/null && command -v curl >/dev/null && command -v systemctl >/dev/null" || die "Nginx, curl ou systemctl não encontrado"
+remote "command -v nginx >/dev/null && command -v curl >/dev/null && command -v systemctl >/dev/null && command -v rsync >/dev/null" || die "Nginx, curl, systemctl ou rsync não encontrado no servidor"
 if [[ "${ISSUE_SSL:-true}" == "true" ]]; then
   remote "command -v certbot >/dev/null" || die "Certbot não encontrado"
 fi
@@ -212,7 +306,14 @@ remote "sudo nginx -t"
 remote "systemctl is-active --quiet nginx"
 ok "Nginx atual está válido e ativo"
 
-log "Verificando a aplicação antes de tocar no Nginx"
+log "Sincronizando /etc/nginx do servidor para o espelho local"
+sync_nginx_from_server
+ok "Espelho local atualizado antes de gerar qualquer arquivo"
+
+log "Inventário atual do Nginx no servidor"
+show_remote_inventory
+
+log "Verificando a aplicação antes de preparar o domínio"
 remote "curl --silent --show-error --fail --max-time 15 'http://$UPSTREAM_HOST:$UPSTREAM_PORT/' >/dev/null" || die "Aplicação não respondeu em http://$UPSTREAM_HOST:$UPSTREAM_PORT"
 ok "Aplicação respondeu"
 
@@ -239,16 +340,26 @@ for domain in "${DOMAINS[@]}"; do
   fi
 done
 
-render_http
+log "Gerando a configuração no espelho local"
+render_config
+install_local_generated_file
+show_diff
 
 if [[ "$MODE" == "check" ]]; then
-  log "Pré-validação concluída; nenhuma alteração foi feita"
-  echo "Para publicar:"
+  log "Verificação concluída"
+  echo "O espelho local foi sincronizado e o arquivo foi gerado localmente."
+  echo "Nenhuma alteração foi feita no servidor."
+  echo
+  echo "Para publicar exatamente este arquivo:"
   echo "  ./publicar-dominio.sh --apply"
   trap - EXIT
   cleanup
   exit 0
 fi
+
+echo
+read -r -p "Publicar somente $SITE_NAME em $REMOTE_HOST? Digite PUBLICAR para continuar: " confirmation
+[[ "$confirmation" == "PUBLICAR" ]] || die "Publicação cancelada pelo usuário"
 
 log "Obtendo trava exclusiva de publicação"
 remote "sudo sh -c 'set -C; : > \"$LOCK_FILE\"'" 2>/dev/null || die "Outra publicação parece estar em andamento: $LOCK_FILE"
@@ -265,29 +376,32 @@ remote "
   if sudo test -e '$REMOTE_ENABLED/$SITE_NAME' || sudo test -L '$REMOTE_ENABLED/$SITE_NAME'; then
     sudo cp -a '$REMOTE_ENABLED/$SITE_NAME' '$REMOTE_BACKUP_DIR/enabled'
   fi
-  sudo chown -R '$REMOTE_USER':'$REMOTE_USER' '$REMOTE_BACKUP_DIR'
 "
 ok "Backup temporário criado"
 
-log "Instalando configuração HTTP inicial"
-install_config "$HTTP_FILE"
-ok "HTTP ativado sem alterar outros arquivos de site"
+log "Enviando somente o arquivo local deste domínio"
+push_local_site
+ok "Arquivo publicado, habilitado e Nginx recarregado"
 
 if [[ "${ISSUE_SSL:-true}" == "true" ]]; then
-  log "Emitindo ou reutilizando certificado Let's Encrypt"
-  CERTBOT_ARGS=()
-  for domain in "${DOMAINS[@]}"; do CERTBOT_ARGS+=("-d" "$domain"); done
-  printf -v CERTBOT_CMD ' %q' sudo certbot certonly --nginx --non-interactive --agree-tos --no-eff-email --keep-until-expiring --cert-name "$CERT_NAME" -m "$SSL_EMAIL" "${CERTBOT_ARGS[@]}"
-  remote "$CERTBOT_CMD"
-  remote "sudo test -s '/etc/letsencrypt/live/$CERT_NAME/fullchain.pem' && sudo test -s '/etc/letsencrypt/live/$CERT_NAME/privkey.pem'" || die "Certificado não encontrado após o Certbot"
-  ok "Certificado disponível"
+  if ! remote "sudo test -s '/etc/letsencrypt/live/$CERT_NAME/fullchain.pem' && sudo test -s '/etc/letsencrypt/live/$CERT_NAME/privkey.pem'"; then
+    log "Emitindo certificado Let's Encrypt"
+    CERTBOT_ARGS=()
+    for domain in "${DOMAINS[@]}"; do CERTBOT_ARGS+=("-d" "$domain"); done
+    printf -v CERTBOT_CMD ' %q' sudo certbot certonly --nginx --non-interactive --agree-tos --no-eff-email --keep-until-expiring --cert-name "$CERT_NAME" -m "$SSL_EMAIL" "${CERTBOT_ARGS[@]}"
+    remote "$CERTBOT_CMD"
+    remote "sudo test -s '/etc/letsencrypt/live/$CERT_NAME/fullchain.pem' && sudo test -s '/etc/letsencrypt/live/$CERT_NAME/privkey.pem'" || die "Certificado não encontrado após o Certbot"
+    ok "Certificado emitido"
 
-  render_https
-  log "Instalando configuração HTTPS definitiva"
-  install_config "$HTTPS_FILE"
-  FINAL_FILE="$HTTPS_FILE"
-else
-  FINAL_FILE="$HTTP_FILE"
+    log "Regenerando o arquivo local com HTTPS"
+    render_config
+    install -m 0644 "$GENERATED_FILE" "$LOCAL_FILE"
+
+    log "Enviando a versão HTTPS definitiva"
+    push_local_site
+  else
+    ok "Certificado existente reutilizado"
+  fi
 fi
 
 log "Verificações finais"
@@ -295,15 +409,11 @@ remote "sudo nginx -t"
 remote "systemctl is-active --quiet nginx"
 remote "sudo test -L '$REMOTE_ENABLED/$SITE_NAME'"
 remote "curl --silent --show-error --fail --max-time 15 'http://$UPSTREAM_HOST:$UPSTREAM_PORT/' >/dev/null"
-if [[ "${ISSUE_SSL:-true}" == "true" ]]; then
-  remote "curl --silent --show-error --fail --max-time 20 --resolve '$PRIMARY_DOMAIN:443:127.0.0.1' 'https://$PRIMARY_DOMAIN/' >/dev/null"
-  ok "HTTPS respondeu localmente com certificado válido"
-fi
+verify_site_identity
 
-log "Salvando espelho final no repositório"
-mkdir -p "$LOCAL_AVAILABLE"
-install -m 0644 "$FINAL_FILE" "$LOCAL_FILE"
-ok "Salvo em $LOCAL_FILE"
+log "Sincronizando novamente o estado final do servidor para o repositório"
+sync_nginx_from_server
+ok "Espelho local final atualizado a partir do servidor"
 
 CHANGED_REMOTE="false"
 trap - EXIT
