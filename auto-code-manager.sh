@@ -104,7 +104,10 @@ project_for_zip() {
 
     if [[ "$zip_name" == "$project.zip" ||
           "$zip_name" == "$project"-*.zip ||
-          "$zip_name" == "$project"_*.zip ]]; then
+          "$zip_name" == "$project"_*.zip ||
+          "$zip_name" == "$project"\(*.zip ||
+          "$zip_name" == "$project"\ \(*.zip ||
+          "$zip_name" == "$project"\ *.zip ]]; then
 
       if [ "${#project}" -gt "${#best}" ]; then
         best="$project"
