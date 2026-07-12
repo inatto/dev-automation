@@ -4,7 +4,8 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CODE_ROOT="/home/daniel/Code"
-IGNORE_FILE="$SCRIPT_DIR/auto-code-manager.ignore"
+IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
+IGNORE_UNZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
 DDL_EXPORT_DIR="$CODE_ROOT/sind-infra/sind-oracle/exports/ddl"
 
@@ -84,7 +85,8 @@ clean_file() {
 }
 
 ensure_files() {
-  [ -f "$IGNORE_FILE" ] || touch "$IGNORE_FILE"
+  [ -f "$IGNORE_ZIP_FILE" ] || touch "$IGNORE_ZIP_FILE"
+  [ -f "$IGNORE_UNZIP_FILE" ] || touch "$IGNORE_UNZIP_FILE"
 
   if [ ! -f "$PROJECTS_FILE" ]; then
     echo "site-inst" > "$PROJECTS_FILE"
@@ -120,7 +122,7 @@ project_for_zip() {
 
 import_one_zip() {
   local zip_file="$1"
-  local zip_name project project_dir temp_dir source_dir
+  local zip_name project project_dir temp_dir source_dir filtered_dir unzip_filter_file
   local total_files checked_files rel destination
 
   zip_name="$(basename "$zip_file")"
@@ -167,11 +169,24 @@ import_one_zip() {
     log "ZIP sem pasta raiz do projeto; usando a raiz do ZIP."
   fi
 
+  filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${project}-XXXXXX")"
+  unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${project}-XXXXXX")"
+  make_rsync_filter "$IGNORE_UNZIP_FILE" "$unzip_filter_file"
+
+  log "Aplicando regras de ignore-unzip..."
+  if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
+    log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    return 1
+  fi
+
+  source_dir="$filtered_dir"
+
   total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
 
   if [ "$total_files" -eq 0 ]; then
     log "ERRO: nenhum arquivo foi extraído. O ZIP foi mantido."
-    rm -rf -- "$temp_dir"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
 
@@ -181,7 +196,7 @@ import_one_zip() {
   log "Copiando para o destino..."
   if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
     log "ERRO: falha ao copiar. O ZIP foi mantido."
-    rm -rf -- "$temp_dir"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
 
@@ -194,14 +209,14 @@ import_one_zip() {
     if [ ! -f "$destination" ]; then
       log "ERRO: arquivo não apareceu no destino: $destination"
       log "ZIP mantido: $zip_file"
-      rm -rf -- "$temp_dir"
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
 
     if ! cmp -s -- "$source_dir/$rel" "$destination"; then
       log "ERRO: arquivo no destino está diferente: $destination"
       log "ZIP mantido: $zip_file"
-      rm -rf -- "$temp_dir"
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
 
@@ -211,11 +226,11 @@ import_one_zip() {
 
   if [ "$checked_files" -ne "$total_files" ]; then
     log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
-    rm -rf -- "$temp_dir"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
 
-  rm -rf -- "$temp_dir"
+  rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
 
   log "Todos os $checked_files arquivos foram conferidos no destino."
   log "Apagando ZIP original de Downloads..."
@@ -266,7 +281,8 @@ clean_zone() {
 }
 
 make_rsync_filter() {
-  local output="$1"
+  local ignore_file="$1"
+  local output="$2"
   local pattern
   local action
   local directory
@@ -298,7 +314,7 @@ make_rsync_filter() {
       echo "$action $pattern" >> "$output"
       echo "$action **/$pattern" >> "$output"
     fi
-  done < <(clean_file "$IGNORE_FILE")
+  done < <(clean_file "$ignore_file")
 
   echo "- *:Zone.Identifier" >> "$output"
   echo "- **/*:Zone.Identifier" >> "$output"
@@ -356,7 +372,7 @@ backup_project() {
   temp_zip="/tmp/${project}-backup-$$.zip"
   final_zip="$CODE_ROOT/$project.zip"
 
-  make_rsync_filter "$filter_file"
+  make_rsync_filter "$IGNORE_ZIP_FILE" "$filter_file"
 
   log "Gerando backup: $project -> $final_zip"
 
