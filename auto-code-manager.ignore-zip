@@ -19,3 +19,16 @@ temp/
 tmp/
 venv/
 public/
+
+.dart_tool/
+build/
+.idea/
+
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.iml
+
+linux/flutter/ephemeral/
+windows/flutter/ephemeral/
+macos/Flutter/ephemeral/
