@@ -7,12 +7,40 @@ CODE_ROOT="/home/daniel/Code"
 IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
+ENV_FILE="$SCRIPT_DIR/auto-code-manager.env"
 DDL_EXPORT_DIR="$CODE_ROOT/sind-infra/sind-oracle/exports/ddl"
 
+# Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
 ZONE_EVERY=4
 BACKUP_EVERY=10
 STABLE_WAIT=2
+
+load_env() {
+  if [ -f "$ENV_FILE" ]; then
+    # shellcheck disable=SC1090
+    set -a
+    source "$ENV_FILE"
+    set +a
+  fi
+}
+
+validate_positive_integer() {
+  local name="$1"
+  local value="${!name:-}"
+
+  if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERRO: $name deve ser um número inteiro maior que zero. Valor atual: ${value:-<vazio>}" >&2
+    exit 1
+  fi
+}
+
+validate_timers() {
+  validate_positive_integer INTERVAL
+  validate_positive_integer ZONE_EVERY
+  validate_positive_integer BACKUP_EVERY
+  validate_positive_integer STABLE_WAIT
+}
 
 log() {
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -425,15 +453,19 @@ if [ ! -d "$CODE_ROOT" ]; then
 fi
 
 ensure_files
+load_env
+validate_timers
 
 line
 echo "Auto Code Manager"
 line
 echo "CODE_ROOT:     $CODE_ROOT"
 echo "Downloads:     $(downloads_dir)"
+echo "ENV:           $ENV_FILE"
 echo "Intervalo:     ${INTERVAL}s"
 echo "Backup cada:   ${BACKUP_EVERY}s"
 echo "Zone cada:     ${ZONE_EVERY}s"
+echo "Estável por:   ${STABLE_WAIT}s"
 line
 
 cycle=1
