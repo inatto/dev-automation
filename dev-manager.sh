@@ -3,6 +3,7 @@
 set -euo pipefail
 
 SESSION="dev"
+WINDOW="projetos"
 
 require_tmux() {
   if ! command -v tmux >/dev/null 2>&1; then
@@ -13,46 +14,67 @@ require_tmux() {
   fi
 }
 
-create_first_window() {
-  local window_name="$1"
-  local working_dir="$2"
-  local command="$3"
+validate_dir() {
+  local working_dir="$1"
+  local required="${2:-false}"
 
-  if [[ ! -d "$working_dir" ]]; then
+  if [[ -d "$working_dir" ]]; then
+    return 0
+  fi
+
+  if [[ "$required" == "true" ]]; then
     echo "Erro: pasta não encontrada: $working_dir" >&2
     exit 1
   fi
 
-  tmux new-session -d \
-    -s "$SESSION" \
-    -n "$window_name" \
-    -c "$working_dir"
-
-  tmux send-keys \
-    -t "$SESSION:$window_name" \
-    "$command" \
-    C-m
+  echo "Aviso: pasta não encontrada; painel ignorado: $working_dir" >&2
+  return 1
 }
 
-add_window() {
-  local window_name="$1"
+configure_window() {
+  tmux set-option -t "$SESSION" pane-border-status top
+  tmux set-option -t "$SESSION" pane-border-format ' #[bold]#{pane_title} #[default]'
+  tmux set-option -t "$SESSION" remain-on-exit on
+}
+
+create_first_pane() {
+  local pane_name="$1"
   local working_dir="$2"
   local command="$3"
 
-  if [[ ! -d "$working_dir" ]]; then
-    echo "Aviso: pasta não encontrada; janela ignorada: $working_dir" >&2
-    return 0
-  fi
+  validate_dir "$working_dir" true
 
-  tmux new-window \
-    -t "$SESSION" \
-    -n "$window_name" \
+  tmux new-session -d \
+    -s "$SESSION" \
+    -n "$WINDOW" \
     -c "$working_dir"
 
-  tmux send-keys \
-    -t "$SESSION:$window_name" \
-    "$command" \
-    C-m
+  tmux select-pane -t "$SESSION:$WINDOW.0" -T "$pane_name"
+  tmux send-keys -t "$SESSION:$WINDOW.0" "$command" C-m
+}
+
+add_pane() {
+  local pane_name="$1"
+  local working_dir="$2"
+  local command="$3"
+  local pane_id
+
+  validate_dir "$working_dir" || return 0
+
+  pane_id="$(
+    tmux split-window \
+      -h \
+      -P \
+      -F '#{pane_id}' \
+      -t "$SESSION:$WINDOW" \
+      -c "$working_dir"
+  )"
+
+  tmux select-pane -t "$pane_id" -T "$pane_name"
+  tmux send-keys -t "$pane_id" "$command" C-m
+
+  # Redistribui todos os painéis igualmente após cada inclusão.
+  tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
 }
 
 start_session() {
@@ -62,17 +84,18 @@ start_session() {
     return
   fi
 
-  echo "Criando sessão tmux '$SESSION'..."
+  echo "Criando sessão tmux '$SESSION' com os projetos lado a lado..."
 
-  # A ordem destas chamadas define a ordem das janelas.
-  # Para reordenar, mova apenas a linha completa correspondente.
-  create_first_window "infra"      "$HOME/Code/sind-infra"          "bash ./deploy/auto-code-manager.sh"
-  add_window          "sinproprev" "$HOME/Code/site-sinproprev-v2" "bash ./deploy/local.dev.sh"
-  add_window          "asaclub"    "$HOME/Code/site-asaclub-2026"  "bash ./deploy/local.dev.sh"
-  add_window          "site-inst"  "$HOME/Code/site-inst"          "bash ./deploy/local.dev.sh anpprev"
-  add_window          "murm-app"   "$HOME/Code/murm-app"           "flutter run -d linux"
+  # A ordem destas chamadas define a ordem dos painéis, da esquerda para a direita.
+  create_first_pane "infra"      "$HOME/Code/sind-infra"          "bash ./deploy/auto-code-manager.sh"
+  configure_window
+  add_pane          "sinproprev" "$HOME/Code/site-sinproprev-v2" "bash ./deploy/local.dev.sh"
+  add_pane          "asaclub"    "$HOME/Code/site-asaclub-2026"  "bash ./deploy/local.dev.sh"
+  add_pane          "site-inst"  "$HOME/Code/site-inst"          "bash ./deploy/local.dev.sh anpprev"
+  add_pane          "murm-app"   "$HOME/Code/murm-app"           "flutter run -d linux"
 
-  tmux select-window -t "$SESSION:infra"
+  tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
+  tmux select-pane -t "$SESSION:$WINDOW.0"
   tmux attach-session -t "$SESSION"
 }
 
@@ -98,7 +121,9 @@ stop_session() {
 status_session() {
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "Sessão '$SESSION' rodando:"
-    tmux list-windows -t "$SESSION"
+    tmux list-panes \
+      -t "$SESSION:$WINDOW" \
+      -F '  painel #{pane_index}: #{pane_title} | #{pane_current_path} | #{pane_current_command}'
   else
     echo "Sessão '$SESSION' parada."
   fi
