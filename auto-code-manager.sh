@@ -437,6 +437,42 @@ backup_project() {
   log "OK backup: $final_zip"
 }
 
+clean_unmanaged_backup_zips() {
+  local zip_file
+  local zip_name
+  local project
+  local managed
+
+  log "Limpando ZIPs de backup fora de $PROJECTS_FILE em $CODE_ROOT"
+
+  while IFS= read -r -d '' zip_file; do
+    zip_name="$(basename "$zip_file")"
+    project="${zip_name%.zip}"
+    managed=false
+
+    while IFS= read -r allowed_project || [ -n "$allowed_project" ]; do
+      [ -n "$allowed_project" ] || continue
+
+      if [ "$project" = "$allowed_project" ]; then
+        managed=true
+        break
+      fi
+    done < <(clean_file "$PROJECTS_FILE")
+
+    if [ "$managed" = false ]; then
+      log "Removendo ZIP fora do .projects: $zip_file"
+      rm -f -- "$zip_file" ||
+        log "ERRO ao remover ZIP fora do .projects: $zip_file"
+    fi
+  done < <(
+    find "$CODE_ROOT" \
+      -maxdepth 1 \
+      -type f \
+      -iname "*.zip" \
+      -print0 2>/dev/null
+  )
+}
+
 backup_all() {
   local project
 
@@ -494,6 +530,7 @@ while true; do
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
+    clean_unmanaged_backup_zips
     backup_all
     last_backup="$now"
   else
