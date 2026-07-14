@@ -89,10 +89,10 @@ start_session() {
   # A ordem destas chamadas define a ordem dos painéis, da esquerda para a direita.
   create_first_pane "infra"      "$HOME/Code/sind-infra"          "bash ./deploy/auto-code-manager.sh"
   configure_window
-  add_pane          "sinproprev" "$HOME/Code/site-sinproprev-v2" "bash ./deploy/local.dev.sh"
   add_pane          "asaclub"    "$HOME/Code/site-asaclub-2026"  "bash ./deploy/local.dev.sh"
   add_pane          "site-inst"  "$HOME/Code/site-inst"          "bash ./deploy/local.dev.sh anpprev"
-  add_pane          "murm-app"   "$HOME/Code/murm-app"           "flutter run -d linux"
+  add_pane          "sinproprev" "$HOME/Code/site-sinproprev-v2" "bash ./deploy/local.dev.sh"
+#  add_pane          "murm-app"   "$HOME/Code/murm-app"           "flutter run -d linux"
 
   tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
   tmux select-pane -t "$SESSION:$WINDOW.0"

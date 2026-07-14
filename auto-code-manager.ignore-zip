@@ -32,3 +32,5 @@ build/
 linux/flutter/ephemeral/
 windows/flutter/ephemeral/
 macos/Flutter/ephemeral/
+
+docs/
