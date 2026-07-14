@@ -22,8 +22,8 @@ set -euo pipefail
 # Cada chamada é separada para evitar problemas de aspas entre Bash,
 # Windows Terminal e wsl.exe.
 
-DISTRO="${WSL_DISTRO_NAME:-Ubuntu-22.04}"
-PROFILE="Ubuntu-22.04"
+DISTRO="${WSL_DISTRO_NAME:-Ubuntu-22.04-D}"
+PROFILE="Ubuntu-22.04-D"
 CODE_ROOT="/home/daniel/Code"
 
 open_tab() {
