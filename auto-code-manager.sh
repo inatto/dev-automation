@@ -50,6 +50,13 @@ line() {
   echo "────────────────────────────────────────────────────────────"
 }
 
+soft_beep() {
+  if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -NonInteractive -Command "[console]::beep(700,180)" \
+      >/dev/null 2>&1 || true
+  fi
+}
+
 downloads_dir() {
   local win_profile=""
   local wsl_profile=""
@@ -271,6 +278,7 @@ import_one_zip() {
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
   log "ZIP apagado: $zip_file"
+  soft_beep
   line
 }
 
