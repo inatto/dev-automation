@@ -35,6 +35,7 @@ macos/Flutter/ephemeral/
 
 docs/
 todo/
+amazon/
 
 .output_crawler/
 .output_gpt_images/

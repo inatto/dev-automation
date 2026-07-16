@@ -1,9 +1,9 @@
-#general-crawler
 #site-murm
 #site-foto
-#site-sindicatto-admin
 #murm-app
 
+general-crawler
+sindicatto
 sind-infra
 site-asaclub-2026
 site-inst
@@ -12,4 +12,3 @@ site-sindicatto-admin
 site-asaclub-admin-mariadb
 sind-services
 site-murm
-general-crawler
