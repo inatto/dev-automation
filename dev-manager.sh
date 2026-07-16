@@ -91,9 +91,8 @@ start_session() {
   configure_window
   add_pane          "site-asaclub-admin-mariadb"  "$HOME/Code/site-asaclub-admin-mariadb"   "bash ./deploy/local-dev.sh"
   add_pane          "asaclub"                     "$HOME/Code/site-asaclub-2026"            "bash ./deploy/local.dev.sh"
-  add_pane          "site-inst"                   "$HOME/Code/site-inst"                    "bash ./deploy/local.dev.sh anpprev"
-  add_pane          "sinproprev"                  "$HOME/Code/site-sinproprev-v2"           "bash ./deploy/local.dev.sh"
-
+#  add_pane          "site-inst"                   "$HOME/Code/site-inst"                    "bash ./deploy/local-dev.sh anpprev"
+#  add_pane          "sinproprev"                  "$HOME/Code/site-sinproprev-v2"           "bash ./deploy/local.dev.sh"
 #  add_pane          "murm-app"   "$HOME/Code/murm-app"           "flutter run -d linux"
 
   tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
