@@ -425,7 +425,7 @@ backup_project() {
 
   if ! (
     cd "$temp_dir" &&
-    zip -qr "$temp_zip" .
+    zip -qry "$temp_zip" .
   ); then
     log "ERRO ao compactar projeto: $project"
     rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
