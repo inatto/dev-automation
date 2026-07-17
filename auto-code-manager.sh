@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# cd /home/daniel/Code/sind-infra/deploy
 set -uo pipefail
 #cd /home/daniel/Code/sind-infra/deploy/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

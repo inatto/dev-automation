@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# cd /home/daniel/Code/sind-infra/deploy
 
 set -euo pipefail
 
