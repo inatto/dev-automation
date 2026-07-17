@@ -3,8 +3,6 @@
 *:Zone.Identifier
 .astro/
 .cache/
-.env
-.env.prod
 .git/
 .idea/
 .output*/
