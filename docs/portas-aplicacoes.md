@@ -16,16 +16,16 @@ Orientação para a futura padronização. Este documento não altera as portas 
 
 ## Numeração inicial
 
-| Aplicação | Tipo | Astro | API |
-|---|---|---:|---:|
+| Aplicação | Tipo | Astro |    API |
+|---|---|---:|-------:|
 | `orbital-app` | Base | `4001` | `8001` |
 | `station-app` | Base | `4002` | `8002` |
 | `site-inst` | Base | `4003` | `8003` |
-| `site-murm` | Base | `4004` | — |
-| `site-inst/anpprev` | Tenant | `4100` | Compartilha `8003` |
-| `site-inst/sinproprev` | Tenant | `4101` | Compartilha `8003` |
-| `site-asaclub-2026` | Cliente | `4102` | — |
-| `site-sinproprev-v2` | Cliente | `4103` | — |
+| `site-murm` | Base | `4004` |      — |
+| `site-inst/anpprev` | Tenant | `4100` | `8100` |
+| `site-inst/sinproprev` | Tenant | `4101` | `8101` |
+| `site-asaclub-2026` | Cliente | `4102` |      — |
+| `site-sinproprev-v2` | Cliente | `4103` |      — |
 
 As próximas aplicações base seguem a partir de `4005`/`8005`. Os próximos tenants e projetos de clientes seguem a partir de `4104`.
 
