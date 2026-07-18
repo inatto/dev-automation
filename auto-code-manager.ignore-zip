@@ -38,3 +38,8 @@ amazon/
 .output_crawler/
 .output_gpt_images/
 godot-cpp/
+.deps/
+cmake-build-debug/
+third_party/
+assets/
+build-*/
