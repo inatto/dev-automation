@@ -16,6 +16,8 @@ INTERVAL=2
 ZONE_EVERY=4
 BACKUP_EVERY=10
 STABLE_WAIT=2
+BEEP_REPEATS=3
+BEEP_GAP_MS=180
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -41,6 +43,8 @@ validate_timers() {
   validate_positive_integer ZONE_EVERY
   validate_positive_integer BACKUP_EVERY
   validate_positive_integer STABLE_WAIT
+  validate_positive_integer BEEP_REPEATS
+  validate_positive_integer BEEP_GAP_MS
 }
 
 log() {
@@ -52,10 +56,37 @@ line() {
 }
 
 soft_beep() {
+  local repeats="${BEEP_REPEATS:-3}"
+  local gap_ms="${BEEP_GAP_MS:-180}"
+
+  # O som padrão do Windows costuma ser mais confiável que Console.Beep no WSL.
+  # A sequência de Console.Beep reforça o aviso e o sino do terminal é o fallback final.
   if command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoProfile -NonInteractive -Command "[console]::beep(700,180)" \
-      >/dev/null 2>&1 || true
+    powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
+      "\$ErrorActionPreference = 'SilentlyContinue'; \
+       Add-Type -AssemblyName System.Windows.Forms; \
+       for (\$i = 0; \$i -lt $repeats; \$i++) { \
+         [System.Media.SystemSounds]::Exclamation.Play(); \
+         [console]::beep(880,220); \
+         Start-Sleep -Milliseconds $gap_ms; \
+       }" >/dev/null 2>&1 && return 0
   fi
+
+  if command -v paplay >/dev/null 2>&1 && [ -r /usr/share/sounds/freedesktop/stereo/complete.oga ]; then
+    local i
+    for ((i = 0; i < repeats; i++)); do
+      paplay /usr/share/sounds/freedesktop/stereo/complete.oga >/dev/null 2>&1 || break
+      sleep "$(awk "BEGIN { print $gap_ms / 1000 }")"
+    done
+    return 0
+  fi
+
+  # Pode depender da configuração de sino do terminal, mas evita silêncio total.
+  local i
+  for ((i = 0; i < repeats; i++)); do
+    printf '\a' > /dev/tty 2>/dev/null || printf '\a'
+    sleep "$(awk "BEGIN { print $gap_ms / 1000 }")"
+  done
 }
 
 downloads_dir() {
