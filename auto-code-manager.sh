@@ -3,8 +3,9 @@
 set -uo pipefail
 #cd /home/daniel/Code/sind-infra/deploy/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_VERSION="2026-07-18-codezip-v3"
 
-CODE_ROOT="/home/daniel/Code"
+CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
@@ -16,8 +17,11 @@ INTERVAL=2
 ZONE_EVERY=4
 BACKUP_EVERY=10
 STABLE_WAIT=2
-BEEP_REPEATS=3
-BEEP_GAP_MS=180
+BEEP_REPEATS=2
+BEEP_GAP_MS=220
+BEEP_MODE="wave"
+BEEP_VOLUME=22
+BEEP_WAVE_FILE="$SCRIPT_DIR/sounds/soft-notification.wav"
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -45,6 +49,11 @@ validate_timers() {
   validate_positive_integer STABLE_WAIT
   validate_positive_integer BEEP_REPEATS
   validate_positive_integer BEEP_GAP_MS
+
+  if ! [[ "${BEEP_VOLUME:-}" =~ ^[0-9]+$ ]] || [ "$BEEP_VOLUME" -gt 100 ]; then
+    echo "ERRO: BEEP_VOLUME deve ser um inteiro entre 0 e 100. Valor atual: ${BEEP_VOLUME:-<vazio>}" >&2
+    exit 1
+  fi
 }
 
 log() {
@@ -56,32 +65,47 @@ line() {
 }
 
 soft_beep() {
-  local repeats="${BEEP_REPEATS:-3}"
-  local gap_ms="${BEEP_GAP_MS:-180}"
+  local repeats="${BEEP_REPEATS:-2}"
+  local gap_ms="${BEEP_GAP_MS:-220}"
+  local mode="${BEEP_MODE:-wave}"
+  local volume="${BEEP_VOLUME:-22}"
+  local wave_file="${BEEP_WAVE_FILE:-$SCRIPT_DIR/sounds/soft-notification.wav}"
+  local wave_windows=""
 
-  # O som padrão do Windows costuma ser mais confiável que Console.Beep no WSL.
-  # A sequência de Console.Beep reforça o aviso e o sino do terminal é o fallback final.
+  # WAV suave com volume controlável no Windows. O volume vai de 0 a 100.
+  if [ "$mode" = "wave" ] &&
+     [ -r "$wave_file" ] &&
+     command -v powershell.exe >/dev/null 2>&1 &&
+     command -v wslpath >/dev/null 2>&1; then
+
+    wave_windows="$(wslpath -w "$wave_file" 2>/dev/null || true)"
+
+    if [ -n "$wave_windows" ]; then
+      powershell.exe -NoLogo -NoProfile -NonInteractive -STA -Command \
+        "\$ErrorActionPreference = 'Stop'; \
+         \$player = New-Object -ComObject WMPlayer.OCX; \
+         \$player.settings.volume = $volume; \
+         for (\$i = 0; \$i -lt $repeats; \$i++) { \
+           \$player.URL = '$wave_windows'; \
+           \$player.controls.play(); \
+           Start-Sleep -Milliseconds 700; \
+           \$player.controls.stop(); \
+           Start-Sleep -Milliseconds $gap_ms; \
+         }; \
+         \$player.close()" >/dev/null 2>&1 && return 0
+    fi
+  fi
+
+  # Fallback reforçado quando o WAV ou o componente de mídia não estiver disponível.
   if command -v powershell.exe >/dev/null 2>&1; then
     powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
       "\$ErrorActionPreference = 'SilentlyContinue'; \
-       Add-Type -AssemblyName System.Windows.Forms; \
        for (\$i = 0; \$i -lt $repeats; \$i++) { \
-         [System.Media.SystemSounds]::Exclamation.Play(); \
-         [console]::beep(880,220); \
+         [console]::beep(660,160); \
          Start-Sleep -Milliseconds $gap_ms; \
        }" >/dev/null 2>&1 && return 0
   fi
 
-  if command -v paplay >/dev/null 2>&1 && [ -r /usr/share/sounds/freedesktop/stereo/complete.oga ]; then
-    local i
-    for ((i = 0; i < repeats; i++)); do
-      paplay /usr/share/sounds/freedesktop/stereo/complete.oga >/dev/null 2>&1 || break
-      sleep "$(awk "BEGIN { print $gap_ms / 1000 }")"
-    done
-    return 0
-  fi
-
-  # Pode depender da configuração de sino do terminal, mas evita silêncio total.
   local i
   for ((i = 0; i < repeats; i++)); do
     printf '\a' > /dev/tty 2>/dev/null || printf '\a'
@@ -427,8 +451,9 @@ backup_project() {
   local filter_file
 
   if [ ! -d "$project_dir" ]; then
-    log "Projeto não existe: $project_dir"
-    return 0
+    log "ERRO: projeto não existe: $project_dir"
+    rm -f -- "$CODE_ROOT/$project.zip"
+    return 1
   fi
 
   if [ "$project" = "sind-infra" ]; then
@@ -479,6 +504,12 @@ clean_unmanaged_backup_zips() {
 
   while IFS= read -r -d '' zip_file; do
     zip_name="$(basename "$zip_file")"
+
+    # Code.zip é o pacote geral e nunca é removido pela limpeza.
+    if [ "$zip_name" = "Code.zip" ] || [ "$zip_name" = "code.zip" ]; then
+      continue
+    fi
+
     project="${zip_name%.zip}"
     managed=false
 
@@ -505,13 +536,100 @@ clean_unmanaged_backup_zips() {
   )
 }
 
-backup_all() {
+create_code_zip() {
+  local final_zip="$CODE_ROOT/Code.zip"
+  local staging_dir
+  local temp_zip
   local project
+  local project_zip
+  local count=0
+
+  staging_dir="$(mktemp -d /tmp/auto-code-package-XXXXXX)"
+  temp_zip="$(mktemp /tmp/Code.zip.tmp-XXXXXX)"
+  rm -f -- "$temp_zip"
+
+  log "Iniciando criação obrigatória do pacote geral Code.zip..."
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    backup_project "$project"
+    project_zip="$CODE_ROOT/$project.zip"
+
+    if [ ! -s "$project_zip" ]; then
+      log "ERRO: ZIP ausente ou vazio: $project_zip"
+      rm -rf -- "$staging_dir"
+      rm -f -- "$temp_zip"
+      return 1
+    fi
+
+    cp -f -- "$project_zip" "$staging_dir/$project.zip" || {
+      log "ERRO ao preparar $project.zip para Code.zip"
+      rm -rf -- "$staging_dir"
+      rm -f -- "$temp_zip"
+      return 1
+    }
+    count=$((count + 1))
   done < <(clean_file "$PROJECTS_FILE")
+
+  if [ "$count" -eq 0 ]; then
+    log "ERRO: nenhum projeto configurado para criar Code.zip"
+    rm -rf -- "$staging_dir"
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  log "Gerando pacote geral: $count ZIPs -> $final_zip"
+
+  if ! (
+    cd "$staging_dir" &&
+    zip -q -0 "$temp_zip" -- ./*.zip
+  ); then
+    log "ERRO ao criar pacote geral Code.zip"
+    rm -rf -- "$staging_dir"
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
+    log "ERRO: validação do Code.zip falhou"
+    rm -rf -- "$staging_dir"
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  # Substituição atômica: o Code.zip anterior só muda depois do novo estar válido.
+  if ! mv -f -- "$temp_zip" "$final_zip"; then
+    log "ERRO ao instalar o novo Code.zip em $final_zip"
+    rm -rf -- "$staging_dir"
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  rm -f -- "$CODE_ROOT/code.zip"
+  rm -rf -- "$staging_dir"
+
+  log "OK Code.zip criado e preservado: $final_zip ($count ZIPs)"
+  ls -lh -- "$final_zip" 2>/dev/null || true
+  return 0
+}
+
+backup_all() {
+  local project
+  local failed=0
+
+  # Nunca apaga o Code.zip válido antes de o novo estar pronto.
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    backup_project "$project" || failed=1
+  done < <(clean_file "$PROJECTS_FILE")
+
+  if [ "$failed" -ne 0 ]; then
+    log "ERRO: um ou mais projetos falharam; Code.zip anterior foi mantido; o novo não foi criado neste ciclo."
+    return 1
+  fi
+
+  log "Todos os projetos foram compactados; chamando create_code_zip agora."
+  create_code_zip
 }
 
 stop() {
@@ -533,7 +651,7 @@ load_env
 validate_timers
 
 line
-echo "Auto Code Manager"
+echo "Auto Code Manager - $SCRIPT_VERSION"
 line
 echo "CODE_ROOT:     $CODE_ROOT"
 echo "Downloads:     $(downloads_dir)"
@@ -563,7 +681,11 @@ while true; do
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
     clean_unmanaged_backup_zips
-    backup_all
+    if backup_all; then
+      log "Ciclo de backup concluído com Code.zip."
+    else
+      log "ERRO: ciclo de backup terminou sem Code.zip."
+    fi
     last_backup="$now"
   else
     log "Backup ainda não venceu."
