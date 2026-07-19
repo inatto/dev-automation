@@ -5,6 +5,8 @@
 # todos os auto-code-manager.ignore-zip/ignore-unzip dentro dela.
 infra
 
+dev-automation
+
 # Projetos individuais dentro de pastas agrupadoras:
 sindicatto/station-app
 sindicatto/orbital-app
