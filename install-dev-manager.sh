@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/infra/dev-automation
+# cd /home/daniel/Code/dev-automation
 
 set -euo pipefail
 
 # INSTALAÇÃO INICIAL — execute uma única vez em um WSL novo:
 #
-#   cd /home/daniel/Code/infra/dev-automation
+#   cd /home/daniel/Code/dev-automation
 #   chmod +x install-dev-manager.sh dev-manager.sh
 #   ./install-dev-manager.sh
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 #   dev-manager restart
 #   dev-manager stop
 
-PROJECT_ROOT="/home/daniel/Code/infra/dev-automation"
+PROJECT_ROOT="/home/daniel/Code/dev-automation"
 TARGET_DIR="$HOME/.local/bin"
 TARGET="$TARGET_DIR/dev-manager"
 SOURCE="$PROJECT_ROOT/dev-manager.sh"

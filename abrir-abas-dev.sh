@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/infra/dev-automation
+# cd /home/daniel/Code/dev-automation
 set -euo pipefail
 
 # Abre, na MESMA janela do Windows Terminal, uma aba WSL para cada projeto
@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # COMO RODAR
 # 1. Entre na raiz do projeto:
-#      cd ~/Code/infra/dev-automation
+#      cd ~/Code/dev-automation
 # 2. Na primeira vez, dê permissão de execução:
 #      chmod +x abrir-abas-dev.sh
 # 3. Execute:
@@ -41,7 +41,7 @@ open_tab() {
 }
 
 open_tab "Dev Automation" \
-  "$CODE_ROOT/infra/dev-automation" \
+  "$CODE_ROOT/dev-automation" \
   "./auto-code-manager.sh"
 
 open_tab "SINPROPREV" \
