@@ -2,12 +2,15 @@
 #site-foto
 #site-murm
 
-general-crawler
-orbital-app
-sindicatto
-sind-infra
-sind-services
-site-asaclub-2026
-site-inst
-site-sinproprev-v2
+#general-crawler
+#sind-services
+#site-asaclub-2026
+#site-inst
+#site-sinproprev-v2
 station-app
+#asaclub-app
+
+
+orbital-app
+inst-app
+sind-infra

@@ -3,7 +3,7 @@
 set -uo pipefail
 #cd /home/daniel/Code/sind-infra/deploy/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_VERSION="2026-07-18-codezip-v4-windows-audio"
+SCRIPT_VERSION="2026-07-19-codezip-v5-project-ignore"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
@@ -311,7 +311,10 @@ import_one_zip() {
 
   filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${project}-XXXXXX")"
   unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${project}-XXXXXX")"
-  make_rsync_filter "$IGNORE_UNZIP_FILE" "$unzip_filter_file"
+  make_project_rsync_filter \
+    "$IGNORE_UNZIP_FILE" \
+    "$project_dir/auto-code-manager.ignore-unzip" \
+    "$unzip_filter_file"
 
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
@@ -461,6 +464,31 @@ make_rsync_filter() {
   echo "- **/*:Zone.Identifier" >> "$output"
 }
 
+make_project_rsync_filter() {
+  local global_ignore_file="$1"
+  local project_ignore_file="$2"
+  local output="$3"
+  local combined_ignore_file
+
+  combined_ignore_file="$(mktemp /tmp/auto-code-ignore-combined-XXXXXX)"
+
+  if [ -f "$global_ignore_file" ]; then
+    cat -- "$global_ignore_file" >> "$combined_ignore_file"
+    printf '\n' >> "$combined_ignore_file"
+  fi
+
+  if [ -f "$project_ignore_file" ]; then
+    log "Usando regras específicas do projeto: $project_ignore_file"
+    cat -- "$project_ignore_file" >> "$combined_ignore_file"
+    printf '\n' >> "$combined_ignore_file"
+  else
+    log "Sem regras específicas do projeto: $project_ignore_file"
+  fi
+
+  make_rsync_filter "$combined_ignore_file" "$output"
+  rm -f -- "$combined_ignore_file"
+}
+
 zip_ddl_exports() {
   local file
   local zip_file
@@ -514,7 +542,10 @@ backup_project() {
   temp_zip="/tmp/${project}-backup-$$.zip"
   final_zip="$CODE_ROOT/$project.zip"
 
-  make_rsync_filter "$IGNORE_ZIP_FILE" "$filter_file"
+  make_project_rsync_filter \
+    "$IGNORE_ZIP_FILE" \
+    "$project_dir/auto-code-manager.ignore-zip" \
+    "$filter_file"
 
   log "Gerando backup: $project -> $final_zip"
 
