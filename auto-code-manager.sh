@@ -3,7 +3,7 @@
 set -uo pipefail
 #cd /home/daniel/Code/sind-infra/deploy/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_VERSION="2026-07-18-codezip-v3"
+SCRIPT_VERSION="2026-07-18-codezip-v4-windows-audio"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
@@ -22,6 +22,7 @@ BEEP_GAP_MS=220
 BEEP_MODE="wave"
 BEEP_VOLUME=22
 BEEP_WAVE_FILE="$SCRIPT_DIR/sounds/soft-notification.wav"
+BEEP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\notify.wav"
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -70,47 +71,95 @@ soft_beep() {
   local mode="${BEEP_MODE:-wave}"
   local volume="${BEEP_VOLUME:-22}"
   local wave_file="${BEEP_WAVE_FILE:-$SCRIPT_DIR/sounds/soft-notification.wav}"
-  local wave_windows=""
+  local windows_wave="${BEEP_WINDOWS_WAVE_FILE:-C:\\Windows\\Media\\notify.wav}"
+  local bundled_windows=""
+  local powershell_script=""
 
-  # WAV suave com volume controlável no Windows. O volume vai de 0 a 100.
-  if [ "$mode" = "wave" ] &&
-     [ -r "$wave_file" ] &&
-     command -v powershell.exe >/dev/null 2>&1 &&
-     command -v wslpath >/dev/null 2>&1; then
+  line
+  log "AVISO SONORO: iniciando ($repeats toque(s), modo=$mode, volume=$volume%)"
 
-    wave_windows="$(wslpath -w "$wave_file" 2>/dev/null || true)"
-
-    if [ -n "$wave_windows" ]; then
-      powershell.exe -NoLogo -NoProfile -NonInteractive -STA -Command \
-        "\$ErrorActionPreference = 'Stop'; \
-         \$player = New-Object -ComObject WMPlayer.OCX; \
-         \$player.settings.volume = $volume; \
-         for (\$i = 0; \$i -lt $repeats; \$i++) { \
-           \$player.URL = '$wave_windows'; \
-           \$player.controls.play(); \
-           Start-Sleep -Milliseconds 700; \
-           \$player.controls.stop(); \
-           Start-Sleep -Milliseconds $gap_ms; \
-         }; \
-         \$player.close()" >/dev/null 2>&1 && return 0
-    fi
-  fi
-
-  # Fallback reforçado quando o WAV ou o componente de mídia não estiver disponível.
   if command -v powershell.exe >/dev/null 2>&1; then
-    powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
-      "\$ErrorActionPreference = 'SilentlyContinue'; \
-       for (\$i = 0; \$i -lt $repeats; \$i++) { \
-         [console]::beep(660,160); \
-         Start-Sleep -Milliseconds $gap_ms; \
-       }" >/dev/null 2>&1 && return 0
+    log "AVISO SONORO: PowerShell do Windows encontrado."
+
+    if [ "$mode" = "wave" ]; then
+      if [ -r "$wave_file" ] && command -v wslpath >/dev/null 2>&1; then
+        bundled_windows="$(wslpath -w "$wave_file" 2>/dev/null || true)"
+      fi
+
+      # Primeiro tenta o WAV nativo do Windows pedido pelo usuário. Se ele não
+      # existir ou falhar, tenta o WAV incluído no projeto.
+      powershell_script="\$ErrorActionPreference = 'Stop';
+        \$candidates = @('$windows_wave', '$bundled_windows') | Where-Object { \$_ -and (Test-Path -LiteralPath \$_) };
+        if (\$candidates.Count -eq 0) { throw 'Nenhum arquivo WAV foi encontrado.' }
+        \$played = \$false;
+        foreach (\$wav in \$candidates) {
+          try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue;
+            \$player = New-Object System.Media.SoundPlayer;
+            \$player.SoundLocation = \$wav;
+            \$player.Load();
+            for (\$i = 0; \$i -lt $repeats; \$i++) {
+              \$player.PlaySync();
+              if (\$i -lt ($repeats - 1)) { Start-Sleep -Milliseconds $gap_ms }
+            }
+            Write-Output ('OK|' + \$wav);
+            \$played = \$true;
+            break;
+          } catch {
+            Write-Output ('FALHOU|' + \$wav + '|' + \$_.Exception.Message);
+          }
+        }
+        if (-not \$played) { exit 2 }"
+
+      local audio_result=""
+      audio_result="$(powershell.exe -NoLogo -NoProfile -NonInteractive -STA -Command "$powershell_script" 2>&1 | tr -d '\r')"
+      if grep -q '^OK|' <<< "$audio_result"; then
+        while IFS= read -r result_line; do
+          if [[ "$result_line" == OK\|* ]]; then
+            log "AVISO SONORO: WAV tocado pelo Windows: ${result_line#OK|}"
+          elif [[ "$result_line" == FALHOU\|* ]]; then
+            log "AVISO SONORO: tentativa anterior falhou: ${result_line#FALHOU|}"
+          fi
+        done <<< "$audio_result"
+        line
+        return 0
+      fi
+
+      log "AVISO SONORO: falha ao tocar WAV pelo Windows. Retorno: ${audio_result:-<sem retorno>}"
+    fi
+
+    log "AVISO SONORO: tentando beep eletrônico pelo Windows..."
+    if powershell.exe -NoLogo -NoProfile -NonInteractive -Command \
+      "\$ErrorActionPreference = 'Stop'; for (\$i = 0; \$i -lt $repeats; \$i++) { [console]::beep(880,220); if (\$i -lt ($repeats - 1)) { Start-Sleep -Milliseconds $gap_ms } }" \
+      >/dev/null 2>&1; then
+      log "AVISO SONORO: beep eletrônico enviado ao Windows."
+      line
+      return 0
+    fi
+
+    log "AVISO SONORO: beep eletrônico do Windows também falhou."
+  else
+    log "AVISO SONORO: powershell.exe não está disponível no WSL."
   fi
 
+  log "AVISO SONORO: tentando campainha do terminal/TTY..."
   local i
+  local tty_ok=false
   for ((i = 0; i < repeats; i++)); do
-    printf '\a' > /dev/tty 2>/dev/null || printf '\a'
+    if printf '\a' > /dev/tty 2>/dev/null; then
+      tty_ok=true
+    else
+      printf '\a'
+    fi
     sleep "$(awk "BEGIN { print $gap_ms / 1000 }")"
   done
+
+  if [ "$tty_ok" = true ]; then
+    log "AVISO SONORO: campainha enviada ao TTY. O tmux/terminal pode estar configurado para silenciá-la."
+  else
+    log "AVISO SONORO: não foi possível confirmar áudio. Verifique o áudio do Windows e a interoperabilidade WSL."
+  fi
+  line
 }
 
 downloads_dir() {
