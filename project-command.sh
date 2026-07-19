@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/infra/dev-automation
+# cd /home/daniel/Code/bots/dev-automation
 
 set -euo pipefail
 

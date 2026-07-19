@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/dev-automation/
+# cd /home/daniel/Code/bots/dev-automation/
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
 # sind-infra-clean-zoneidentifier.sh
 #
-# Monitora /home/daniel/Code/dev-automation e apaga arquivos *:Zone.Identifier
+# Monitora /home/daniel/Code/bots/dev-automation e apaga arquivos *:Zone.Identifier
 # em qualquer subpasta, em loop com timer.
 #
 # Uso:

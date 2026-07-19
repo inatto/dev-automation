@@ -1,22 +1,25 @@
 # Cada linha é relativa a /home/daniel/Code.
-# Pode ser um projeto direto ou uma pasta agrupadora inteira.
+# ZIPs de projetos aninhados ficam ao lado da pasta do projeto.
 
-# Pasta agrupadora: gera /home/daniel/Code/infra.zip e reconhece
-# todos os auto-code-manager.ignore-zip/ignore-unzip dentro dela.
 infra
+bots/dev-automation
+orgs/station-app
+orgs/orbital-app
+orgs/inst-app
 
-dev-automation
-
-# Projetos individuais dentro de pastas agrupadoras:
-sindicatto/station-app
-sindicatto/orbital-app
-sindicatto/inst-app
-
-# Outros exemplos disponíveis:
-#sindicatto/asaclub-app
-#sindicatto/sind-services
-#sindicatto/sind-vault
-#sindicatto/site-sinproprev-v2
-#siteverso/murm-app
-#siteverso/site-foto
-#siteverso/site-murm
+# Ative somente depois de revisar cada projeto:
+#bots/general-crawler
+#orgs/asaclub-app
+#orgs/email-app
+#orgs/sind-services
+#orgs/sind-vault
+#orgs/site-sinproprev-v2
+#social/murm-app
+#social/site-foto
+#social/site-murm
+#games/chap-game
+#games/map-app
+#games/mini-game
+#games/web-assembly
+#games/zig-example
+#sims/zig-rocket-simulator

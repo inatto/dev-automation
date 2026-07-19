@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/infra/dev-automation
+# cd /home/daniel/Code/bots/dev-automation
 
 set -euo pipefail
 
@@ -7,7 +7,7 @@ set -euo pipefail
 # ================================================================
 # 1. Entre na pasta deste projeto:
 #
-#      cd /home/daniel/Code/infra/dev-automation
+#      cd /home/daniel/Code/bots/dev-automation
 #
 # 2. Garanta permissão de execução:
 #

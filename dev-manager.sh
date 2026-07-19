@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/dev-automation
+# cd /home/daniel/Code/bots/dev-automation
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ require_tmux() {
   if ! command -v tmux >/dev/null 2>&1; then
     echo "Erro: tmux não está instalado."
     echo "Execute uma vez:"
-    echo "  /home/daniel/Code/dev-automation/install-dev-manager.sh"
+    echo "  /home/daniel/Code/bots/dev-automation/install-dev-manager.sh"
     exit 1
   fi
 }
@@ -88,13 +88,13 @@ start_session() {
   echo "Criando sessão tmux '$SESSION' com os projetos lado a lado..."
 
   # A ordem destas chamadas define a ordem dos painéis, da esquerda para a direita.
-  create_first_pane "automation" "$HOME/Code/dev-automation" "bash ./auto-code-manager.sh"
+  create_first_pane "automation" "$HOME/Code/bots/dev-automation" "bash ./auto-code-manager.sh"
   configure_window
-#  add_pane          "site-asaclub-admin-mariadb"  "$HOME/Code/sindicatto/orbital-app"   "bash ./deploy/local-dev.sh"
-#  add_pane          "asaclub"                     "$HOME/Code/sindicatto/asaclub-app"            "bash ./deploy/local.dev.sh"
-#  add_pane          "site-inst"                   "$HOME/Code/sindicatto/inst-app"                    "bash ./deploy/local-dev.sh anpprev"
-#  add_pane          "sinproprev"                  "$HOME/Code/sindicatto/site-sinproprev-v2"           "bash ./deploy/local.dev.sh"
-#  add_pane          "murm-app"   "$HOME/Code/siteverso/murm-app"           "flutter run -d linux"
+#  add_pane          "site-asaclub-admin-mariadb"  "$HOME/Code/orgs/orbital-app"   "bash ./deploy/local-dev.sh"
+#  add_pane          "asaclub"                     "$HOME/Code/orgs/asaclub-app"            "bash ./deploy/local.dev.sh"
+#  add_pane          "site-inst"                   "$HOME/Code/orgs/inst-app"                    "bash ./deploy/local-dev.sh anpprev"
+#  add_pane          "sinproprev"                  "$HOME/Code/orgs/site-sinproprev-v2"           "bash ./deploy/local.dev.sh"
+#  add_pane          "murm-app"   "$HOME/Code/social/murm-app"           "flutter run -d linux"
 
   tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
   tmux select-pane -t "$SESSION:$WINDOW.0"

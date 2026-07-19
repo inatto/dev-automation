@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/dev-automation
+# cd /home/daniel/Code/bots/dev-automation
 set -euo pipefail
 
 # Abre, na MESMA janela do Windows Terminal, uma aba WSL para cada projeto
@@ -41,21 +41,21 @@ open_tab() {
 }
 
 open_tab "Dev Automation" \
-  "$CODE_ROOT/dev-automation" \
+  "$CODE_ROOT/bots/dev-automation" \
   "./auto-code-manager.sh"
 
 open_tab "SINPROPREV" \
-  "$CODE_ROOT/sindicatto/site-sinproprev-v2" \
+  "$CODE_ROOT/orgs/site-sinproprev-v2" \
   "./deploy/local.dev.sh"
 
 open_tab "Murm App" \
-  "$CODE_ROOT/siteverso/murm-app" \
+  "$CODE_ROOT/social/murm-app" \
   "flutter run -d linux"
 
 open_tab "ASAClub" \
-  "$CODE_ROOT/sindicatto/asaclub-app" \
+  "$CODE_ROOT/orgs/asaclub-app" \
   "./deploy/local.dev.sh"
 
 open_tab "Site Inst" \
-  "$CODE_ROOT/sindicatto/inst-app" \
+  "$CODE_ROOT/orgs/inst-app" \
   "./deploy/local.dev.sh anpprev"

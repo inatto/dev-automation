@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/dev-automation
+# cd /home/daniel/Code/bots/dev-automation
 set -uo pipefail
-#cd /home/daniel/Code/dev-automation/
+#cd /home/daniel/Code/bots/dev-automation/
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 SCRIPT_VERSION="2026-07-19-codezip-v7-audio-wsl"
@@ -301,8 +301,24 @@ project_archive_name() {
 
   # O nome do ZIP é o nome da pasta selecionada. Ex.:
   #   infra                   -> infra.zip
-  #   sindicatto/station-app  -> station-app.zip
+  #   orgs/station-app  -> station-app.zip
   basename -- "$project"
+}
+
+project_archive_path() {
+  local project="$1"
+  local parent archive_name
+
+  project="${project#./}"
+  project="${project%/}"
+  parent="$(dirname -- "$project")"
+  archive_name="$(project_archive_name "$project")"
+
+  if [ "$parent" = "." ]; then
+    printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
+  else
+    printf '%s/%s/%s.zip\n' "$CODE_ROOT" "$parent" "$archive_name"
+  fi
 }
 
 validate_projects() {
@@ -697,7 +713,7 @@ backup_project() {
 
   if [ ! -d "$project_dir" ]; then
     log "ERRO: projeto não existe: $project_dir"
-    rm -f -- "$CODE_ROOT/$archive_name.zip"
+    rm -f -- "$(project_archive_path "$project")"
     return 1
   fi
 
@@ -708,7 +724,7 @@ backup_project() {
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
   filter_file="$(mktemp "/tmp/auto-code-filter-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
-  final_zip="$CODE_ROOT/$archive_name.zip"
+  final_zip="$(project_archive_path "$project")"
 
   make_project_rsync_filter \
     "$IGNORE_ZIP_FILE" \
@@ -744,28 +760,20 @@ backup_project() {
 }
 
 clean_unmanaged_backup_zips() {
-  local zip_file
-  local zip_name
-  local project
-  local managed
+  local zip_file expected project managed
 
   log "Limpando ZIPs de backup fora de $PROJECTS_FILE em $CODE_ROOT"
 
   while IFS= read -r -d '' zip_file; do
-    zip_name="$(basename "$zip_file")"
+    case "$zip_file" in
+      "$CODE_ROOT/Code.zip"|"$CODE_ROOT/code.zip") continue ;;
+    esac
 
-    # Code.zip é o pacote geral e nunca é removido pela limpeza.
-    if [ "$zip_name" = "Code.zip" ] || [ "$zip_name" = "code.zip" ]; then
-      continue
-    fi
-
-    project="${zip_name%.zip}"
     managed=false
-
-    while IFS= read -r allowed_project || [ -n "$allowed_project" ]; do
-      [ -n "$allowed_project" ] || continue
-
-      if [ "$project" = "$(project_archive_name "$allowed_project")" ]; then
+    while IFS= read -r project || [ -n "$project" ]; do
+      [ -n "$project" ] || continue
+      expected="$(project_archive_path "$project")"
+      if [ "$zip_file" = "$expected" ]; then
         managed=true
         break
       fi
@@ -773,15 +781,10 @@ clean_unmanaged_backup_zips() {
 
     if [ "$managed" = false ]; then
       log "Removendo ZIP fora do .projects: $zip_file"
-      rm -f -- "$zip_file" ||
-        log "ERRO ao remover ZIP fora do .projects: $zip_file"
+      rm -f -- "$zip_file" || log "ERRO ao remover ZIP fora do .projects: $zip_file"
     fi
   done < <(
-    find "$CODE_ROOT" \
-      -maxdepth 1 \
-      -type f \
-      -iname "*.zip" \
-      -print0 2>/dev/null
+    find "$CODE_ROOT" -mindepth 1 -maxdepth 3 -type f -iname "*.zip" -print0 2>/dev/null
   )
 }
 
@@ -803,7 +806,7 @@ create_code_zip() {
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     archive_name="$(project_archive_name "$project")"
-    project_zip="$CODE_ROOT/$archive_name.zip"
+    project_zip="$(project_archive_path "$project")"
 
     if [ ! -s "$project_zip" ]; then
       log "ERRO: ZIP ausente ou vazio: $project_zip"
