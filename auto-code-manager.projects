@@ -1,13 +1,13 @@
 # Cada linha é relativa a /home/daniel/Code.
-# ZIPs de projetos aninhados ficam ao lado da pasta do projeto.
+# Todos os ZIPs são gerados diretamente em /home/daniel/Code.
 
-infra
 bots/dev-automation
 orgs/station-app
 orgs/orbital-app
 orgs/inst-app
 
 # Ative somente depois de revisar cada projeto:
+#infra
 #bots/general-crawler
 #orgs/asaclub-app
 #orgs/email-app

@@ -307,18 +307,12 @@ project_archive_name() {
 
 project_archive_path() {
   local project="$1"
-  local parent archive_name
+  local archive_name
 
-  project="${project#./}"
-  project="${project%/}"
-  parent="$(dirname -- "$project")"
+  # Independentemente da categoria do projeto (bots, orgs, infra, etc.),
+  # todos os ZIPs de backup ficam diretamente na raiz de CODE_ROOT.
   archive_name="$(project_archive_name "$project")"
-
-  if [ "$parent" = "." ]; then
-    printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
-  else
-    printf '%s/%s/%s.zip\n' "$CODE_ROOT" "$parent" "$archive_name"
-  fi
+  printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
 }
 
 validate_projects() {
