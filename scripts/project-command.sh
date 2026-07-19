@@ -4,7 +4,7 @@
 set -euo pipefail
 
 # Este arquivo é chamado pelos comandos globais gerados por
-# install-project-commands.sh. Normalmente não é executado diretamente.
+# deploy/local/install-project-commands.sh. Normalmente não é executado diretamente.
 #
 # Exemplos após a instalação:
 #   orbital-app              # deploy/local/start.sh

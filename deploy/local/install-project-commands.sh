@@ -106,6 +106,8 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   fi
 
   target="$TARGET_DIR/$command_name"
+  rm -f "$target"
+  rm -f "$target"
   cat > "$target" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-project-commands

@@ -4,6 +4,7 @@ set -uo pipefail
 #cd /home/daniel/Code/bots/dev-automation/
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SCRIPT_VERSION="2026-07-19-codezip-v7-audio-wsl"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
