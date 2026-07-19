@@ -1,0 +1,25 @@
+# Cada linha é relativa a /home/daniel/Code.
+# Todos os ZIPs são gerados diretamente em /home/daniel/Code.
+
+bots/dev-automation
+orgs/station-app
+orgs/orbital-app
+orgs/inst-app
+
+# Ative somente depois de revisar cada projeto:
+#infra
+#bots/general-crawler
+#orgs/asaclub-app
+#orgs/email-app
+#orgs/sind-services
+#orgs/sind-vault
+#orgs/site-sinproprev-v2
+#social/murm-app
+#social/site-foto
+#social/site-murm
+#games/chap-game
+#games/map-app
+#games/mini-game
+#games/web-assembly
+#games/zig-example
+#sims/zig-rocket-simulator
