@@ -1,16 +1,20 @@
-#murm-app
-#site-foto
-#site-murm
+# Cada linha é relativa a /home/daniel/Code.
+# Pode ser um projeto direto ou uma pasta agrupadora inteira.
 
-#general-crawler
-#sind-services
-#site-asaclub-2026
-#site-inst
-#site-sinproprev-v2
-station-app
-#asaclub-app
+# Pasta agrupadora: gera /home/daniel/Code/infra.zip e reconhece
+# todos os auto-code-manager.ignore-zip/ignore-unzip dentro dela.
+infra
 
+# Projetos individuais dentro de pastas agrupadoras:
+sindicatto/station-app
+sindicatto/orbital-app
+sindicatto/inst-app
 
-orbital-app
-inst-app
-sind-infra
+# Outros exemplos disponíveis:
+#sindicatto/asaclub-app
+#sindicatto/sind-services
+#sindicatto/sind-vault
+#sindicatto/site-sinproprev-v2
+#siteverso/murm-app
+#siteverso/site-foto
+#siteverso/site-murm

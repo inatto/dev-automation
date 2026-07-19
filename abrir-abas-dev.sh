@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/sind-infra/deploy
+# cd /home/daniel/Code/infra/dev-automation
 set -euo pipefail
 
 # Abre, na MESMA janela do Windows Terminal, uma aba WSL para cada projeto
@@ -7,14 +7,14 @@ set -euo pipefail
 #
 # COMO RODAR
 # 1. Entre na raiz do projeto:
-#      cd ~/Code/sind-infra
+#      cd ~/Code/infra/dev-automation
 # 2. Na primeira vez, dê permissão de execução:
-#      chmod +x deploy/abrir-abas-dev.sh
+#      chmod +x abrir-abas-dev.sh
 # 3. Execute:
-#      ./deploy/abrir-abas-dev.sh
+#      ./abrir-abas-dev.sh
 #
 # ORDEM E COMANDOS INICIADOS
-# 1. Sind Infra:  ./deploy/auto-code-manager.sh
+# 1. Dev Automation: ./auto-code-manager.sh
 # 2. SINPROPREV:  ./deploy/local.dev.sh
 # 3. Murm App:    flutter run -d linux
 # 4. ASAClub:     ./deploy/local.dev.sh
@@ -40,22 +40,22 @@ open_tab() {
     bash -lc "$command; exec bash"
 }
 
-open_tab "Sind Infra" \
-  "$CODE_ROOT/sind-infra" \
-  "./deploy/auto-code-manager.sh"
+open_tab "Dev Automation" \
+  "$CODE_ROOT/infra/dev-automation" \
+  "./auto-code-manager.sh"
 
 open_tab "SINPROPREV" \
-  "$CODE_ROOT/site-sinproprev-v2" \
+  "$CODE_ROOT/sindicatto/site-sinproprev-v2" \
   "./deploy/local.dev.sh"
 
 open_tab "Murm App" \
-  "$CODE_ROOT/murm-app" \
+  "$CODE_ROOT/siteverso/murm-app" \
   "flutter run -d linux"
 
 open_tab "ASAClub" \
-  "$CODE_ROOT/site-asaclub-2026" \
+  "$CODE_ROOT/sindicatto/asaclub-app" \
   "./deploy/local.dev.sh"
 
 open_tab "Site Inst" \
-  "$CODE_ROOT/site-inst" \
+  "$CODE_ROOT/sindicatto/inst-app" \
   "./deploy/local.dev.sh anpprev"

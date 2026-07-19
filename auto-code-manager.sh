@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/sind-infra/deploy
+# cd /home/daniel/Code/infra/dev-automation
 set -uo pipefail
-#cd /home/daniel/Code/sind-infra/deploy/
+#cd /home/daniel/Code/infra/dev-automation/
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_VERSION="2026-07-19-codezip-v5-project-ignore"
+SCRIPT_VERSION="2026-07-19-codezip-v6-nested-projects"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$SCRIPT_DIR/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$SCRIPT_DIR/auto-code-manager.projects"
 ENV_FILE="$SCRIPT_DIR/auto-code-manager.env"
-DDL_EXPORT_DIR="$CODE_ROOT/sind-infra/sind-oracle/exports/ddl"
+DDL_EXPORT_DIR="$CODE_ROOT/infra/sind-infra/sind-oracle/exports/ddl"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
@@ -233,36 +233,94 @@ ensure_files() {
   fi
 }
 
+project_path() {
+  local project="$1"
+
+  # As entradas são sempre relativas a CODE_ROOT. Barras finais são removidas.
+  project="${project#./}"
+  project="${project%/}"
+
+  printf '%s/%s\n' "$CODE_ROOT" "$project"
+}
+
+project_archive_name() {
+  local project="$1"
+
+  project="${project#./}"
+  project="${project%/}"
+
+  # O nome do ZIP é o nome da pasta selecionada. Ex.:
+  #   infra                   -> infra.zip
+  #   sindicatto/station-app  -> station-app.zip
+  basename -- "$project"
+}
+
+validate_projects() {
+  local project project_dir archive_name
+  local seen_file
+  local failed=0
+
+  seen_file="$(mktemp /tmp/auto-code-project-names-XXXXXX)"
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+
+    if [[ "$project" = /* || "$project" = *".."* ]]; then
+      log "ERRO: entrada inválida em $PROJECTS_FILE: $project"
+      failed=1
+      continue
+    fi
+
+    project_dir="$(project_path "$project")"
+    archive_name="$(project_archive_name "$project")"
+
+    if [ ! -d "$project_dir" ]; then
+      log "ERRO: projeto/pasta configurado não existe: $project_dir"
+      failed=1
+    fi
+
+    if grep -Fxq -- "$archive_name" "$seen_file"; then
+      log "ERRO: dois itens gerariam o mesmo ZIP '$archive_name.zip'. Use apenas um deles."
+      failed=1
+    else
+      printf '%s\n' "$archive_name" >> "$seen_file"
+    fi
+  done < <(clean_file "$PROJECTS_FILE")
+
+  rm -f -- "$seen_file"
+  [ "$failed" -eq 0 ]
+}
+
 project_for_zip() {
   local zip_name="$1"
-  local dir
-  local project
+  local project archive_name
   local best=""
+  local best_name=""
 
-  for dir in "$CODE_ROOT"/*; do
-    [ -d "$dir" ] || continue
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    archive_name="$(project_archive_name "$project")"
 
-    project="$(basename "$dir")"
+    if [[ "$zip_name" == "$archive_name.zip" ||
+          "$zip_name" == "$archive_name"-*.zip ||
+          "$zip_name" == "$archive_name"_*.zip ||
+          "$zip_name" == "$archive_name"\(*.zip ||
+          "$zip_name" == "$archive_name"\ \(*.zip ||
+          "$zip_name" == "$archive_name"\ *.zip ]]; then
 
-    if [[ "$zip_name" == "$project.zip" ||
-          "$zip_name" == "$project"-*.zip ||
-          "$zip_name" == "$project"_*.zip ||
-          "$zip_name" == "$project"\(*.zip ||
-          "$zip_name" == "$project"\ \(*.zip ||
-          "$zip_name" == "$project"\ *.zip ]]; then
-
-      if [ "${#project}" -gt "${#best}" ]; then
+      if [ "${#archive_name}" -gt "${#best_name}" ]; then
         best="$project"
+        best_name="$archive_name"
       fi
     fi
-  done
+  done < <(clean_file "$PROJECTS_FILE")
 
   echo "$best"
 }
 
 import_one_zip() {
   local zip_file="$1"
-  local zip_name project project_dir temp_dir source_dir filtered_dir unzip_filter_file
+  local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
   local total_files checked_files rel destination
 
   zip_name="$(basename "$zip_file")"
@@ -278,8 +336,9 @@ import_one_zip() {
     return 0
   fi
 
-  project_dir="$CODE_ROOT/$project"
-  temp_dir="$(mktemp -d "/tmp/auto-code-import-${project}-XXXXXX")"
+  archive_name="$(project_archive_name "$project")"
+  project_dir="$(project_path "$project")"
+  temp_dir="$(mktemp -d "/tmp/auto-code-import-${archive_name}-XXXXXX")"
 
   line
   log "IMPORTAÇÃO INICIADA"
@@ -301,19 +360,20 @@ import_one_zip() {
     return 1
   fi
 
-  if [ -d "$temp_dir/$project" ]; then
-    source_dir="$temp_dir/$project"
-    log "Raiz do ZIP identificada: $project/"
+  if [ -d "$temp_dir/$archive_name" ]; then
+    source_dir="$temp_dir/$archive_name"
+    log "Raiz do ZIP identificada: $archive_name/"
   else
     source_dir="$temp_dir"
     log "ZIP sem pasta raiz do projeto; usando a raiz do ZIP."
   fi
 
-  filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${project}-XXXXXX")"
-  unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${project}-XXXXXX")"
+  filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${archive_name}-XXXXXX")"
+  unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${archive_name}-XXXXXX")"
   make_project_rsync_filter \
     "$IGNORE_UNZIP_FILE" \
-    "$project_dir/auto-code-manager.ignore-unzip" \
+    "$project_dir" \
+    "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
 
   log "Aplicando regras de ignore-unzip..."
@@ -464,29 +524,83 @@ make_rsync_filter() {
   echo "- **/*:Zone.Identifier" >> "$output"
 }
 
+append_scoped_ignore_file() {
+  local ignore_file="$1"
+  local scope="$2"
+  local output="$3"
+  local pattern action directory base
+
+  while IFS= read -r pattern || [ -n "$pattern" ]; do
+    [ -n "$pattern" ] || continue
+
+    action="-"
+    if [[ "$pattern" == !* ]]; then
+      action="+"
+      pattern="${pattern:1}"
+    fi
+
+    # Barra inicial ancora a regra na raiz da pasta que contém o ignore.
+    if [[ "$pattern" == /* ]]; then
+      pattern="${pattern#/}"
+      if [ -n "$scope" ]; then
+        echo "$action /$scope/$pattern" >> "$output"
+      else
+        echo "$action /$pattern" >> "$output"
+      fi
+      continue
+    fi
+
+    base="${scope:+$scope/}"
+
+    if [[ "$pattern" == */ ]]; then
+      directory="${pattern%/}"
+      echo "$action /$base$directory/***" >> "$output"
+      echo "$action /${base}**/$directory/***" >> "$output"
+    elif [[ "$pattern" == */* ]]; then
+      echo "$action /$base$pattern" >> "$output"
+    else
+      echo "$action /$base$pattern" >> "$output"
+      echo "$action /${base}**/$pattern" >> "$output"
+    fi
+  done < <(clean_file "$ignore_file")
+}
+
 make_project_rsync_filter() {
   local global_ignore_file="$1"
-  local project_ignore_file="$2"
-  local output="$3"
-  local combined_ignore_file
+  local project_dir="$2"
+  local ignore_filename="$3"
+  local output="$4"
+  local ignore_file scope count=0
 
-  combined_ignore_file="$(mktemp /tmp/auto-code-ignore-combined-XXXXXX)"
+  : > "$output"
 
   if [ -f "$global_ignore_file" ]; then
-    cat -- "$global_ignore_file" >> "$combined_ignore_file"
-    printf '\n' >> "$combined_ignore_file"
+    make_rsync_filter "$global_ignore_file" "$output"
   fi
 
-  if [ -f "$project_ignore_file" ]; then
-    log "Usando regras específicas do projeto: $project_ignore_file"
-    cat -- "$project_ignore_file" >> "$combined_ignore_file"
-    printf '\n' >> "$combined_ignore_file"
+  while IFS= read -r -d '' ignore_file; do
+    scope="${ignore_file#"$project_dir"/}"
+    scope="${scope%/$ignore_filename}"
+    [ "$scope" = "$ignore_filename" ] && scope=""
+
+    log "Usando regras específicas: $ignore_file"
+    append_scoped_ignore_file "$ignore_file" "$scope" "$output"
+    count=$((count + 1))
+  done < <(
+    find "$project_dir" \
+      -type f \
+      -name "$ignore_filename" \
+      -print0 2>/dev/null
+  )
+
+  if [ "$count" -eq 0 ]; then
+    log "Sem arquivos $ignore_filename dentro de $project_dir"
   else
-    log "Sem regras específicas do projeto: $project_ignore_file"
+    log "$count arquivo(s) $ignore_filename reconhecido(s) dentro de $project_dir"
   fi
 
-  make_rsync_filter "$combined_ignore_file" "$output"
-  rm -f -- "$combined_ignore_file"
+  # Os próprios arquivos de configuração devem continuar no backup, salvo se
+  # alguma regra explícita disser o contrário.
 }
 
 zip_ddl_exports() {
@@ -521,30 +635,35 @@ zip_ddl_exports() {
 
 backup_project() {
   local project="$1"
-  local project_dir="$CODE_ROOT/$project"
+  local project_dir
+  local archive_name
   local temp_dir
   local temp_zip
   local final_zip
   local filter_file
 
+  project_dir="$(project_path "$project")"
+  archive_name="$(project_archive_name "$project")"
+
   if [ ! -d "$project_dir" ]; then
     log "ERRO: projeto não existe: $project_dir"
-    rm -f -- "$CODE_ROOT/$project.zip"
+    rm -f -- "$CODE_ROOT/$archive_name.zip"
     return 1
   fi
 
-  if [ "$project" = "sind-infra" ]; then
+  if [ "$archive_name" = "sind-infra" ] || [ "$project" = "infra" ]; then
     zip_ddl_exports
   fi
 
-  temp_dir="$(mktemp -d "/tmp/auto-code-backup-${project}-XXXXXX")"
-  filter_file="$(mktemp "/tmp/auto-code-filter-${project}-XXXXXX")"
-  temp_zip="/tmp/${project}-backup-$$.zip"
-  final_zip="$CODE_ROOT/$project.zip"
+  temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
+  filter_file="$(mktemp "/tmp/auto-code-filter-${archive_name}-XXXXXX")"
+  temp_zip="/tmp/${archive_name}-backup-$$.zip"
+  final_zip="$CODE_ROOT/$archive_name.zip"
 
   make_project_rsync_filter \
     "$IGNORE_ZIP_FILE" \
-    "$project_dir/auto-code-manager.ignore-zip" \
+    "$project_dir" \
+    "auto-code-manager.ignore-zip" \
     "$filter_file"
 
   log "Gerando backup: $project -> $final_zip"
@@ -596,7 +715,7 @@ clean_unmanaged_backup_zips() {
     while IFS= read -r allowed_project || [ -n "$allowed_project" ]; do
       [ -n "$allowed_project" ] || continue
 
-      if [ "$project" = "$allowed_project" ]; then
+      if [ "$project" = "$(project_archive_name "$allowed_project")" ]; then
         managed=true
         break
       fi
@@ -621,6 +740,7 @@ create_code_zip() {
   local staging_dir
   local temp_zip
   local project
+  local archive_name
   local project_zip
   local count=0
 
@@ -632,7 +752,8 @@ create_code_zip() {
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    project_zip="$CODE_ROOT/$project.zip"
+    archive_name="$(project_archive_name "$project")"
+    project_zip="$CODE_ROOT/$archive_name.zip"
 
     if [ ! -s "$project_zip" ]; then
       log "ERRO: ZIP ausente ou vazio: $project_zip"
@@ -641,8 +762,8 @@ create_code_zip() {
       return 1
     fi
 
-    cp -f -- "$project_zip" "$staging_dir/$project.zip" || {
-      log "ERRO ao preparar $project.zip para Code.zip"
+    cp -f -- "$project_zip" "$staging_dir/$archive_name.zip" || {
+      log "ERRO ao preparar $archive_name.zip para Code.zip"
       rm -rf -- "$staging_dir"
       rm -f -- "$temp_zip"
       return 1
@@ -729,6 +850,11 @@ fi
 ensure_files
 load_env
 validate_timers
+
+if ! validate_projects; then
+  echo "ERRO: corrija $PROJECTS_FILE antes de iniciar." >&2
+  exit 1
+fi
 
 line
 echo "Auto Code Manager - $SCRIPT_VERSION"

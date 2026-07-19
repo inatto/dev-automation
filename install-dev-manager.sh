@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/sind-infra/deploy
+# cd /home/daniel/Code/infra/dev-automation
 
 set -euo pipefail
 
 # INSTALAÇÃO INICIAL — execute uma única vez em um WSL novo:
 #
-#   cd /home/daniel/Code/sind-infra
-#   chmod +x deploy/install-dev-manager.sh deploy/dev-manager.sh
-#   ./deploy/install-dev-manager.sh
+#   cd /home/daniel/Code/infra/dev-automation
+#   chmod +x install-dev-manager.sh dev-manager.sh
+#   ./install-dev-manager.sh
 #
 # Depois, em qualquer pasta, use:
 #
@@ -17,10 +17,10 @@ set -euo pipefail
 #   dev-manager restart
 #   dev-manager stop
 
-PROJECT_ROOT="/home/daniel/Code/sind-infra"
+PROJECT_ROOT="/home/daniel/Code/infra/dev-automation"
 TARGET_DIR="$HOME/.local/bin"
 TARGET="$TARGET_DIR/dev-manager"
-SOURCE="$PROJECT_ROOT/deploy/dev-manager.sh"
+SOURCE="$PROJECT_ROOT/dev-manager.sh"
 
 if [[ ! -f "$SOURCE" ]]; then
   echo "Erro: script não encontrado em $SOURCE" >&2
