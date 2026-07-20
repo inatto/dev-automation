@@ -6,6 +6,8 @@ orgs/station-app
 orgs/orbital-app
 orgs/inst-app
 orgs/email-app
+orgs/sind-vault
+infra/amazon-infra
 
 # Ative somente depois de revisar cada projeto:
 #infra
