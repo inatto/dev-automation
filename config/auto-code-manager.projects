@@ -2,6 +2,7 @@
 # Todos os ZIPs são gerados diretamente em /home/daniel/Code.
 
 bots/dev-automation
+bots/general-crawler
 orgs/station-app
 orgs/orbital-app
 orgs/inst-app
