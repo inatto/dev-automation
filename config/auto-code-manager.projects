@@ -3,6 +3,7 @@
 
 bots/dev-automation
 bots/general-crawler
+bots/importer
 orgs/station-app
 orgs/orbital-app
 orgs/inst-app
