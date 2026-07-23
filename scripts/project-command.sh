@@ -7,7 +7,7 @@ set -euo pipefail
 # deploy/local/install-project-commands.sh. Normalmente não é executado diretamente.
 #
 # Exemplos após a instalação:
-#   orbital-app              # deploy/local/start.sh
+#   orbital-app              # setup.sh + start.sh
 #   orbital-app start        # deploy/local/start.sh
 #   orbital-app setup        # deploy/local/setup.sh
 #   orbital-app run          # setup.sh + start.sh
@@ -19,7 +19,7 @@ set -euo pipefail
 PROJECT_NAME="${1:-}"
 PROJECT_DIR="${2:-}"
 shift 2 || true
-ACTION="${1:-start}"
+ACTION="${1:-run}"
 if (($# > 0)); then
   shift
 fi
@@ -33,17 +33,38 @@ fail() {
   exit 1
 }
 
+script_path() {
+  local script_name="$1"
+  local path="$PROJECT_DIR/deploy/local/$script_name"
+  [[ -f "$path" ]] || fail "script local não encontrado: $path"
+  printf '%s\n' "$path"
+}
+
 run_script() {
   local script_name="$1"
   shift || true
-  local script_path="$PROJECT_DIR/deploy/local/$script_name"
-
-  [[ -f "$script_path" ]] || fail "script local não encontrado: $script_path"
+  local path
+  path="$(script_path "$script_name")"
 
   log "diretório: $PROJECT_DIR"
   log "executando: ./deploy/local/$script_name${*:+ $*}"
   cd "$PROJECT_DIR"
-  bash "$script_path" "$@"
+  bash "$path" "$@"
+}
+
+exec_script() {
+  local script_name="$1"
+  shift || true
+  local path
+  path="$(script_path "$script_name")"
+
+  log "diretório: $PROJECT_DIR"
+  log "executando: ./deploy/local/$script_name${*:+ $*}"
+  cd "$PROJECT_DIR"
+
+  # Substitui o executor universal pelo script da aplicação. Assim, o processo
+  # iniciado fica em primeiro plano e recebe Ctrl+C/SIGINT diretamente.
+  exec bash "$path" "$@"
 }
 
 show_help() {
@@ -52,9 +73,9 @@ Uso:
   $PROJECT_NAME [ação] [argumentos]
 
 Ações principais:
-  $PROJECT_NAME              Executa deploy/local/start.sh
-  $PROJECT_NAME start        Executa deploy/local/start.sh
-  $PROJECT_NAME setup        Executa deploy/local/setup.sh
+  $PROJECT_NAME              Executa setup.sh e, se concluir, start.sh
+  $PROJECT_NAME start        Executa somente deploy/local/start.sh
+  $PROJECT_NAME setup        Executa somente deploy/local/setup.sh
   $PROJECT_NAME run          Executa setup.sh e, se concluir, start.sh
   $PROJECT_NAME test         Executa deploy/local/test.sh
   $PROJECT_NAME dir          Mostra o caminho absoluto do projeto
@@ -76,14 +97,14 @@ EOF_HELP
 
 case "$ACTION" in
   start)
-    run_script "start.sh" "$@"
+    exec_script "start.sh" "$@"
     ;;
   setup)
-    run_script "setup.sh" "$@"
+    exec_script "setup.sh" "$@"
     ;;
   run)
     run_script "setup.sh"
-    run_script "start.sh" "$@"
+    exec_script "start.sh" "$@"
     ;;
   dir|path)
     printf '%s\n' "$PROJECT_DIR"
@@ -98,7 +119,7 @@ case "$ACTION" in
     ;;
   *)
     if [[ "$ACTION" =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
-      run_script "$ACTION.sh" "$@"
+      exec_script "$ACTION.sh" "$@"
     else
       fail "ação inválida: $ACTION"
     fi

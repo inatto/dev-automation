@@ -4,12 +4,14 @@
 bots/dev-automation
 bots/general-crawler
 bots/importer
-orgs/station-app
-orgs/orbital-app
-orgs/inst-app
-orgs/email-app
-orgs/sind-vault
 infra/amazon-infra
+orgs/asaclub-app
+orgs/email-app
+orgs/inst-app
+orgs/orbital/orbital-app
+orgs/orbital/orbital-reports
+orgs/sind-vault
+orgs/station-app
 
 # Ative somente depois de revisar cada projeto:
 #infra

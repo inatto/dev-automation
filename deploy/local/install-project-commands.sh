@@ -29,9 +29,9 @@ set -euo pipefail
 #
 # USO DOS COMANDOS GERADOS
 # ================================================================
-#   orbital-app              -> deploy/local/start.sh
-#   orbital-app start        -> deploy/local/start.sh
-#   orbital-app setup        -> deploy/local/setup.sh
+#   orbital-app              -> setup.sh + start.sh
+#   orbital-app start        -> somente deploy/local/start.sh
+#   orbital-app setup        -> somente deploy/local/setup.sh
 #   orbital-app run          -> setup.sh + start.sh
 #   orbital-app test         -> deploy/local/test.sh
 #   orbital-app start-api    -> deploy/local/start-api.sh

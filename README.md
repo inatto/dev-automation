@@ -16,9 +16,9 @@ inst-app
 Cada comando de projeto entra automaticamente na pasta correta e usa os scripts em `deploy/local`:
 
 ```bash
-orbital-app             # start.sh
-orbital-app start       # start.sh
-orbital-app setup       # setup.sh
+orbital-app             # setup.sh + start.sh
+orbital-app start       # somente start.sh
+orbital-app setup       # somente setup.sh
 orbital-app run         # setup.sh + start.sh
 orbital-app test        # test.sh
 orbital-app start-api   # start-api.sh, quando existir
