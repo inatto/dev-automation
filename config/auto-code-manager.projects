@@ -1,10 +1,10 @@
 bots/dev-automation
 #bots/general-crawler
 #bots/importer
-#infra/amazon-infra
+infra/amazon-infra
 orgs/asaclub-app
 #orgs/email-app
-#orgs/inst-app
+orgs/inst-app
 orgs/orbital/orbital-app
 orgs/orbital/orbital-reports
 #orgs/sind-vault
