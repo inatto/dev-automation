@@ -2,18 +2,64 @@
 
 Automação local dos projetos em `/home/daniel/Code`, sem `tmux`.
 
-## O que fica disponível globalmente
+## Comandos globais
 
-Depois da instalação, estes comandos podem ser executados de qualquer pasta do WSL:
+Depois da instalação:
 
 ```bash
 auto-code-manager
+chromes
+phpstorms
+phpstorm-dev
 orbital-app
 station-app
 inst-app
 ```
 
-Cada comando de projeto entra automaticamente na pasta correta e usa os scripts em `deploy/local`:
+### `chromes`
+
+Abre duas janelas do Chrome:
+
+- perfil `Default`, somente em `https://chatgpt.com/`;
+- perfil `Profile 2`, em uma nova aba vazia.
+
+```bash
+chromes
+```
+
+### `phpstorm-dev`
+
+Abre somente `/home/daniel/Code/bots/dev-automation` no PhpStorm. O comando `phpstorms` ignora esse projeto para evitar abrir duas vezes.
+
+```bash
+phpstorm-dev
+```
+
+### `phpstorms`
+
+Lê todos os projetos ativos de:
+
+```text
+config/auto-code-manager.projects
+```
+
+Para cada linha não comentada cuja pasta exista em `/home/daniel/Code`, abre uma janela separada do PhpStorm usando `--new-instance`.
+
+```bash
+phpstorms
+```
+
+O intervalo entre as janelas pode ser alterado:
+
+```bash
+PHPSTORMS_OPEN_DELAY_SECONDS=2 phpstorms
+```
+
+Linhas comentadas com `#` são ignoradas. Projetos inexistentes são informados e ignorados.
+
+## Comandos individuais dos projetos
+
+Cada comando entra automaticamente na pasta correta e usa `deploy/local`:
 
 ```bash
 orbital-app             # setup.sh + start.sh
@@ -21,12 +67,11 @@ orbital-app start       # somente start.sh
 orbital-app setup       # somente setup.sh
 orbital-app run         # setup.sh + start.sh
 orbital-app test        # test.sh
-orbital-app start-api   # start-api.sh, quando existir
-orbital-app scripts     # lista as ações disponíveis
-orbital-app dir         # mostra a pasta do projeto
+orbital-app scripts     # lista ações disponíveis
+orbital-app dir         # mostra a pasta
 ```
 
-## Instalar ou atualizar comandos
+## Instalar ou atualizar
 
 ```bash
 cd /home/daniel/Code/bots/dev-automation
@@ -35,25 +80,4 @@ chmod +x scripts/*.sh deploy/local/*.sh
 source ~/.bashrc
 ```
 
-O instalador:
-
-- cria `~/.local/bin/auto-code-manager`;
-- recria os comandos dos projetos listados em `config/auto-code-manager.projects`;
-- remove atalhos antigos gerados anteriormente quando um projeto sai da lista;
-- não instala nem utiliza `tmux`.
-
-Sempre que alterar `config/auto-code-manager.projects`, execute novamente:
-
-```bash
-cd /home/daniel/Code/bots/dev-automation
-./deploy/local/install-commands.sh
-source ~/.bashrc
-```
-
-## Estrutura
-
-- `scripts/auto-code-manager.sh`: monitora, compacta e restaura projetos.
-- `scripts/project-command.sh`: executa ações locais de cada projeto.
-- `config/auto-code-manager.projects`: projetos monitorados e usados para gerar comandos.
-- `deploy/local/install-commands.sh`: instala tudo globalmente.
-- `deploy/local/install-project-commands.sh`: gerador interno dos comandos de projeto.
+O instalador cria os comandos `auto-code-manager`, `chromes`, `phpstorms`, `phpstorm-dev` e recria os comandos dos projetos listados na configuração.
