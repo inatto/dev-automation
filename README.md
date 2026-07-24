@@ -81,3 +81,7 @@ source ~/.bashrc
 ```
 
 O instalador cria os comandos `auto-code-manager`, `chromes`, `phpstorms`, `phpstorm-dev` e recria os comandos dos projetos listados na configuração.
+
+## Oracle Local Monitor
+
+Projeto isolado em `apps/oracle-monitor`, instalado como comando global `oracle-monitor`. Consulte `apps/oracle-monitor/README.md`.

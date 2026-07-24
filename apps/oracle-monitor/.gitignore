@@ -1,0 +1,8 @@
+apps/api/.env
+apps/api/.venv/
+apps/api/__pycache__/
+apps/web/.env
+apps/web/node_modules/
+apps/web/.astro/
+apps/web/dist/
+*.log
