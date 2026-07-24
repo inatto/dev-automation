@@ -1,1 +1,5 @@
-/.idea/
+.idea/
+.venv/
+.astro/
+node_modules/
+.env
