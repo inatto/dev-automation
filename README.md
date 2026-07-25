@@ -18,6 +18,34 @@ station-app
 inst-app
 ```
 
+### `auto-code-manager`
+
+Monitora a pasta Downloads e associa cada ZIP ao projeto pelo começo do nome.
+Além dos formatos comuns, aceita sufixos gerados ou codificados pelo navegador:
+
+```text
+dev-automation.zip
+dev-automation(15).zip
+dev-automation%23232-3434.zip
+dev-automation#revisado.zip
+```
+
+O primeiro caractere depois do nome do projeto precisa ser um separador não
+alfanumérico. Assim, `dev-automation2.zip` não é confundido com
+`dev-automation.zip`.
+
+Para testar somente o reconhecimento, sem importar o arquivo:
+
+```bash
+auto-code-manager --identify-zip 'dev-automation%23232-3434.zip'
+```
+
+Resultado esperado:
+
+```text
+bots/dev-automation
+```
+
 ### `dev-manager`
 
 Executa o `auto-code-manager` diretamente no terminal atual:

@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-19-codezip-v7-audio-wsl"
+SCRIPT_VERSION="2026-07-25-codezip-v8-flexible-download-name"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -354,25 +354,47 @@ validate_projects() {
 
 project_for_zip() {
   local zip_name="$1"
-  local project archive_name
+  local zip_name_lower zip_stem zip_stem_lower
+  local project archive_name archive_name_lower suffix first_suffix_char
   local best=""
   local best_name=""
+
+  zip_name_lower="${zip_name,,}"
+  [[ "$zip_name_lower" == *.zip ]] || {
+    echo ""
+    return 0
+  }
+
+  # Retira apenas a extensão final. A comparação é case-insensitive para aceitar
+  # nomes alterados pelo navegador, mas o projeto retornado preserva o config.
+  zip_stem="${zip_name:0:${#zip_name}-4}"
+  zip_stem_lower="${zip_stem,,}"
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     archive_name="$(project_archive_name "$project")"
+    archive_name_lower="${archive_name,,}"
 
-    if [[ "$zip_name" == "$archive_name.zip" ||
-          "$zip_name" == "$archive_name"-*.zip ||
-          "$zip_name" == "$archive_name"_*.zip ||
-          "$zip_name" == "$archive_name"\(*.zip ||
-          "$zip_name" == "$archive_name"\ \(*.zip ||
-          "$zip_name" == "$archive_name"\ *.zip ]]; then
+    # Aceita o nome exato ou qualquer sufixo iniciado por separador não
+    # alfanumérico. Exemplos válidos:
+    #   dev-automation.zip
+    #   dev-automation(15).zip
+    #   dev-automation%23232-3434.zip
+    #   dev-automation#revisado.zip
+    # Evita falsos positivos como dev-automation2.zip.
+    if [[ "$zip_stem_lower" == "$archive_name_lower" ]]; then
+      suffix=""
+    elif [[ "$zip_stem_lower" == "$archive_name_lower"* ]]; then
+      suffix="${zip_stem:${#archive_name}}"
+      first_suffix_char="${suffix:0:1}"
+      [[ -n "$first_suffix_char" && ! "$first_suffix_char" =~ [[:alnum:]] ]] || continue
+    else
+      continue
+    fi
 
-      if [ "${#archive_name}" -gt "${#best_name}" ]; then
-        best="$project"
-        best_name="$archive_name"
-      fi
+    if [ "${#archive_name}" -gt "${#best_name}" ]; then
+      best="$project"
+      best_name="$archive_name"
     fi
   done < <(clean_file "$PROJECTS_FILE")
 
@@ -897,6 +919,22 @@ validate_timers
 if [ "${1:-}" = "--test-sound" ]; then
   soft_beep
   exit $?
+fi
+
+if [ "${1:-}" = "--identify-zip" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "Uso: auto-code-manager --identify-zip <arquivo.zip>" >&2
+    exit 2
+  fi
+
+  identified_project="$(project_for_zip "$(basename -- "$2")")"
+  if [ -z "$identified_project" ]; then
+    echo "NÃO RECONHECIDO: $(basename -- "$2")" >&2
+    exit 1
+  fi
+
+  echo "$identified_project"
+  exit 0
 fi
 
 if [ ! -d "$CODE_ROOT" ]; then
