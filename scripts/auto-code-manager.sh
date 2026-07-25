@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-25-codezip-v9-parent-group-backups"
+SCRIPT_VERSION="2026-07-25-codezip-v10-parent-nested-import"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -342,6 +342,21 @@ inferred_parent_projects() {
   done < <(configured_projects)
 }
 
+direct_child_projects() {
+  local parent="$1"
+  local project
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    project="${project#./}"
+    project="${project%/}"
+
+    if [ "${project%/*}" = "$parent" ]; then
+      printf '%s\n' "$project"
+    fi
+  done < <(configured_projects)
+}
+
 backup_targets() {
   local project
   declare -A seen=()
@@ -456,8 +471,12 @@ project_for_zip() {
 
 import_one_zip() {
   local zip_file="$1"
+  local skip_stable="${2:-false}"
   local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
   local total_files checked_files rel destination
+  local nested_zip nested_project nested_count=0 nested_index
+  local -a nested_zips=() nested_projects=()
+  local -A nested_seen=()
 
   zip_name="$(basename "$zip_file")"
   project="$(project_for_zip "$zip_name")"
@@ -467,7 +486,7 @@ import_one_zip() {
     return 0
   fi
 
-  if ! stable_file "$zip_file"; then
+  if [ "$skip_stable" != "true" ] && ! stable_file "$zip_file"; then
     log "ZIP ainda está sendo gravado: $zip_name"
     return 0
   fi
@@ -504,6 +523,55 @@ import_one_zip() {
     log "ZIP sem pasta raiz do projeto; usando a raiz do ZIP."
   fi
 
+  # ZIP de pasta-pai, como orbital.zip, pode conter os ZIPs dos módulos.
+  # Primeiro valida todos os ZIPs filhos, sem alterar nenhum projeto. Só depois
+  # inicia a importação recursiva. O ZIP pai original permanece em Downloads se
+  # qualquer validação ou importação falhar.
+  while IFS= read -r -d '' nested_zip; do
+    nested_project="$(project_for_zip "$(basename -- "$nested_zip")")"
+
+    [ -n "$nested_project" ] || continue
+    [ "$nested_project" != "$project" ] || continue
+    [ "${nested_project%/*}" = "$project" ] || continue
+
+    if [ -n "${nested_seen[$nested_project]+x}" ]; then
+      log "ERRO: ZIP pai contém mais de um ZIP para o mesmo módulo: $nested_project"
+      log "ZIP pai mantido: $zip_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+
+    if ! unzip -tq "$nested_zip" >/dev/null 2>&1; then
+      log "ERRO: ZIP filho inválido: $(basename -- "$nested_zip")"
+      log "Nenhum ZIP filho foi importado; ZIP pai mantido: $zip_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+
+    nested_seen["$nested_project"]=1
+    nested_zips+=("$nested_zip")
+    nested_projects+=("$nested_project")
+  done < <(find "$source_dir" -maxdepth 1 -type f -iname "*.zip" -print0 2>/dev/null)
+
+  nested_count="${#nested_zips[@]}"
+  if [ "$nested_count" -gt 0 ]; then
+    log "Todos os $nested_count ZIP(s) filho(s) foram validados antes da importação."
+
+    for ((nested_index = 0; nested_index < nested_count; nested_index++)); do
+      nested_zip="${nested_zips[$nested_index]}"
+      nested_project="${nested_projects[$nested_index]}"
+      log "ZIP filho [$((nested_index + 1))/$nested_count]: $(basename -- "$nested_zip") -> $nested_project"
+
+      if ! import_one_zip "$nested_zip" true; then
+        log "ERRO: falha ao importar ZIP filho. O ZIP pai foi mantido: $zip_file"
+        rm -rf -- "$temp_dir"
+        return 1
+      fi
+    done
+
+    log "$nested_count ZIP(s) filho(s) importado(s) e confirmado(s)."
+  fi
+
   filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${archive_name}-XXXXXX")"
   unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${archive_name}-XXXXXX")"
   make_project_rsync_filter \
@@ -520,59 +588,63 @@ import_one_zip() {
   fi
 
   source_dir="$filtered_dir"
-
   total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
 
-  if [ "$total_files" -eq 0 ]; then
+  if [ "$total_files" -eq 0 ] && [ "$nested_count" -eq 0 ]; then
     log "ERRO: nenhum arquivo foi extraído. O ZIP foi mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
 
-  log "Arquivos extraídos: $total_files"
-  find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
+  if [ "$total_files" -gt 0 ]; then
+    log "Arquivos diretos extraídos: $total_files"
+    find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
 
-  log "Copiando para o destino..."
-  if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
-    log "ERRO: falha ao copiar. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
-    return 1
-  fi
-
-  log "Conferindo arquivo por arquivo no destino..."
-  checked_files=0
-
-  while IFS= read -r -d '' rel; do
-    destination="$project_dir/$rel"
-
-    if [ ! -f "$destination" ]; then
-      log "ERRO: arquivo não apareceu no destino: $destination"
-      log "ZIP mantido: $zip_file"
+    log "Copiando arquivos diretos para o destino..."
+    if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
+      log "ERRO: falha ao copiar. O ZIP foi mantido."
       rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
 
-    if ! cmp -s -- "$source_dir/$rel" "$destination"; then
-      log "ERRO: arquivo no destino está diferente: $destination"
-      log "ZIP mantido: $zip_file"
+    log "Conferindo arquivo por arquivo no destino..."
+    checked_files=0
+
+    while IFS= read -r -d '' rel; do
+      destination="$project_dir/$rel"
+
+      if [ ! -f "$destination" ]; then
+        log "ERRO: arquivo não apareceu no destino: $destination"
+        log "ZIP mantido: $zip_file"
+        rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+        return 1
+      fi
+
+      if ! cmp -s -- "$source_dir/$rel" "$destination"; then
+        log "ERRO: arquivo no destino está diferente: $destination"
+        log "ZIP mantido: $zip_file"
+        rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+        return 1
+      fi
+
+      checked_files=$((checked_files + 1))
+      log "CONFIRMADO [$checked_files/$total_files]: $destination"
+    done < <(find "$source_dir" -type f -printf '%P\0')
+
+    if [ "$checked_files" -ne "$total_files" ]; then
+      log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
       rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
 
-    checked_files=$((checked_files + 1))
-    log "CONFIRMADO [$checked_files/$total_files]: $destination"
-  done < <(find "$source_dir" -type f -printf '%P\0')
-
-  if [ "$checked_files" -ne "$total_files" ]; then
-    log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
-    return 1
+    log "Todos os $checked_files arquivos diretos foram conferidos no destino."
+  else
+    log "ZIP pai contém apenas ZIPs filhos; não há arquivos diretos para copiar."
   fi
 
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
 
-  log "Todos os $checked_files arquivos foram conferidos no destino."
-  log "Apagando ZIP original de Downloads..."
+  log "Apagando ZIP original somente após todas as confirmações..."
 
   if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
     log "ERRO: arquivos importados, mas o ZIP não foi apagado: $zip_file"
@@ -777,6 +849,7 @@ backup_project() {
   local temp_zip
   local final_zip
   local filter_file
+  local child child_name child_zip child_count=0
 
   project_dir="$(project_path "$project")"
   archive_name="$(project_archive_name "$project")"
@@ -802,6 +875,17 @@ backup_project() {
     "auto-code-manager.ignore-zip" \
     "$filter_file"
 
+  # Para uma pasta-pai inferida (orgs/orbital), o pacote contém os arquivos
+  # próprios da pasta-pai e os ZIPs atuais dos módulos. As pastas dos módulos
+  # não são duplicadas dentro do ZIP pai.
+  while IFS= read -r child || [ -n "$child" ]; do
+    [ -n "$child" ] || continue
+    child_name="$(project_archive_name "$child")"
+    printf '%s\n' "- /$child_name/***" >> "$filter_file"
+    printf '%s\n' "- /$child_name.zip" >> "$filter_file"
+    child_count=$((child_count + 1))
+  done < <(direct_child_projects "$project")
+
   log "Gerando backup: $project -> $final_zip"
 
   if ! rsync -a \
@@ -814,11 +898,41 @@ backup_project() {
     return 1
   fi
 
+  if [ "$child_count" -gt 0 ]; then
+    child_count=0
+    while IFS= read -r child || [ -n "$child" ]; do
+      [ -n "$child" ] || continue
+      child_name="$(project_archive_name "$child")"
+      child_zip="$(project_archive_path "$child")"
+
+      if [ ! -s "$child_zip" ] || ! unzip -tq "$child_zip" >/dev/null 2>&1; then
+        log "ERRO: ZIP filho ausente ou inválido para o pacote pai: $child_zip"
+        rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+        return 1
+      fi
+
+      cp -f -- "$child_zip" "$temp_dir/$child_name.zip" || {
+        log "ERRO ao incluir ZIP filho no pacote pai: $child_zip"
+        rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+        return 1
+      }
+      child_count=$((child_count + 1))
+    done < <(direct_child_projects "$project")
+
+    log "Pacote pai preparado com $child_count ZIP(s) filho(s)."
+  fi
+
   if ! (
     cd "$temp_dir" &&
     zip -qry "$temp_zip" .
   ); then
     log "ERRO ao compactar projeto: $project"
+    rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+    return 1
+  fi
+
+  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
+    log "ERRO: validação do backup falhou: $project"
     rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
     return 1
   fi
@@ -993,6 +1107,26 @@ if [ "${1:-}" = "--identify-zip" ]; then
 
   echo "$identified_project"
   exit 0
+fi
+
+if [ "${1:-}" = "--import-one" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "Uso: auto-code-manager --import-one <arquivo.zip>" >&2
+    exit 2
+  fi
+
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+
+  if ! validate_projects; then
+    echo "ERRO: corrija $PROJECTS_FILE antes de importar." >&2
+    exit 1
+  fi
+
+  import_one_zip "$2"
+  exit $?
 fi
 
 if [ ! -d "$CODE_ROOT" ]; then

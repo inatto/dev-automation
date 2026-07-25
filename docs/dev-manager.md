@@ -42,4 +42,7 @@ comandos globais individuais dos projetos.
 
 Quando houver entradas com exatamente três segmentos, como
 `orgs/orbital/orbital-app`, o backup também inclui automaticamente a pasta pai
-`orgs/orbital`, gerando `orbital.zip` além dos ZIPs individuais.
+`orgs/orbital`, gerando `orbital.zip` além dos ZIPs individuais. O ZIP pai leva
+os arquivos próprios da pasta agrupadora e os ZIPs dos módulos. Na importação,
+os ZIPs filhos são validados e extraídos em suas respectivas pastas antes de o
+ZIP pai ser removido.

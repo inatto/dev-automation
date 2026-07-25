@@ -60,9 +60,17 @@ orgs/orbital/orbital-reports -> orbital-reports.zip
 orgs/orbital                  -> orbital.zip
 ```
 
-O `orbital.zip` representa diretamente a raiz de `orgs/orbital` e contém as
-pastas dos módulos, sem uma pasta-wrapper adicional. Todos esses ZIPs também são
-incluídos no `Code.zip`.
+O `orbital.zip` representa diretamente a raiz de `orgs/orbital`. Ele contém:
+
+- os arquivos próprios da pasta pai, como configurações compartilhadas;
+- `orbital-app.zip`, `orbital-assets.zip`, `orbital-fin.zip`,
+  `orbital-mail.zip` e `orbital-reports.zip`.
+
+As pastas completas dos módulos não são duplicadas dentro do ZIP pai. Ao receber
+`orbital.zip`, o importador valida primeiro todos os ZIPs filhos e depois extrai
+cada um diretamente em seu módulo correspondente. Os ZIPs filhos não ficam
+soltos em `orgs/orbital` e o ZIP pai só é apagado após todas as conferências.
+Todos os ZIPs individuais e o ZIP pai também são incluídos no `Code.zip`.
 
 Para conferir os alvos inferidos:
 
@@ -74,6 +82,12 @@ Para gerar uma rodada imediatamente, sem iniciar o monitor contínuo:
 
 ```bash
 auto-code-manager --backup-once
+```
+
+Para testar/importar diretamente um único ZIP sem iniciar o monitor contínuo:
+
+```bash
+auto-code-manager --import-one '/caminho/orbital.zip'
 ```
 
 ### `dev-manager`
