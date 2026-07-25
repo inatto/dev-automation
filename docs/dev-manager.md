@@ -39,3 +39,7 @@ Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
 `/home/daniel/Code`. As entradas continuam sendo usadas pelo backup e pelos
 comandos globais individuais dos projetos.
+
+Quando houver entradas com exatamente três segmentos, como
+`orgs/orbital/orbital-app`, o backup também inclui automaticamente a pasta pai
+`orgs/orbital`, gerando `orbital.zip` além dos ZIPs individuais.

@@ -46,6 +46,36 @@ Resultado esperado:
 bots/dev-automation
 ```
 
+#### Backups de grupos com dois níveis
+
+Quando os projetos configurados estão dentro de uma pasta agrupadora, o monitor
+mantém os ZIPs individuais e também gera o ZIP da pasta pai. Exemplo:
+
+```text
+orgs/orbital/orbital-app     -> orbital-app.zip
+orgs/orbital/orbital-assets  -> orbital-assets.zip
+orgs/orbital/orbital-fin     -> orbital-fin.zip
+orgs/orbital/orbital-mail    -> orbital-mail.zip
+orgs/orbital/orbital-reports -> orbital-reports.zip
+orgs/orbital                  -> orbital.zip
+```
+
+O `orbital.zip` representa diretamente a raiz de `orgs/orbital` e contém as
+pastas dos módulos, sem uma pasta-wrapper adicional. Todos esses ZIPs também são
+incluídos no `Code.zip`.
+
+Para conferir os alvos inferidos:
+
+```bash
+auto-code-manager --list-backup-targets
+```
+
+Para gerar uma rodada imediatamente, sem iniciar o monitor contínuo:
+
+```bash
+auto-code-manager --backup-once
+```
+
 ### `dev-manager`
 
 Executa o `auto-code-manager` diretamente no terminal atual:

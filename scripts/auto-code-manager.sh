@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-25-codezip-v8-flexible-download-name"
+SCRIPT_VERSION="2026-07-25-codezip-v9-parent-group-backups"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -316,6 +316,59 @@ project_archive_path() {
   printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
 }
 
+configured_projects() {
+  clean_file "$PROJECTS_FILE"
+}
+
+inferred_parent_projects() {
+  local project parent
+  declare -A seen=()
+
+  # Um projeto com exatamente três segmentos, por exemplo
+  # orgs/orbital/orbital-app, também gera o backup do grupo pai:
+  # orgs/orbital -> orbital.zip.
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    project="${project#./}"
+    project="${project%/}"
+
+    [[ "$project" =~ ^[^/]+/[^/]+/[^/]+$ ]] || continue
+    parent="${project%/*}"
+
+    if [ -z "${seen[$parent]+x}" ]; then
+      printf '%s\n' "$parent"
+      seen["$parent"]=1
+    fi
+  done < <(configured_projects)
+}
+
+backup_targets() {
+  local project
+  declare -A seen=()
+
+  # Primeiro preserva todos os projetos individuais configurados.
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    project="${project#./}"
+    project="${project%/}"
+
+    if [ -z "${seen[$project]+x}" ]; then
+      printf '%s\n' "$project"
+      seen["$project"]=1
+    fi
+  done < <(configured_projects)
+
+  # Depois acrescenta uma única vez cada pasta pai inferida.
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+
+    if [ -z "${seen[$project]+x}" ]; then
+      printf '%s\n' "$project"
+      seen["$project"]=1
+    fi
+  done < <(inferred_parent_projects)
+}
+
 validate_projects() {
   local project project_dir archive_name
   local seen_file
@@ -341,12 +394,12 @@ validate_projects() {
     fi
 
     if grep -Fxq -- "$archive_name" "$seen_file"; then
-      log "ERRO: dois itens gerariam o mesmo ZIP '$archive_name.zip'. Use apenas um deles."
+      log "ERRO: dois alvos gerariam o mesmo ZIP '$archive_name.zip'. Use apenas um deles."
       failed=1
     else
       printf '%s\n' "$archive_name" >> "$seen_file"
     fi
-  done < <(clean_file "$PROJECTS_FILE")
+  done < <(backup_targets)
 
   rm -f -- "$seen_file"
   [ "$failed" -eq 0 ]
@@ -396,7 +449,7 @@ project_for_zip() {
       best="$project"
       best_name="$archive_name"
     fi
-  done < <(clean_file "$PROJECTS_FILE")
+  done < <(backup_targets)
 
   echo "$best"
 }
@@ -779,7 +832,7 @@ backup_project() {
 clean_unmanaged_backup_zips() {
   local zip_file expected project managed
 
-  log "Limpando ZIPs de backup fora de $PROJECTS_FILE em $CODE_ROOT"
+  log "Limpando ZIPs de backup fora dos projetos e grupos gerenciados em $CODE_ROOT"
 
   while IFS= read -r -d '' zip_file; do
     case "$zip_file" in
@@ -794,7 +847,7 @@ clean_unmanaged_backup_zips() {
         managed=true
         break
       fi
-    done < <(clean_file "$PROJECTS_FILE")
+    done < <(backup_targets)
 
     if [ "$managed" = false ]; then
       log "Removendo ZIP fora do .projects: $zip_file"
@@ -839,7 +892,7 @@ create_code_zip() {
       return 1
     }
     count=$((count + 1))
-  done < <(clean_file "$PROJECTS_FILE")
+  done < <(backup_targets)
 
   if [ "$count" -eq 0 ]; then
     log "ERRO: nenhum projeto configurado para criar Code.zip"
@@ -892,14 +945,14 @@ backup_all() {
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     backup_project "$project" || failed=1
-  done < <(clean_file "$PROJECTS_FILE")
+  done < <(backup_targets)
 
   if [ "$failed" -ne 0 ]; then
     log "ERRO: um ou mais projetos falharam; Code.zip anterior foi mantido; o novo não foi criado neste ciclo."
     return 1
   fi
 
-  log "Todos os projetos foram compactados; chamando create_code_zip agora."
+  log "Todos os projetos e grupos pais foram compactados; chamando create_code_zip agora."
   create_code_zip
 }
 
@@ -919,6 +972,11 @@ validate_timers
 if [ "${1:-}" = "--test-sound" ]; then
   soft_beep
   exit $?
+fi
+
+if [ "${1:-}" = "--list-backup-targets" ]; then
+  backup_targets
+  exit 0
 fi
 
 if [ "${1:-}" = "--identify-zip" ]; then
@@ -945,6 +1003,12 @@ fi
 if ! validate_projects; then
   echo "ERRO: corrija $PROJECTS_FILE antes de iniciar." >&2
   exit 1
+fi
+
+if [ "${1:-}" = "--backup-once" ]; then
+  clean_unmanaged_backup_zips
+  backup_all
+  exit $?
 fi
 
 line
