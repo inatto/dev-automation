@@ -1,6 +1,7 @@
 # dev-automation
 
-Automação local dos projetos em `/home/daniel/Code`, sem `tmux`.
+Automação local dos projetos em `/home/daniel/Code`, com execução direta em
+primeiro plano e encerramento por `Ctrl+C`.
 
 ## Comandos globais
 
@@ -8,6 +9,7 @@ Depois da instalação:
 
 ```bash
 auto-code-manager
+dev-manager
 chromes
 phpstorms
 phpstorm-dev
@@ -15,6 +17,17 @@ orbital-app
 station-app
 inst-app
 ```
+
+### `dev-manager`
+
+Executa o `auto-code-manager` diretamente no terminal atual:
+
+```bash
+dev-manager
+```
+
+Para encerrar, pressione `Ctrl+C`. Não existe sessão separada para anexar ou
+manter em segundo plano.
 
 ### `chromes`
 
@@ -29,7 +42,8 @@ chromes
 
 ### `phpstorm-dev`
 
-Abre somente `/home/daniel/Code/bots/dev-automation` no PhpStorm. O comando `phpstorms` ignora esse projeto para evitar abrir duas vezes.
+Abre somente `/home/daniel/Code/bots/dev-automation` no PhpStorm. O comando
+`phpstorms` ignora esse projeto para evitar abrir duas vezes.
 
 ```bash
 phpstorm-dev
@@ -37,13 +51,37 @@ phpstorm-dev
 
 ### `phpstorms`
 
-Lê todos os projetos ativos de:
+Lê os projetos ativos de `config/auto-code-manager.projects`.
+
+A regra de abertura é:
 
 ```text
-config/auto-code-manager.projects
+orgs/orbital/orbital-app
+orgs/orbital/orbital-assets
+orgs/orbital/orbital-fin
 ```
 
-Para cada linha não comentada cuja pasta exista em `/home/daniel/Code`, abre uma janela separada do PhpStorm usando `--new-instance`.
+Esses irmãos são agrupados e abrem uma única janela em:
+
+```text
+orgs/orbital
+```
+
+Projetos de um nível abaixo da categoria continuam individuais:
+
+```text
+orgs/asaclub-app
+orgs/email-app
+orgs/inst-app
+```
+
+Para conferir sem abrir o PhpStorm:
+
+```bash
+phpstorms --list
+```
+
+Para abrir normalmente:
 
 ```bash
 phpstorms
@@ -55,7 +93,8 @@ O intervalo entre as janelas pode ser alterado:
 PHPSTORMS_OPEN_DELAY_SECONDS=2 phpstorms
 ```
 
-Linhas comentadas com `#` são ignoradas. Projetos inexistentes são informados e ignorados.
+Linhas comentadas com `#` são ignoradas. Projetos inexistentes são informados e
+ignorados.
 
 ## Comandos individuais dos projetos
 
@@ -71,6 +110,9 @@ orbital-app scripts     # lista ações disponíveis
 orbital-app dir         # mostra a pasta
 ```
 
+Os scripts de execução usam `exec` no processo de longa duração, permitindo
+encerrar normalmente com `Ctrl+C`.
+
 ## Instalar ou atualizar
 
 ```bash
@@ -80,8 +122,10 @@ chmod +x scripts/*.sh deploy/local/*.sh
 source ~/.bashrc
 ```
 
-O instalador cria os comandos `auto-code-manager`, `chromes`, `phpstorms`, `phpstorm-dev` e recria os comandos dos projetos listados na configuração.
+O instalador cria ou atualiza `auto-code-manager`, `dev-manager`, `chromes`,
+`phpstorms`, `phpstorm-dev` e os comandos dos projetos listados na configuração.
 
 ## Oracle Local Monitor
 
-Projeto isolado em `apps/oracle-monitor`, instalado como comando global `oracle-monitor`. Consulte `apps/oracle-monitor/README.md`.
+Projeto isolado em `apps/oracle-monitor`, instalado como comando global
+`oracle-monitor`. Consulte `apps/oracle-monitor/README.md`.

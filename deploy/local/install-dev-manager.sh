@@ -3,59 +3,36 @@
 
 set -euo pipefail
 
-# INSTALAÇÃO INICIAL — execute uma única vez em um WSL novo:
-#
-#   cd /home/daniel/Code/bots/dev-automation
-#   chmod +x deploy/local/install-dev-manager.sh scripts/dev-manager.sh
-#   ./deploy/local/install-dev-manager.sh
-#
-# Depois, em qualquer pasta, use:
-#
-#   dev-manager start
-#   dev-manager status
-#   dev-manager attach
-#   dev-manager restart
-#   dev-manager stop
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-TARGET_DIR="$HOME/.local/bin"
+TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 TARGET="$TARGET_DIR/dev-manager"
 SOURCE="$PROJECT_ROOT/scripts/dev-manager.sh"
+AUTO_SOURCE="$PROJECT_ROOT/scripts/auto-code-manager.sh"
 
-if [[ ! -f "$SOURCE" ]]; then
-  echo "Erro: script não encontrado em $SOURCE" >&2
+fail() {
+  printf '[install-dev-manager] ERRO: %s\n' "$*" >&2
   exit 1
-fi
+}
 
-echo "Instalando dependências..."
-sudo apt update
-sudo apt install -y tmux
+[[ -f "$SOURCE" ]] || fail "script não encontrado: $SOURCE"
+[[ -f "$AUTO_SOURCE" ]] || fail "script não encontrado: $AUTO_SOURCE"
 
 mkdir -p "$TARGET_DIR"
+chmod +x "$SOURCE" "$AUTO_SOURCE"
 
 cat > "$TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
+# generated-by: dev-automation-global-command
 exec "$SOURCE" "\$@"
 EOF_WRAPPER
-
-chmod +x "$TARGET" "$SOURCE"
+chmod +x "$TARGET"
 
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
-if ! grep -qxF "$PATH_LINE" "$HOME/.bashrc"; then
+if ! grep -qxF "$PATH_LINE" "$HOME/.bashrc" 2>/dev/null; then
   printf '\n%s\n' "$PATH_LINE" >> "$HOME/.bashrc"
 fi
 
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-
-echo
-echo "Instalação concluída."
-echo "Comando global: $TARGET"
-echo
-echo "Teste agora com:"
-echo "  dev-manager status"
-echo "  dev-manager start"
-echo
-echo "Em terminais já abertos, se o comando ainda não for encontrado, execute:"
-echo "  source ~/.bashrc"
+printf '[install-dev-manager] criado: %s -> %s\n' "$TARGET" "$SOURCE"
+printf '[install-dev-manager] execução em primeiro plano; encerre com Ctrl+C.\n'
+printf 'No terminal atual, execute: source ~/.bashrc\n'

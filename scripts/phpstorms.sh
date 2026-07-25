@@ -13,19 +13,49 @@ INCLUDE_DEV_AUTOMATION="${PHPSTORMS_INCLUDE_DEV_AUTOMATION:-0}"
 log() { printf '[phpstorms] %s\n' "$*"; }
 fail() { printf '[phpstorms] ERRO: %s\n' "$*" >&2; exit 1; }
 
-POWERSHELL='/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
-[[ -f "$POWERSHELL" ]] || fail "PowerShell do Windows não encontrado: $POWERSHELL"
-if ! "$POWERSHELL" -NoLogo -NoProfile -Command 'exit 0' >/dev/null 2>&1; then
-  fail 'WSL Interop está desativado ou travado. No PowerShell do Windows execute: wsl --shutdown; depois abra novamente o Ubuntu-22.04-D.'
-fi
-command -v python3 >/dev/null 2>&1 || fail 'python3 não está disponível no WSL.'
-[[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
+show_help() {
+  cat <<'EOF_HELP'
+Uso:
+  phpstorms          Abre os projetos configurados no PhpStorm
+  phpstorms --list   Mostra as pastas que seriam abertas, sem iniciar o PhpStorm
+  phpstorms --help   Mostra esta ajuda
 
-projects=()
+Regra de agrupamento:
+  orgs/orbital/orbital-app + outros irmãos -> abre orgs/orbital
+  orgs/asaclub-app, orgs/email-app etc.     -> abre cada projeto individualmente
+EOF_HELP
+}
+
+case "${1:-}" in
+  --help|-h|help)
+    show_help
+    exit 0
+    ;;
+  --list|list)
+    LIST_ONLY=1
+    ;;
+  "")
+    LIST_ONLY=0
+    ;;
+  *)
+    fail "opção inválida: $1 (use --help)"
+    ;;
+esac
+
+[[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
+[[ -d "$CODE_ROOT" ]] || fail "raiz de projetos não encontrada: $CODE_ROOT"
+
+# Guarda os projetos válidos usando caminhos relativos à CODE_ROOT. O agrupamento
+# é decidido pela profundidade relativa, não pelo fato de vários projetos terem
+# o mesmo diretório de primeiro nível (como orgs/).
+relative_projects=()
+declare -A seen_relative_projects=()
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="${line#"${line%%[![:space:]]*}"}"
   line="${line%"${line##*[![:space:]]}"}"
+  line="${line#./}"
+  line="${line%/}"
   [[ -n "$line" ]] || continue
 
   project_path="$CODE_ROOT/$line"
@@ -40,17 +70,69 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     continue
   fi
 
-  projects+=("$(wslpath -w "$project_real_path")")
+  if [[ -z "${seen_relative_projects["$line"]:-}" ]]; then
+    seen_relative_projects["$line"]=1
+    relative_projects+=("$line")
+  fi
 done < "$CONFIG_FILE"
 
-((${#projects[@]} > 0)) || fail 'nenhum projeto válido encontrado na configuração.'
+((${#relative_projects[@]} > 0)) || fail 'nenhum projeto válido encontrado na configuração.'
+
+# Conta somente grupos exatamente no padrão categoria/grupo/projeto.
+# Isso impede que orgs/asaclub-app + orgs/email-app sejam reduzidos para orgs/.
+declare -A group_counts=()
+for relative in "${relative_projects[@]}"; do
+  if [[ "$relative" == */*/* && "$relative" != */*/*/* ]]; then
+    group="${relative%/*}"
+    group_counts["$group"]=$(( ${group_counts["$group"]:-0} + 1 ))
+  fi
+done
+
+resolved_projects=()
+declare -A seen_projects=()
+for relative in "${relative_projects[@]}"; do
+  target_relative="$relative"
+
+  if [[ "$relative" == */*/* && "$relative" != */*/*/* ]]; then
+    group="${relative%/*}"
+    if (( ${group_counts["$group"]:-0} >= 2 )); then
+      target_relative="$group"
+    fi
+  fi
+
+  target_path="$(cd -- "$CODE_ROOT/$target_relative" && pwd -P)"
+  if [[ -z "${seen_projects["$target_path"]:-}" ]]; then
+    seen_projects["$target_path"]=1
+    resolved_projects+=("$target_path")
+  fi
+done
+
+((${#resolved_projects[@]} > 0)) || fail 'nenhum projeto restou após resolver os agrupamentos.'
+
+if ((LIST_ONLY == 1)); then
+  printf '%s\n' "${resolved_projects[@]}"
+  exit 0
+fi
+
+POWERSHELL='/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe'
+[[ -f "$POWERSHELL" ]] || fail "PowerShell do Windows não encontrado: $POWERSHELL"
+if ! "$POWERSHELL" -NoLogo -NoProfile -Command 'exit 0' >/dev/null 2>&1; then
+  fail 'WSL Interop está desativado ou travado. No PowerShell do Windows execute: wsl --shutdown; depois abra novamente o Ubuntu-22.04-D.'
+fi
+command -v python3 >/dev/null 2>&1 || fail 'python3 não está disponível no WSL.'
+command -v wslpath >/dev/null 2>&1 || fail 'wslpath não está disponível no WSL.'
+
+windows_projects=()
+for project in "${resolved_projects[@]}"; do
+  windows_projects+=("$(wslpath -w "$project")")
+done
 
 ps_file="$(mktemp --suffix=.ps1)"
 json_file="$(mktemp --suffix=.json)"
 cleanup() { rm -f "$ps_file" "$json_file"; }
 trap cleanup EXIT
 
-printf '%s\n' "${projects[@]}" |
+printf '%s\n' "${windows_projects[@]}" |
   python3 -c 'import json,sys; json.dump([line.rstrip("\n") for line in sys.stdin], sys.stdout, ensure_ascii=False)' \
   > "$json_file"
 
@@ -107,15 +189,11 @@ if (-not $phpStormWasRunning) {
         throw 'O PhpStorm não iniciou dentro de 60 segundos.'
     }
 
-    # O processo aparece antes de o mecanismo de abertura de projetos estar pronto.
     Start-Sleep -Seconds 4
 }
 
 foreach ($project in $projects) {
     Write-Host "[phpstorms] Abrindo: $project"
-
-    # Com uma instância já inicializada, esta chamada é repassada ao PhpStorm
-    # e o caminho não se perde durante a primeira inicialização.
     Start-Process -FilePath $phpStorm.FullName -ArgumentList @([string]$project) | Out-Null
 
     if ($DelaySeconds -gt 0) {
@@ -127,7 +205,7 @@ POWERSHELL
 ps_file_windows="$(wslpath -w "$ps_file")"
 json_file_windows="$(wslpath -w "$json_file")"
 
-log "Abrindo ${#projects[@]} projeto(s) em janelas separadas do PhpStorm..."
+log "Abrindo ${#windows_projects[@]} projeto(s) em janelas separadas do PhpStorm..."
 "$POWERSHELL" \
   -NoLogo \
   -NoProfile \

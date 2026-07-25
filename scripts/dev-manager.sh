@@ -1,162 +1,69 @@
 #!/usr/bin/env bash
-# cd /home/daniel/Code/bots/dev-automation
+# Executa o Auto Code Manager diretamente, sem sessão intermediária.
 
 set -euo pipefail
 
-SESSION="dev"
-WINDOW="projetos"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+AUTO_MANAGER="${DEV_MANAGER_AUTO_MANAGER:-$PROJECT_ROOT/scripts/auto-code-manager.sh}"
 
-require_tmux() {
-  if ! command -v tmux >/dev/null 2>&1; then
-    echo "Erro: tmux não está instalado."
-    echo "Execute uma vez:"
-    echo "  /home/daniel/Code/bots/dev-automation/deploy/local/install-dev-manager.sh"
-    exit 1
-  fi
+fail() {
+  printf '[dev-manager] ERRO: %s\n' "$*" >&2
+  exit 1
 }
 
-validate_dir() {
-  local working_dir="$1"
-  local required="${2:-false}"
+show_help() {
+  cat <<'EOF_HELP'
+Uso:
+  dev-manager              Inicia o monitor em primeiro plano
+  dev-manager start        Mesmo comportamento acima
+  dev-manager --test-sound Testa o aviso sonoro
+  dev-manager status       Verifica se há um monitor ativo
+  dev-manager stop         Explica como encerrar o monitor ativo
+  dev-manager help         Mostra esta ajuda
 
-  if [[ -d "$working_dir" ]]; then
-    return 0
-  fi
-
-  if [[ "$required" == "true" ]]; then
-    echo "Erro: pasta não encontrada: $working_dir" >&2
-    exit 1
-  fi
-
-  echo "Aviso: pasta não encontrada; painel ignorado: $working_dir" >&2
-  return 1
+O monitor não cria sessão em segundo plano. Para encerrar, pressione Ctrl+C
+no mesmo terminal em que ele está executando.
+EOF_HELP
 }
 
-configure_window() {
-  tmux set-option -t "$SESSION" pane-border-status top
-  tmux set-option -t "$SESSION" pane-border-format ' #[bold]#{pane_title} #[default]'
-  tmux set-option -t "$SESSION" remain-on-exit on
-}
-
-create_first_pane() {
-  local pane_name="$1"
-  local working_dir="$2"
-  local command="$3"
-
-  validate_dir "$working_dir" true
-
-  tmux new-session -d \
-    -s "$SESSION" \
-    -n "$WINDOW" \
-    -c "$working_dir"
-
-  tmux select-pane -t "$SESSION:$WINDOW.0" -T "$pane_name"
-  tmux send-keys -t "$SESSION:$WINDOW.0" "$command" C-m
-}
-
-add_pane() {
-  local pane_name="$1"
-  local working_dir="$2"
-  local command="$3"
-  local pane_id
-
-  validate_dir "$working_dir" || return 0
-
-  pane_id="$(
-    tmux split-window \
-      -h \
-      -P \
-      -F '#{pane_id}' \
-      -t "$SESSION:$WINDOW" \
-      -c "$working_dir"
-  )"
-
-  tmux select-pane -t "$pane_id" -T "$pane_name"
-  tmux send-keys -t "$pane_id" "$command" C-m
-
-  # Redistribui todos os painéis igualmente após cada inclusão.
-  tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
-}
-
-start_session() {
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    echo "A sessão '$SESSION' já está rodando; conectando..."
-    tmux attach-session -t "$SESSION"
-    return
-  fi
-
-  echo "Criando sessão tmux '$SESSION' com os projetos lado a lado..."
-
-  # A ordem destas chamadas define a ordem dos painéis, da esquerda para a direita.
-  create_first_pane "automation" "$HOME/Code/bots/dev-automation" "bash ./scripts/auto-code-manager.sh"
-  configure_window
-#  add_pane          "site-asaclub-admin-mariadb"  "$HOME/Code/orgs/orbital-app"   "bash ./deploy/local-dev.sh"
-#  add_pane          "asaclub"                     "$HOME/Code/orgs/asaclub-app"            "bash ./deploy/local.dev.sh"
-#  add_pane          "site-inst"                   "$HOME/Code/orgs/inst-app"                    "bash ./deploy/local-dev.sh anpprev"
-#  add_pane          "sinproprev"                  "$HOME/Code/orgs/site-sinproprev-v2"           "bash ./deploy/local.dev.sh"
-#  add_pane          "murm-app"   "$HOME/Code/social/murm-app"           "flutter run -d linux"
-
-  tmux select-layout -t "$SESSION:$WINDOW" even-horizontal
-  tmux select-pane -t "$SESSION:$WINDOW.0"
-  tmux attach-session -t "$SESSION"
-}
-
-attach_session() {
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    tmux attach-session -t "$SESSION"
+status_manager() {
+  local matches
+  matches="$(pgrep -af '[a]uto-code-manager\.sh' || true)"
+  if [[ -n "$matches" ]]; then
+    printf '[dev-manager] monitor ativo:\n%s\n' "$matches"
   else
-    echo "A sessão '$SESSION' não está rodando."
-    echo "Use: dev-manager start"
-    exit 1
+    printf '[dev-manager] nenhum monitor ativo.\n'
   fi
 }
 
-stop_session() {
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    tmux kill-session -t "$SESSION"
-    echo "Sessão '$SESSION' encerrada."
-  else
-    echo "A sessão '$SESSION' já está parada."
-  fi
-}
+[[ -f "$AUTO_MANAGER" ]] || fail "script não encontrado: $AUTO_MANAGER"
+[[ -x "$AUTO_MANAGER" ]] || chmod +x "$AUTO_MANAGER"
 
-status_session() {
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    echo "Sessão '$SESSION' rodando:"
-    tmux list-panes \
-      -t "$SESSION:$WINDOW" \
-      -F '  painel #{pane_index}: #{pane_title} | #{pane_current_path} | #{pane_current_command}'
-  else
-    echo "Sessão '$SESSION' parada."
-  fi
-}
-
-require_tmux
-
-case "${1:-start}" in
-  start)
-    start_session
+action="${1:-start}"
+case "$action" in
+  start|run)
+    shift || true
+    printf '[dev-manager] executando em primeiro plano; para parar, pressione Ctrl+C.\n'
+    exec "$AUTO_MANAGER" "$@"
     ;;
-  attach)
-    attach_session
-    ;;
-  stop)
-    stop_session
-    ;;
-  restart)
-    stop_session
-    start_session
+  --test-sound|test-sound)
+    exec "$AUTO_MANAGER" --test-sound
     ;;
   status)
-    status_session
+    status_manager
+    ;;
+  stop)
+    printf '[dev-manager] não há sessão em segundo plano para encerrar.\n'
+    printf '[dev-manager] pressione Ctrl+C no terminal em que o monitor está rodando.\n'
+    ;;
+  attach|restart)
+    fail "a ação '$action' foi removida porque o monitor agora roda em primeiro plano. Use 'dev-manager' e encerre com Ctrl+C."
+    ;;
+  help|-h|--help)
+    show_help
     ;;
   *)
-    echo "Uso:"
-    echo "  dev-manager start"
-    echo "  dev-manager attach"
-    echo "  dev-manager stop"
-    echo "  dev-manager restart"
-    echo "  dev-manager status"
-    exit 1
+    fail "ação inválida: $action (use 'dev-manager help')"
     ;;
 esac
