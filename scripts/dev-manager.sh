@@ -18,6 +18,7 @@ Uso:
   dev-manager              Inicia o monitor em primeiro plano
   dev-manager start        Mesmo comportamento acima
   dev-manager --test-sound Testa o aviso sonoro
+  dev-manager --test-backup-sound Testa o aviso sutil de backup
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
   dev-manager help         Mostra esta ajuda
@@ -49,6 +50,9 @@ case "$action" in
     ;;
   --test-sound|test-sound)
     exec "$AUTO_MANAGER" --test-sound
+    ;;
+  --test-backup-sound|test-backup-sound)
+    exec "$AUTO_MANAGER" --test-backup-sound
     ;;
   status)
     status_manager

@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-25-codezip-v10-parent-nested-import"
+SCRIPT_VERSION="2026-07-25-codezip-v13-round-ding"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -25,6 +25,10 @@ BEEP_MODE="wave"
 BEEP_VOLUME=22
 BEEP_WAVE_FILE="$PROJECT_ROOT/assets/sounds/soft-notification.wav"
 BEEP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\notify.wav"
+BACKUP_BEEP_ENABLED=true
+BACKUP_BEEP_VOLUME=18
+BACKUP_BEEP_WAVE_FILE="$PROJECT_ROOT/assets/sounds/backup-complete.wav"
+BACKUP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\ding.wav"
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -57,6 +61,19 @@ validate_timers() {
     echo "ERRO: BEEP_VOLUME deve ser um inteiro entre 0 e 100. Valor atual: ${BEEP_VOLUME:-<vazio>}" >&2
     exit 1
   fi
+
+  if ! [[ "${BACKUP_BEEP_VOLUME:-}" =~ ^[0-9]+$ ]] || [ "$BACKUP_BEEP_VOLUME" -gt 100 ]; then
+    echo "ERRO: BACKUP_BEEP_VOLUME deve ser um inteiro entre 0 e 100. Valor atual: ${BACKUP_BEEP_VOLUME:-<vazio>}" >&2
+    exit 1
+  fi
+
+  case "${BACKUP_BEEP_ENABLED:-}" in
+    true|false) ;;
+    *)
+      echo "ERRO: BACKUP_BEEP_ENABLED deve ser true ou false. Valor atual: ${BACKUP_BEEP_ENABLED:-<vazio>}" >&2
+      exit 1
+      ;;
+  esac
 }
 
 log() {
@@ -211,6 +228,47 @@ soft_beep() {
   fi
   line
   return 1
+}
+
+backup_beep() {
+  [ "${BACKUP_BEEP_ENABLED:-true}" = "true" ] || return 0
+
+  local windows_wave="${BACKUP_WINDOWS_WAVE_FILE:-C:\\Windows\\Media\\ding.wav}"
+  local powershell_cmd=""
+  local escaped_windows_wave=""
+
+  # O backup usa prioritariamente o som nativo solicitado do Windows. O
+  # SoundPlayer respeita o volume geral do sistema e bloqueia até o fim do WAV,
+  # evitando sobreposição quando vários backups terminam em sequência.
+  powershell_cmd="$(command -v powershell.exe 2>/dev/null || true)"
+  if [ -n "$powershell_cmd" ]; then
+    escaped_windows_wave="${windows_wave//\'/\'\'}"
+    if "$powershell_cmd" -NoLogo -NoProfile -NonInteractive -STA -Command \
+      "\$ErrorActionPreference = 'Stop'; \
+       \$wav = '$escaped_windows_wave'; \
+       if (-not (Test-Path -LiteralPath \$wav)) { throw 'Arquivo WAV de backup não encontrado.' }; \
+       \$player = New-Object System.Media.SoundPlayer; \
+       \$player.SoundLocation = \$wav; \
+       \$player.Load(); \
+       \$player.PlaySync()" \
+      >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+
+  # Fallback discreto para ambientes sem interoperabilidade WSL/Windows ou sem
+  # o ding.wav. Não altera o aviso sonoro usado após downloads/importações.
+  (
+    BEEP_REPEATS=1
+    BEEP_GAP_MS=1
+    BEEP_MODE="wave"
+    BEEP_VOLUME="${BACKUP_BEEP_VOLUME:-18}"
+    BEEP_WAVE_FILE="${BACKUP_BEEP_WAVE_FILE:-$PROJECT_ROOT/assets/sounds/backup-complete.wav}"
+    BEEP_WINDOWS_WAVE_FILE="__backup_native_wave_disabled__"
+    soft_beep
+  ) >/dev/null 2>&1 || true
+
+  return 0
 }
 
 downloads_dir() {
@@ -941,6 +999,7 @@ backup_project() {
   rm -rf -- "$temp_dir" "$filter_file"
 
   log "OK backup: $final_zip"
+  return 0
 }
 
 clean_unmanaged_backup_zips() {
@@ -1067,7 +1126,15 @@ backup_all() {
   fi
 
   log "Todos os projetos e grupos pais foram compactados; chamando create_code_zip agora."
-  create_code_zip
+  if ! create_code_zip; then
+    return 1
+  fi
+
+  # Um único aviso representa a conclusão da rodada inteira. Ele só ocorre
+  # depois que todos os ZIPs e o Code.zip foram criados e validados.
+  backup_beep
+  log "Rodada completa de backup concluída; aviso sonoro executado uma vez."
+  return 0
 }
 
 stop() {
@@ -1085,6 +1152,11 @@ validate_timers
 
 if [ "${1:-}" = "--test-sound" ]; then
   soft_beep
+  exit $?
+fi
+
+if [ "${1:-}" = "--test-backup-sound" ]; then
+  backup_beep
   exit $?
 fi
 

@@ -34,6 +34,10 @@ dev-manager help         # ajuda
 
 Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 
+Quando toda a rodada de backups termina com sucesso, incluindo a validação do
+`Code.zip`, o monitor toca `C:\\Windows\\Media\\ding.wav` uma única vez.
+Não toca após cada projeto individual.
+
 ## Projetos e pastas agrupadoras
 
 O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a

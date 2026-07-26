@@ -9,6 +9,8 @@ TEST_PROJECT="$TEMP_ROOT/dev-automation"
 CODE_ROOT="$TEMP_ROOT/Code"
 MANAGER="$TEST_PROJECT/scripts/auto-code-manager.sh"
 LOG_FILE="$TEMP_ROOT/backup.log"
+FAKE_BIN="$TEMP_ROOT/fake-bin"
+SOUND_LOG="$TEMP_ROOT/sound.log"
 MODULES=(orbital-app orbital-assets orbital-fin orbital-mail orbital-reports)
 
 cleanup() {
@@ -17,7 +19,14 @@ cleanup() {
 trap cleanup EXIT
 
 cp -a -- "$SOURCE_ROOT" "$TEST_PROJECT"
-mkdir -p "$CODE_ROOT/orgs/inst-app"
+mkdir -p "$CODE_ROOT/orgs/inst-app" "$FAKE_BIN"
+
+cat > "$FAKE_BIN/powershell.exe" <<'PS'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${FAKE_PS_LOG:?}"
+exit 0
+PS
+chmod +x "$FAKE_BIN/powershell.exe"
 
 for module in "${MODULES[@]}"; do
   mkdir -p "$CODE_ROOT/orgs/orbital/$module"
@@ -39,7 +48,17 @@ PROJECTS
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
-CODE_ROOT="$CODE_ROOT" "$MANAGER" --backup-once >"$LOG_FILE"
+PATH="$FAKE_BIN:$PATH" \
+FAKE_PS_LOG="$SOUND_LOG" \
+CODE_ROOT="$CODE_ROOT" \
+  "$MANAGER" --backup-once >"$LOG_FILE"
+
+sound_count="$(grep -Fc 'System.Media.SoundPlayer' "$SOUND_LOG" || true)"
+if [ "$sound_count" -ne 1 ]; then
+  printf 'FALHOU: a rodada deveria tocar ding.wav uma vez, mas tocou %s vez(es).\n' "$sound_count" >&2
+  cat "$SOUND_LOG" >&2 || true
+  exit 1
+fi
 
 EXPECTED_ARCHIVES=(
   orbital-app.zip
@@ -86,3 +105,4 @@ identified="$(CODE_ROOT="$CODE_ROOT" "$MANAGER" --identify-zip orbital.zip)"
 }
 
 printf 'OK: orbital.zip contém os cinco ZIPs filhos, arquivos do pai e está dentro de Code.zip\n'
+printf 'OK: ding.wav tocou exatamente uma vez após a rodada completa\n'

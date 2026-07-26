@@ -84,6 +84,18 @@ Para gerar uma rodada imediatamente, sem iniciar o monitor contínuo:
 auto-code-manager --backup-once
 ```
 
+Ao final de uma rodada completa e bem-sucedida, o monitor toca uma única vez
+o som nativo `C:\\Windows\\Media\\ding.wav`. Não há som por projeto nem
+por ZIP individual. O som pode ser testado separadamente:
+
+```bash
+auto-code-manager --test-backup-sound
+```
+
+Para desativar, altere `BACKUP_BEEP_ENABLED`. O caminho pode ser configurado
+em `BACKUP_WINDOWS_WAVE_FILE`; o volume segue o volume geral do Windows.
+`BACKUP_BEEP_VOLUME` é usado somente pelo WAV de fallback.
+
 Para testar/importar diretamente um único ZIP sem iniciar o monitor contínuo:
 
 ```bash
