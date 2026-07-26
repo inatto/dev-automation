@@ -1,14 +1,14 @@
+#bots/dev-automation/apps/oracle-monitor
 #bots/general-crawler
 #bots/importer
+#bots/int-app
 #govbr/siga-app
+#infra/amazon-infra
+#orgs/email-app
 #orgs/email-app
 #orgs/sind-vault
 bots/dev-automation
-bots/dev-automation/apps/oracle-monitor
-bots/int-app
-infra/amazon-infra
 orgs/asaclub-app
-orgs/email-app
 orgs/inst-app
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
@@ -16,3 +16,4 @@ orgs/orbital/orbital-fin
 orgs/orbital/orbital-mail
 orgs/orbital/orbital-reports
 orgs/station-app
+social/murm-app
