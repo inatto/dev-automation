@@ -20,7 +20,7 @@ inst-app
 
 ### `auto-code-manager`
 
-Monitora a pasta Downloads e associa cada ZIP ao projeto pelo começo do nome.
+Monitora a pasta Downloads e associa cada ZIP ao projeto pelo começo do nome. Todos os ZIPs encontrados no início da rodada são capturados em um único lote e importados em sequência antes de o ciclo seguir para limpeza, backup ou espera.
 Além dos formatos comuns, aceita sufixos gerados ou codificados pelo navegador:
 
 ```text
@@ -102,12 +102,28 @@ Para testar/importar diretamente um único ZIP sem iniciar o monitor contínuo:
 auto-code-manager --import-one '/caminho/orbital.zip'
 ```
 
+Para executar uma única rodada completa sobre todos os ZIPs presentes em Downloads:
+
+```bash
+auto-code-manager --import-downloads-once
+```
+
 ### `dev-manager`
 
 Executa o `auto-code-manager` diretamente no terminal atual:
 
 ```bash
 dev-manager
+```
+
+Antes de iniciar o monitor, o comando executa automaticamente
+`deploy/local/install-commands.sh`. Esse é o instalador principal: atualiza os
+comandos fixos (`auto-code-manager`, `dev-manager`, `chromes`, `phpstorms`,
+`phpstorm-dev` e `oracle-monitor`) e chama `install-project-commands.sh` para recriar os comandos
+dos projetos configurados. Para atualizar sem iniciar o monitor:
+
+```bash
+dev-manager commands
 ```
 
 Para encerrar, pressione `Ctrl+C`. Não existe sessão separada para anexar ou
@@ -207,7 +223,7 @@ source ~/.bashrc
 ```
 
 O instalador cria ou atualiza `auto-code-manager`, `dev-manager`, `chromes`,
-`phpstorms`, `phpstorm-dev` e os comandos dos projetos listados na configuração.
+`phpstorms`, `phpstorm-dev`, `oracle-monitor` e os comandos dos projetos listados na configuração.
 
 ## Oracle Local Monitor
 

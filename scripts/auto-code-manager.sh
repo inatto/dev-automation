@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-25-codezip-v13-round-ding"
+SCRIPT_VERSION="2026-07-26-codezip-v14-batch-import-global-refresh"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -272,8 +272,14 @@ backup_beep() {
 }
 
 downloads_dir() {
+  local configured_downloads="${DOWNLOADS_DIR:-}"
   local win_profile=""
   local wsl_profile=""
+
+  if [ -n "$configured_downloads" ] && [ -d "$configured_downloads" ]; then
+    printf '%s\n' "$configured_downloads"
+    return
+  fi
 
   if command -v cmd.exe >/dev/null 2>&1 &&
      command -v wslpath >/dev/null 2>&1; then
@@ -717,27 +723,54 @@ import_one_zip() {
 }
 
 import_downloads() {
-  local downloads
+  local downloads zip_file
+  local total index imported=0 failed=0
+  local -a zip_files=()
 
   downloads="$(downloads_dir)"
 
   if [ -z "$downloads" ] || [ ! -d "$downloads" ]; then
     log "Downloads não encontrado."
-    return
+    return 0
   fi
 
   log "Verificando Downloads: $downloads"
 
+  # Captura todos os ZIPs existentes no início da rodada e os processa no mesmo
+  # lote. Assim o monitor não volta para limpeza/backup/espera entre um ZIP e
+  # outro. Um arquivo que chegar depois fica para a próxima rodada.
   while IFS= read -r -d '' zip_file; do
-    import_one_zip "$zip_file" ||
-      log "Falha ao importar: $(basename "$zip_file")"
+    zip_files+=("$zip_file")
   done < <(
     find "$downloads" \
       -maxdepth 1 \
       -type f \
       -iname "*.zip" \
-      -print0 2>/dev/null
+      -print0 2>/dev/null | sort -z
   )
+
+  total="${#zip_files[@]}"
+  if [ "$total" -eq 0 ]; then
+    log "Nenhum ZIP encontrado em Downloads nesta rodada."
+    return 0
+  fi
+
+  log "LOTE DE DOWNLOADS: $total ZIP(s) serão processados em sequência antes de continuar o ciclo."
+
+  for ((index = 0; index < total; index++)); do
+    zip_file="${zip_files[$index]}"
+    log "LOTE [$((index + 1))/$total]: $(basename -- "$zip_file")"
+
+    if import_one_zip "$zip_file"; then
+      imported=$((imported + 1))
+    else
+      failed=$((failed + 1))
+      log "Falha ao importar: $(basename -- "$zip_file")"
+    fi
+  done
+
+  log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
+  [ "$failed" -eq 0 ]
 }
 
 clean_zone() {
@@ -1179,6 +1212,21 @@ if [ "${1:-}" = "--identify-zip" ]; then
 
   echo "$identified_project"
   exit 0
+fi
+
+if [ "${1:-}" = "--import-downloads-once" ]; then
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+
+  if ! validate_projects; then
+    echo "ERRO: corrija $PROJECTS_FILE antes de importar." >&2
+    exit 1
+  fi
+
+  import_downloads
+  exit $?
 fi
 
 if [ "${1:-}" = "--import-one" ]; then

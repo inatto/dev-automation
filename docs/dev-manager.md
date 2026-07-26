@@ -1,8 +1,9 @@
 # Dev Manager
 
-O `dev-manager` executa o `auto-code-manager` diretamente em primeiro plano.
-Não existe sessão separada nem processo intermediário: `Ctrl+C` chega ao monitor
-e encerra o loop de forma limpa.
+O `dev-manager` atualiza todos os comandos globais e depois executa o
+`auto-code-manager` diretamente em primeiro plano. Não existe sessão separada
+nem processo intermediário: `Ctrl+C` chega ao monitor e encerra o loop de forma
+limpa.
 
 ## Instalar ou atualizar
 
@@ -27,10 +28,16 @@ source ~/.bashrc
 ```bash
 dev-manager              # inicia em primeiro plano
 dev-manager start        # equivalente
+dev-manager commands     # apenas atualiza todos os comandos globais
 dev-manager status       # procura um monitor ativo
 dev-manager --test-sound # testa o aviso sonoro
 dev-manager help         # ajuda
 ```
+
+Ao iniciar, o `dev-manager` chama `deploy/local/install-commands.sh`. Esse
+script atualiza os comandos fixos, incluindo `oracle-monitor`, e chama
+`install-project-commands.sh`, que
+recria os comandos dos projetos listados em `config/auto-code-manager.projects`.
 
 Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 
@@ -50,3 +57,14 @@ Quando houver entradas com exatamente três segmentos, como
 os arquivos próprios da pasta agrupadora e os ZIPs dos módulos. Na importação,
 os ZIPs filhos são validados e extraídos em suas respectivas pastas antes de o
 ZIP pai ser removido.
+
+## Lote de Downloads
+
+Em cada ciclo, todos os arquivos `.zip` já presentes em Downloads são capturados
+numa lista única. O monitor mostra `LOTE [1/N]`, processa do primeiro ao último e
+só depois segue para limpeza de `Zone.Identifier`, backups e espera do próximo
+ciclo. Para testar uma rodada sem deixar o monitor contínuo aberto:
+
+```bash
+auto-code-manager --import-downloads-once
+```

@@ -12,9 +12,14 @@ orgs/asaclub-app
 orgs/inst-app
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
+orgs/orbital/orbital-content
+orgs/orbital/orbital-crm
+orgs/orbital/orbital-events
 orgs/orbital/orbital-fin
 orgs/orbital/orbital-mail
+orgs/orbital/orbital-marketing
 orgs/orbital/orbital-reports
 orgs/orbital/orbital-ui
+orgs/orbital/orbital-vouchers
 orgs/station-app
 social/murm-app
