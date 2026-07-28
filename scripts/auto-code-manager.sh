@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-28-codezip-v16-colored-cycles"
+SCRIPT_VERSION="2026-07-28-codezip-v17-described-cycles"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -124,6 +124,7 @@ stage() {
   local context="$1"
   local state="$2"
   local title="$3"
+  local description="${4:-}"
   local marker='▶'
 
   [ "$state" = 'end' ] && marker='✓'
@@ -134,6 +135,10 @@ stage() {
   printf '\n'
   paint "$context" "$marker $title"
   printf '\n'
+  if [ -n "$description" ]; then
+    paint "$context" "  $description"
+    printf '\n'
+  fi
   paint "$context" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   printf '\n'
 }
@@ -141,9 +146,10 @@ stage() {
 run_stage() {
   local context="$1"
   local title="$2"
-  shift 2
+  local description="$3"
+  shift 3
 
-  stage "$context" start "$title — INÍCIO"
+  stage "$context" start "$title — INÍCIO" "$description"
   if LOG_CONTEXT="$context" "$@"; then
     stage "$context" end "$title — CONCLUÍDO"
     return 0
@@ -1467,20 +1473,20 @@ last_zone=0
 while true; do
   now="$(date +%s)"
 
-  stage cycle start "CICLO #$cycle — INÍCIO"
+  stage cycle start "CICLO #$cycle — INÍCIO" "Executa, nesta ordem: importar ZIPs, compactar SQLs, limpar Zone.Identifier quando devido e gerar backups quando devidos."
 
-  run_stage downloads "DOWNLOADS / IMPORTAÇÃO" import_downloads || true
-  run_stage sql "SQL → ZIP" zip_configured_sql_folders || true
+  run_stage downloads "DOWNLOADS / IMPORTAÇÃO" "Procura ZIPs em Downloads, identifica o projeto correspondente e importa cada pacote com segurança." import_downloads || true
+  run_stage sql "SQL → ZIP" "Procura arquivos .sql nas pastas configuradas, cria o ZIP YYYYMMDD-HHMM.zip, valida e só então apaga os SQLs incluídos." zip_configured_sql_folders || true
 
   if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
-    run_stage zone "LIMPEZA ZONE.IDENTIFIER" clean_zone || true
+    run_stage zone "LIMPEZA ZONE.IDENTIFIER" "Remove arquivos residuais :Zone.Identifier existentes dentro de $CODE_ROOT." clean_zone || true
     last_zone="$now"
   else
-    stage zone skip "ZONE.IDENTIFIER — AINDA NÃO VENCEU"
+    stage zone skip "ZONE.IDENTIFIER — AINDA NÃO VENCEU" "Nenhuma limpeza agora; será executada quando completar o intervalo de ${ZONE_EVERY}s."
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
-    stage backup start "BACKUP — INÍCIO"
+    stage backup start "BACKUP — INÍCIO" "Gera os ZIPs dos projetos autorizados e, ao final, atualiza o Code.zip geral."
     LOG_CONTEXT=backup clean_unmanaged_backup_zips
     if LOG_CONTEXT=backup backup_all; then
       LOG_CONTEXT=backup log "Ciclo de backup concluído com Code.zip."
@@ -1490,7 +1496,7 @@ while true; do
     fi
     last_backup="$now"
   else
-    stage wait skip "BACKUP — AINDA NÃO VENCEU"
+    stage wait skip "BACKUP — AINDA NÃO VENCEU" "Nenhum backup agora; será executado quando completar o intervalo de ${BACKUP_EVERY}s."
   fi
 
   stage cycle end "CICLO #$cycle — CONCLUÍDO"

@@ -14,3 +14,12 @@ grep -Fq 'stage cycle end "CICLO #$cycle — CONCLUÍDO"' "$SCRIPT"
 grep -Fq '[ "${NO_COLOR:-}" = "" ]' "$SCRIPT"
 
 printf 'OK: contextos dos ciclos possuem cores e marcos de início/fim\n'
+
+grep -Fq 'Executa, nesta ordem: importar ZIPs, compactar SQLs' "$SCRIPT"
+grep -Fq 'Procura ZIPs em Downloads, identifica o projeto correspondente' "$SCRIPT"
+grep -Fq 'Procura arquivos .sql nas pastas configuradas' "$SCRIPT"
+grep -Fq 'Remove arquivos residuais :Zone.Identifier' "$SCRIPT"
+grep -Fq 'Gera os ZIPs dos projetos autorizados' "$SCRIPT"
+grep -Fq 'Nenhum backup agora; será executado quando completar o intervalo' "$SCRIPT"
+
+printf 'OK: todos os contextos exibem descrição objetiva no início ou motivo quando aguardam\n'
