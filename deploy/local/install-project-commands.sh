@@ -3,48 +3,6 @@
 
 set -euo pipefail
 
-# COMO INSTALAR OU ATUALIZAR OS COMANDOS GLOBAIS
-# ================================================================
-# 1. Entre na pasta deste projeto:
-#
-#      cd /home/daniel/Code/bots/dev-automation
-#
-# 2. Garanta permissão de execução:
-#
-#      chmod +x deploy/local/install-project-commands.sh scripts/project-command.sh
-#
-# 3. Gere ou atualize os atalhos globais:
-#
-#      ./deploy/local/install-project-commands.sh
-#
-# 4. Recarregue o terminal atual:
-#
-#      source ~/.bashrc
-#
-# 5. Teste de qualquer pasta:
-#
-#      orbital-app help
-#      station-app dir
-#      inst-app scripts
-#
-# USO DOS COMANDOS GERADOS
-# ================================================================
-#   orbital-app              -> setup.sh + start.sh
-#   orbital-app start        -> somente deploy/local/start.sh
-#   orbital-app setup        -> somente deploy/local/setup.sh
-#   orbital-app run          -> setup.sh + start.sh
-#   orbital-app test         -> deploy/local/test.sh
-#   orbital-app start-api    -> deploy/local/start-api.sh
-#   orbital-app setup-web    -> deploy/local/setup-web.sh
-#
-# O instalador lê auto-code-manager.projects. Ele cria um comando apenas
-# para entradas que possuam deploy/local/start.sh ou setup.sh. Portanto,
-# pastas agrupadoras como "infra" são ignoradas com segurança.
-#
-# Sempre que adicionar, remover ou renomear um projeto em
-# auto-code-manager.projects, execute este instalador novamente.
-# ================================================================
-
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
@@ -53,14 +11,8 @@ CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 MANIFEST_FILE="$TARGET_DIR/.dev-automation-project-commands"
 
-log() {
-  printf '[project-commands] %s\n' "$*"
-}
-
-fail() {
-  printf '[project-commands] ERRO: %s\n' "$*" >&2
-  exit 1
-}
+log() { printf '[project-commands] %s\n' "$*"; }
+fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$PROJECTS_FILE" ]] || fail "arquivo de projetos não encontrado: $PROJECTS_FILE"
 [[ -f "$COMMAND_RUNNER" ]] || fail "executor não encontrado: $COMMAND_RUNNER"
@@ -68,7 +20,6 @@ fail() {
 chmod +x "$COMMAND_RUNNER"
 mkdir -p "$TARGET_DIR"
 
-# Remove somente atalhos anteriormente gerados por este instalador.
 if [[ -f "$MANIFEST_FILE" ]]; then
   while IFS= read -r old_command; do
     [[ -n "$old_command" ]] || continue
@@ -85,13 +36,30 @@ trap 'rm -f "$new_manifest"' EXIT
 created=0
 skipped=0
 
+create_command() {
+  local command_name="$1"
+  local project_dir="$2"
+  local deploy_mode="$3"
+  local target="$TARGET_DIR/$command_name"
+
+  cat > "$target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-project-commands
+exec "$COMMAND_RUNNER" "$command_name" "$project_dir" "$deploy_mode" "\$@"
+EOF_WRAPPER
+  chmod +x "$target"
+  printf '%s\n' "$command_name" >> "$new_manifest"
+  log "criado: $command_name -> $project_dir/deploy/$deploy_mode"
+  ((created += 1))
+}
+
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="$(printf '%s' "$line" | xargs)"
   [[ -n "$line" ]] || continue
 
   project_dir="$CODE_ROOT/$line"
-  command_name="$(basename "$line")"
+  project_name="$(basename "$line")"
 
   if [[ ! -d "$project_dir" ]]; then
     log "ignorado; pasta não existe: $project_dir"
@@ -99,23 +67,20 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     continue
   fi
 
-  if [[ ! -f "$project_dir/deploy/local/start.sh" && ! -f "$project_dir/deploy/local/setup.sh" ]]; then
-    log "ignorado; sem deploy local de aplicação: $line"
-    ((skipped += 1))
-    continue
+  found=0
+  if [[ -f "$project_dir/deploy/local/setup.sh" ]]; then
+    create_command "$project_name" "$project_dir" local
+    found=1
+  fi
+  if [[ -f "$project_dir/deploy/remote/setup.sh" ]]; then
+    create_command "remote-$project_name" "$project_dir" remote
+    found=1
   fi
 
-  target="$TARGET_DIR/$command_name"
-  rm -f "$target"
-  cat > "$target" <<EOF_WRAPPER
-#!/usr/bin/env bash
-# generated-by: dev-automation-project-commands
-exec "$COMMAND_RUNNER" "$command_name" "$project_dir" "\$@"
-EOF_WRAPPER
-  chmod +x "$target"
-  printf '%s\n' "$command_name" >> "$new_manifest"
-  log "criado: $command_name -> $project_dir"
-  ((created += 1))
+  if ((found == 0)); then
+    log "ignorado; sem deploy local ou remoto com setup.sh: $line"
+    ((skipped += 1))
+  fi
 done < "$PROJECTS_FILE"
 
 sort -u "$new_manifest" > "$MANIFEST_FILE"
@@ -129,15 +94,4 @@ fi
 export PATH="$TARGET_DIR:$PATH"
 hash -r 2>/dev/null || true
 
-printf '\n'
 log "instalação concluída: $created comando(s) criado(s), $skipped entrada(s) ignorada(s)."
-log "diretório dos comandos: $TARGET_DIR"
-
-if ((created > 0)); then
-  printf '\nComandos disponíveis:\n'
-  while IFS= read -r command_name; do
-    printf '  %-24s %s\n' "$command_name" "$command_name help"
-  done < "$MANIFEST_FILE"
-fi
-
-printf '\nNo terminal atual, execute:\n  source ~/.bashrc\n'

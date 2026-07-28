@@ -64,7 +64,7 @@ rm -f "$ORACLE_MONITOR_TARGET"
 cat > "$ORACLE_MONITOR_TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
-exec "$PROJECT_RUNNER" "oracle-monitor" "$ORACLE_MONITOR_DIR" "\$@"
+exec "$PROJECT_RUNNER" "oracle-monitor" "$ORACLE_MONITOR_DIR" "local" "\$@"
 EOF_WRAPPER
 chmod +x "$ORACLE_MONITOR_TARGET"
 log "criado: oracle-monitor -> $ORACLE_MONITOR_DIR"

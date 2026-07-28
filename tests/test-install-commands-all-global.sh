@@ -17,11 +17,11 @@ trap cleanup EXIT
 
 mkdir -p "$HOME_DIR" "$CODE_ROOT/orgs/sample-app/deploy/local"
 : > "$HOME_DIR/.bashrc"
-cat > "$CODE_ROOT/orgs/sample-app/deploy/local/start.sh" <<'START'
+cat > "$CODE_ROOT/orgs/sample-app/deploy/local/setup.sh" <<'START'
 #!/usr/bin/env bash
 exit 0
 START
-chmod +x "$CODE_ROOT/orgs/sample-app/deploy/local/start.sh"
+chmod +x "$CODE_ROOT/orgs/sample-app/deploy/local/setup.sh"
 printf 'orgs/sample-app\n' > "$PROJECTS_FILE"
 
 HOME="$HOME_DIR" \
