@@ -68,3 +68,23 @@ ciclo. Para testar uma rodada sem deixar o monitor contínuo aberto:
 ```bash
 auto-code-manager --import-downloads-once
 ```
+
+## Cores dos ciclos
+
+Quando a saída está em um terminal compatível, cada contexto do ciclo usa uma
+cor fixa para facilitar a leitura:
+
+- ciclo completo: ciano;
+- Downloads/importação: azul;
+- SQL para ZIP: magenta;
+- limpeza de `Zone.Identifier`: amarelo;
+- backups e `Code.zip`: verde;
+- espera até o próximo ciclo: cinza;
+- erros: vermelho.
+
+Cada etapa mostra uma faixa explícita de `INÍCIO` e `CONCLUÍDO`. Para desativar
+as cores sem mudar o restante do comportamento:
+
+```bash
+NO_COLOR=1 dev-manager
+```

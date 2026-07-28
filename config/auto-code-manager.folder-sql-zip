@@ -1,2 +1,3 @@
-~/Code/orgs/asaclub-app/exports/ddl/ 
+# Uma pasta por linha. Aceita caminho absoluto, ~/... ou relativo a /home/daniel/Code.
+~/Code/orgs/asaclub-app/exports/ddl/
 ~/Code/infra/oracle-infra/exports/ddl/

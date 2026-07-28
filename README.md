@@ -229,3 +229,34 @@ O instalador cria ou atualiza `auto-code-manager`, `dev-manager`, `chromes`,
 
 Projeto isolado em `apps/oracle-monitor`, instalado como comando global
 `oracle-monitor`. Consulte `apps/oracle-monitor/README.md`.
+
+#### ZIP automático de arquivos SQL
+
+O arquivo `config/auto-code-manager.folder-sql-zip` informa as pastas que o
+monitor deve observar, uma por linha. São aceitos caminhos absolutos, caminhos
+com `~/` e caminhos relativos a `/home/daniel/Code`.
+
+Exemplo:
+
+```text
+~/Code/orgs/asaclub-app/exports/ddl/
+~/Code/infra/oracle-infra/exports/ddl/
+```
+
+Em cada ciclo, todos os arquivos `*.sql` estáveis encontrados diretamente em
+cada pasta são agrupados em um ZIP com a data e hora de criação:
+
+```text
+20260728-1729.zip
+```
+
+O nome original do SQL não interfere no nome do ZIP. Se novos SQLs chegarem no
+mesmo minuto, eles são adicionados ao ZIP daquele minuto. O ZIP é validado antes
+da instalação e os SQLs incluídos só são apagados depois da validação. Em caso
+de falha, os SQLs permanecem na pasta.
+
+Para executar somente essa tarefa uma vez:
+
+```bash
+auto-code-manager --sql-zip-once
+```

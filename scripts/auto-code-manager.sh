@@ -5,14 +5,14 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-26-codezip-v14-batch-import-global-refresh"
+SCRIPT_VERSION="2026-07-28-codezip-v16-colored-cycles"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$PROJECT_ROOT/config/auto-code-manager.projects"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
-DDL_EXPORT_DIR="$CODE_ROOT/infra/oracle-infra/exports/ddl"
+FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
@@ -76,8 +76,81 @@ validate_timers() {
   esac
 }
 
+color_enabled() {
+  [ -t 1 ] && [ "${NO_COLOR:-}" = "" ] && [ "${TERM:-dumb}" != "dumb" ]
+}
+
+color_code() {
+  case "$1" in
+    cycle) printf '1;36' ;;    # ciano forte
+    downloads) printf '1;34' ;;# azul
+    sql) printf '1;35' ;;      # magenta
+    zone) printf '1;33' ;;     # amarelo
+    backup) printf '1;32' ;;   # verde
+    wait) printf '2;37' ;;     # cinza
+    error) printf '1;31' ;;    # vermelho
+    *) printf '0' ;;
+  esac
+}
+
+paint() {
+  local context="$1"
+  shift
+  if color_enabled; then
+    printf '\033[%sm%s\033[0m' "$(color_code "$context")" "$*"
+  else
+    printf '%s' "$*"
+  fi
+}
+
 log() {
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+  local message="$*"
+  local context="${LOG_CONTEXT:-}"
+
+  if [[ "$message" == ERRO:* ]]; then
+    context="error"
+  fi
+
+  printf '[%s] ' "$(date '+%Y-%m-%d %H:%M:%S')"
+  if [ -n "$context" ]; then
+    paint "$context" "$message"
+    printf '\n'
+  else
+    printf '%s\n' "$message"
+  fi
+}
+
+stage() {
+  local context="$1"
+  local state="$2"
+  local title="$3"
+  local marker='▶'
+
+  [ "$state" = 'end' ] && marker='✓'
+  [ "$state" = 'skip' ] && marker='·'
+
+  printf '\n'
+  paint "$context" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  printf '\n'
+  paint "$context" "$marker $title"
+  printf '\n'
+  paint "$context" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  printf '\n'
+}
+
+run_stage() {
+  local context="$1"
+  local title="$2"
+  shift 2
+
+  stage "$context" start "$title — INÍCIO"
+  if LOG_CONTEXT="$context" "$@"; then
+    stage "$context" end "$title — CONCLUÍDO"
+    return 0
+  fi
+
+  LOG_CONTEXT=error log "ERRO: etapa '$title' terminou com falha."
+  return 1
 }
 
 line() {
@@ -340,6 +413,7 @@ clean_file() {
 }
 
 ensure_files() {
+  [ -f "$FOLDER_SQL_ZIP_FILE" ] || touch "$FOLDER_SQL_ZIP_FILE"
   [ -f "$IGNORE_ZIP_FILE" ] || touch "$IGNORE_ZIP_FILE"
   [ -f "$IGNORE_UNZIP_FILE" ] || touch "$IGNORE_UNZIP_FILE"
 
@@ -902,34 +976,135 @@ make_project_rsync_filter() {
   # alguma regra explícita disser o contrário.
 }
 
-zip_ddl_exports() {
-  local file
-  local zip_file
+expand_configured_path() {
+  local configured_path="$1"
 
-  [ -d "$DDL_EXPORT_DIR" ] || return 0
+  configured_path="${configured_path/#\~\//$HOME/}"
+  configured_path="${configured_path/#\$CODE_ROOT\//$CODE_ROOT/}"
+  configured_path="${configured_path/#CODE_ROOT\//$CODE_ROOT/}"
 
-  log "Compactando DDLs em $DDL_EXPORT_DIR"
+  if [[ "$configured_path" != /* ]]; then
+    configured_path="$CODE_ROOT/$configured_path"
+  fi
 
-  while IFS= read -r -d '' file; do
-    zip_file="${file%.*}.zip"
+  printf '%s\n' "$configured_path"
+}
 
-    if [ -f "$zip_file" ] && [ "$zip_file" -nt "$file" ]; then
-      continue
+configured_sql_zip_folders() {
+  local raw_line folder
+
+  [ -f "$FOLDER_SQL_ZIP_FILE" ] || return 0
+
+  while IFS= read -r raw_line || [ -n "$raw_line" ]; do
+    raw_line="${raw_line%$'\r'}"
+    raw_line="${raw_line%%#*}"
+    raw_line="$(printf '%s' "$raw_line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    [ -n "$raw_line" ] || continue
+
+    folder="$(expand_configured_path "$raw_line")"
+    printf '%s\n' "$folder"
+  done < "$FOLDER_SQL_ZIP_FILE"
+}
+
+zip_sql_folder() {
+  local folder="$1"
+  local stamp final_zip temp_dir temp_zip sql_file sql_name
+  local -a sql_files=()
+  local -a sql_names=()
+
+  if [ ! -d "$folder" ]; then
+    log "Pasta SQL ainda não existe: $folder"
+    return 0
+  fi
+
+  while IFS= read -r -d '' sql_file; do
+    if stable_file "$sql_file"; then
+      sql_files+=("$sql_file")
+    else
+      log "SQL ainda está sendo gravado: $sql_file"
     fi
-
-    (
-      cd "$(dirname "$file")" || exit 1
-      zip -q -j "$(basename "$zip_file")" "$(basename "$file")"
-    ) || log "ERRO compactando DDL: $(basename "$file")"
-
   done < <(
-    find "$DDL_EXPORT_DIR" \
+    find "$folder" \
       -maxdepth 1 \
       -type f \
-      ! -iname "*.zip" \
-      ! -name "*:Zone.Identifier" \
+      -iname '*.sql' \
+      ! -name '*:Zone.Identifier' \
       -print0 2>/dev/null
   )
+
+  [ "${#sql_files[@]}" -gt 0 ] || return 0
+
+  stamp="$(date '+%Y%m%d-%H%M')"
+  final_zip="$folder/$stamp.zip"
+  temp_dir="$(mktemp -d '/tmp/auto-code-folder-sql-zip-XXXXXX')"
+  temp_zip="$temp_dir/$stamp.zip"
+
+  if [ -f "$final_zip" ]; then
+    if ! unzip -tq "$final_zip" >/dev/null 2>&1; then
+      log "ERRO: ZIP existente inválido; SQLs mantidos: $final_zip"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+    cp -f -- "$final_zip" "$temp_zip" || {
+      log "ERRO: não foi possível preparar o ZIP existente: $final_zip"
+      rm -rf -- "$temp_dir"
+      return 1
+    }
+  fi
+
+  for sql_file in "${sql_files[@]}"; do
+    sql_name="$(basename -- "$sql_file")"
+    sql_names+=("$sql_name")
+    cp -f -- "$sql_file" "$temp_dir/$sql_name" || {
+      log "ERRO: não foi possível preparar o SQL: $sql_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    }
+  done
+
+  (
+    cd "$temp_dir" || exit 1
+    zip -q "$temp_zip" -- "${sql_names[@]}"
+  ) || {
+    log "ERRO: falha ao gerar ZIP de SQLs em $folder; SQLs mantidos."
+    rm -rf -- "$temp_dir"
+    return 1
+  }
+
+  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
+    log "ERRO: validação do ZIP de SQLs falhou; SQLs mantidos: $folder"
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
+  if ! mv -f -- "$temp_zip" "$final_zip"; then
+    log "ERRO: não foi possível instalar o ZIP final; SQLs mantidos: $final_zip"
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
+  for sql_file in "${sql_files[@]}"; do
+    if ! rm -f -- "$sql_file" || [ -e "$sql_file" ]; then
+      log "ERRO: ZIP válido, mas o SQL não foi apagado: $sql_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+  done
+
+  rm -rf -- "$temp_dir"
+  log "OK SQL ZIP: $final_zip (${#sql_files[@]} arquivo(s)); SQLs apagados."
+  return 0
+}
+
+zip_configured_sql_folders() {
+  local folder failed=0
+
+  while IFS= read -r folder || [ -n "$folder" ]; do
+    [ -n "$folder" ] || continue
+    zip_sql_folder "$folder" || failed=1
+  done < <(configured_sql_zip_folders)
+
+  return "$failed"
 }
 
 backup_project() {
@@ -949,10 +1124,6 @@ backup_project() {
     log "ERRO: projeto não existe: $project_dir"
     rm -f -- "$(project_archive_path "$project")"
     return 1
-  fi
-
-  if [ "$archive_name" = "sind-infra" ] || [ "$project" = "infra" ]; then
-    zip_ddl_exports
   fi
 
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
@@ -1249,6 +1420,16 @@ if [ "${1:-}" = "--import-one" ]; then
   exit $?
 fi
 
+if [ "${1:-}" = "--sql-zip-once" ]; then
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+
+  zip_configured_sql_folders
+  exit $?
+fi
+
 if [ ! -d "$CODE_ROOT" ]; then
   echo "ERRO: diretório não existe: $CODE_ROOT" >&2
   exit 1
@@ -1260,6 +1441,7 @@ if ! validate_projects; then
 fi
 
 if [ "${1:-}" = "--backup-once" ]; then
+  zip_configured_sql_folders || exit 1
   clean_unmanaged_backup_zips
   backup_all
   exit $?
@@ -1271,6 +1453,7 @@ line
 echo "CODE_ROOT:     $CODE_ROOT"
 echo "Downloads:     $(downloads_dir)"
 echo "ENV:           $ENV_FILE"
+echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
 echo "Intervalo:     ${INTERVAL}s"
 echo "Backup cada:   ${BACKUP_EVERY}s"
 echo "Zone cada:     ${ZONE_EVERY}s"
@@ -1284,27 +1467,34 @@ last_zone=0
 while true; do
   now="$(date +%s)"
 
-  line
-  log "Ciclo #$cycle"
+  stage cycle start "CICLO #$cycle — INÍCIO"
 
-  import_downloads
+  run_stage downloads "DOWNLOADS / IMPORTAÇÃO" import_downloads || true
+  run_stage sql "SQL → ZIP" zip_configured_sql_folders || true
 
   if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
-    clean_zone
+    run_stage zone "LIMPEZA ZONE.IDENTIFIER" clean_zone || true
     last_zone="$now"
+  else
+    stage zone skip "ZONE.IDENTIFIER — AINDA NÃO VENCEU"
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
-    clean_unmanaged_backup_zips
-    if backup_all; then
-      log "Ciclo de backup concluído com Code.zip."
+    stage backup start "BACKUP — INÍCIO"
+    LOG_CONTEXT=backup clean_unmanaged_backup_zips
+    if LOG_CONTEXT=backup backup_all; then
+      LOG_CONTEXT=backup log "Ciclo de backup concluído com Code.zip."
+      stage backup end "BACKUP — CONCLUÍDO"
     else
-      log "ERRO: ciclo de backup terminou sem Code.zip."
+      LOG_CONTEXT=error log "ERRO: ciclo de backup terminou sem Code.zip."
     fi
     last_backup="$now"
   else
-    log "Backup ainda não venceu."
+    stage wait skip "BACKUP — AINDA NÃO VENCEU"
   fi
+
+  stage cycle end "CICLO #$cycle — CONCLUÍDO"
+  LOG_CONTEXT=wait log "Próximo ciclo em ${INTERVAL}s."
 
   cycle=$((cycle + 1))
   sleep "$INTERVAL"
