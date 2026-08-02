@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-export GIT_TERMINAL_PROMPT=0
-
 LOCAL_ROOT="${LOCAL_ROOT:-$HOME/Code}"
 REMOTE_ROOT="${REMOTE_ROOT:-/home/ubuntu/apps}"
 REMOTE_USER="${REMOTE_USER:-ubuntu}"
 REMOTE_HOST="${REMOTE_HOST:-52.67.135.170}"
+
+DEV_AUTOMATION_REL="bots/dev-automation"
+DEV_AUTOMATION_URL="https://github.com/inatto/dev-automation.git"
+
+MANIFEST="${MANIFEST:-$LOCAL_ROOT/$DEV_AUTOMATION_REL/config/environment.repositories}"
 SSH_KEY="${SSH_KEY:-$LOCAL_ROOT/infra/amazon-infra/ec2/52.67.135.170/core/inatto01-sp.pem}"
 
-BOOTSTRAP_PATH="bots/dev-automation"
-BOOTSTRAP_URL="https://github.com/inatto/dev-automation.git"
-MANIFEST="${MANIFEST:-$LOCAL_ROOT/$BOOTSTRAP_PATH/config/environment.repositories}"
-
-SSH_OPTIONS=(
+SSH_OPTS=(
   -n
+  -i "$SSH_KEY"
+  -o ServerAliveInterval=30
+  -o ServerAliveCountMax=120
+  -o TCPKeepAlive=yes
+  -o StrictHostKeyChecking=accept-new
+)
+
+SCP_OPTS=(
   -i "$SSH_KEY"
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=120
@@ -27,70 +34,50 @@ warn() { printf '[environment] AVISO: %s\n' "$*" >&2; }
 die()  { printf '[environment] ERRO: %s\n' "$*" >&2; exit 1; }
 
 trim() {
-  local value="$1"
+  local value="${1:-}"
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
 }
 
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "comando obrigatório não encontrado: $1"
+}
+
 install_base_packages() {
   local packages=()
 
-  command -v git  >/dev/null 2>&1 || packages+=(git)
-  command -v ssh  >/dev/null 2>&1 || packages+=(openssh-client)
-  command -v scp  >/dev/null 2>&1 || packages+=(openssh-client)
+  command -v git >/dev/null 2>&1 || packages+=(git)
+  command -v ssh >/dev/null 2>&1 || packages+=(openssh-client)
+  command -v scp >/dev/null 2>&1 || packages+=(openssh-client)
   command -v find >/dev/null 2>&1 || packages+=(findutils)
-  command -v cmp  >/dev/null 2>&1 || packages+=(diffutils)
+  command -v cmp >/dev/null 2>&1 || packages+=(diffutils)
+  command -v mktemp >/dev/null 2>&1 || packages+=(coreutils)
 
   ((${#packages[@]} == 0)) && return
-  command -v apt-get >/dev/null 2>&1 || die "apt-get não encontrado; instale: ${packages[*]}"
 
-  log "instalando dependências básicas: ${packages[*]}"
+  command -v apt-get >/dev/null 2>&1 ||
+    die "faltam pacotes e apt-get não está disponível: ${packages[*]}"
+
+  log "instalando pacotes básicos: ${packages[*]}"
   sudo apt-get update
   sudo apt-get install -y "${packages[@]}"
 }
 
-configure_github_auth() {
-  command -v gh >/dev/null 2>&1 || {
-    warn "GitHub CLI (gh) não instalado; repositórios privados podem falhar"
-    return
-  }
-
-  if gh auth status --hostname github.com >/dev/null 2>&1; then
-    gh auth setup-git --hostname github.com >/dev/null
-  else
-    warn "GitHub CLI não autenticado. Execute: gh auth login --hostname github.com --git-protocol https --web"
-  fi
-}
-
-ensure_bootstrap_repository() {
-  local target="$LOCAL_ROOT/$BOOTSTRAP_PATH"
-  mkdir -p "$(dirname "$target")"
-
-  if [[ -d "$target/.git" ]]; then
-    git -C "$target" remote set-url origin "$BOOTSTRAP_URL"
-    return
-  fi
-
-  [[ ! -e "$target" ]] || die "existe, mas não é repositório Git: $target"
-
-  log "clonando repositório-base: $BOOTSTRAP_PATH"
-  git clone "$BOOTSTRAP_URL" "$target" ||
-    die "falha ao clonar $BOOTSTRAP_URL; confirme a autenticação com gh auth status"
-}
-
-remote_default_branch() {
+resolve_default_branch() {
   local url="$1"
   local branch
 
   branch="$(
     git ls-remote --symref "$url" HEAD 2>/dev/null |
-      awk '/^ref:/ { sub("refs/heads/", "", $2); print $2; exit }'
+      awk '/^ref:/ {
+        sub("^refs/heads/", "", $2)
+        print $2
+        exit
+      }'
   )"
 
-  [[ -n "$branch" ]] ||
-    die "não foi possível descobrir a branch padrão: $url"
-
+  [[ -n "$branch" ]] || return 1
   printf '%s' "$branch"
 }
 
@@ -100,18 +87,19 @@ ensure_repository() {
   local target="$LOCAL_ROOT/$relative"
   local branch
 
-  branch="$(remote_default_branch "$url")"
   mkdir -p "$(dirname "$target")"
 
   if [[ ! -e "$target" ]]; then
+    branch="$(resolve_default_branch "$url")" ||
+      die "não foi possível descobrir a branch padrão: $url"
+
     log "clonando $relative ($branch)"
-    git clone --branch "$branch" --single-branch "$url" "$target" ||
-      die "falha ao clonar $relative; confirme acesso a $url"
+    git clone --branch "$branch" --single-branch "$url" "$target"
     return
   fi
 
   [[ -d "$target/.git" ]] ||
-    die "o caminho existe, mas não contém .git: $target"
+    die "o caminho existe, mas não é repositório Git: $target"
 
   git -C "$target" remote set-url origin "$url"
 
@@ -119,6 +107,9 @@ ensure_repository() {
     warn "$relative tem alterações locais; origin corrigido e pull ignorado"
     return
   fi
+
+  branch="$(resolve_default_branch "$url")" ||
+    die "não foi possível descobrir a branch padrão: $url"
 
   log "atualizando $relative ($branch)"
   git -C "$target" fetch --prune origin
@@ -137,146 +128,202 @@ ensure_repository() {
   git -C "$target" pull --ff-only origin "$branch"
 }
 
-remote_project_directory() {
-  local relative="$1"
-  local without_first_directory="${relative#*/}"
-
-  [[ "$without_first_directory" != "$relative" ]] ||
-    die "caminho sem diretório-base: $relative"
-
-  printf '%s/%s' "$REMOTE_ROOT" "$without_first_directory"
-}
-
-project_has_env_examples() {
-  local project="$1"
-
-  find "$project" \
-    -type d -name .git -prune -o \
-    -type f -name '.env.example' -print -quit |
-    grep -q .
-}
-
-check_production_ssh() {
+check_remote_access() {
   [[ -f "$SSH_KEY" ]] || die "chave SSH não encontrada: $SSH_KEY"
   chmod 600 "$SSH_KEY"
 
-  ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$REMOTE_HOST" 'printf ready' >/dev/null ||
+  ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$REMOTE_HOST" 'printf ready' >/dev/null ||
     die "não foi possível acessar $REMOTE_USER@$REMOTE_HOST"
 }
 
+remote_file_exists() {
+  local remote_file="$1"
+  ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$REMOTE_HOST" test -f "$remote_file"
+}
+
+download_remote_file() {
+  local remote_file="$1"
+  local local_file="$2"
+
+  scp "${SCP_OPTS[@]}"     "$REMOTE_USER@$REMOTE_HOST:$remote_file"     "$local_file"
+}
+
+sync_one_env() {
+  local project_relative="$1"
+  local project_local="$2"
+  local example_file="$3"
+
+  local example_relative="${example_file#"$project_local"/}"
+  local env_relative
+
+  case "$(basename "$example_file")" in
+    .env.example)
+      env_relative="${example_relative%/.env.example}/.env"
+      ;;
+    .env.sample)
+      env_relative="${example_relative%/.env.sample}/.env"
+      ;;
+    *)
+      return
+      ;;
+  esac
+
+  local local_env="$project_local/$env_relative"
+  local remote_env="$REMOTE_ROOT/$project_relative/$env_relative"
+
+  if ! remote_file_exists "$remote_env"; then
+    warn "não existe no servidor: $remote_env"
+    return
+  fi
+
+  mkdir -p "$(dirname "$local_env")"
+
+  local temporary
+  temporary="$(mktemp)"
+
+  if ! download_remote_file "$remote_env" "$temporary"; then
+    rm -f "$temporary"
+    warn "falha ao baixar: $remote_env"
+    return
+  fi
+
+  chmod 600 "$temporary"
+
+  if [[ -f "$local_env" ]] && cmp -s "$temporary" "$local_env"; then
+    rm -f "$temporary"
+    log "env já atualizado: $local_env"
+    return
+  fi
+
+  if [[ -f "$local_env" ]]; then
+    local backup="${local_env}.before-production-sync.$(date +%Y%m%d-%H%M%S)"
+    cp -p "$local_env" "$backup"
+    log "backup local criado: $backup"
+  fi
+
+  mv "$temporary" "$local_env"
+  chmod 600 "$local_env"
+  log "env sincronizado: $remote_env -> $local_env"
+}
+
 sync_project_envs() {
-  local relative="$1"
-  local local_project="$LOCAL_ROOT/$relative"
-  local remote_project
-  remote_project="$(remote_project_directory "$relative")"
+  local project_relative="$1"
+  local project_local="$LOCAL_ROOT/$project_relative"
+  local found=0
 
-  while IFS= read -r -d '' example; do
-    local directory suffix destination remote_env temporary backup
-
-    directory="$(dirname "$example")"
-    suffix="${directory#"$local_project"}"
-    destination="$directory/.env"
-    remote_env="$remote_project$suffix/.env"
-
-    if ! ssh "${SSH_OPTIONS[@]}" "$REMOTE_USER@$REMOTE_HOST" \
-      "test -f $(printf '%q' "$remote_env")"; then
-      warn "não existe no servidor: $remote_env"
-      continue
-    fi
-
-    temporary="$(mktemp "$directory/.env.remote.XXXXXX")"
-
-    if ! scp "${SSH_OPTIONS[@]}" \
-      "$REMOTE_USER@$REMOTE_HOST:$remote_env" \
-      "$temporary" >/dev/null; then
-      rm -f "$temporary"
-      warn "falha ao baixar: $remote_env"
-      continue
-    fi
-
-    chmod 600 "$temporary"
-
-    if [[ -f "$destination" ]] && cmp -s "$temporary" "$destination"; then
-      rm -f "$temporary"
-      log "env já atualizado: $destination"
-      continue
-    fi
-
-    if [[ -f "$destination" ]]; then
-      backup="${destination}.before-production-sync.$(date +%Y%m%d-%H%M%S)"
-      cp -p "$destination" "$backup"
-      chmod 600 "$backup"
-      log "backup criado: $backup"
-    fi
-
-    mv -f "$temporary" "$destination"
-    chmod 600 "$destination"
-    log "env sincronizado: $remote_env -> $destination"
+  while IFS= read -r -d '' example_file; do
+    found=1
+    sync_one_env "$project_relative" "$project_local" "$example_file"
   done < <(
-    find "$local_project" \
-      -type d -name .git -prune -o \
-      -type f -name '.env.example' -print0
+    find "$project_local"       -type d -name .git -prune -o       -type d \( -name node_modules -o -name .venv -o -name venv \) -prune -o       -type f \( -name '.env.example' -o -name '.env.sample' \)       -print0
   )
+
+  if ((found == 0)); then
+    log "nenhum .env.example/.env.sample em: $project_relative"
+  fi
+}
+
+ensure_bootstrap_repository() {
+  local target="$LOCAL_ROOT/$DEV_AUTOMATION_REL"
+
+  mkdir -p "$(dirname "$target")"
+
+  if [[ -d "$target/.git" ]]; then
+    git -C "$target" remote set-url origin "$DEV_AUTOMATION_URL"
+    return
+  fi
+
+  [[ ! -e "$target" ]] || die "o caminho-base existe, mas não é Git: $target"
+
+  log "clonando repositório-base: $DEV_AUTOMATION_REL"
+  git clone "$DEV_AUTOMATION_URL" "$target"
 }
 
 process_manifest() {
   [[ -f "$MANIFEST" ]] || die "manifesto não encontrado: $MANIFEST"
 
-  local raw line line_number=0 ssh_checked=0
+  local line_number=0
+  local active_projects=0
+  local raw_line line relative url extra
 
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    line_number=$((line_number + 1))
-    line="$(trim "$raw")"
+  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+    ((line_number += 1))
 
+    line="$(trim "$raw_line")"
     [[ -z "$line" ]] && continue
-    [[ "${line:0:1}" == '#' ]] && continue
+    [[ "${line:0:1}" == "#" ]] && continue
 
-    local relative url extra
-    IFS='|' read -r relative url extra <<< "$line"
+    relative=""
+    url=""
+    extra=""
 
-    relative="$(trim "${relative:-}")"
-    url="$(trim "${url:-}")"
+    IFS='|' read -r relative url extra <<<"$line"
 
-    [[ -z "${extra:-}" ]] || die "linha $line_number deve ter apenas caminho|git"
-    [[ -n "$relative" && -n "$url" ]] || die "linha $line_number inválida"
-    [[ "$relative" != /* && "$relative" != *'..'* ]] ||
-      die "caminho inseguro na linha $line_number: $relative"
-    [[ "$url" == https://github.com/*/*.git ]] ||
-      die "URL GitHub inválida na linha $line_number: $url"
+    relative="$(trim "$relative")"
+    url="$(trim "$url")"
+    extra="$(trim "$extra")"
+
+    [[ -n "$relative" && -n "$url" ]] ||
+      die "linha $line_number inválida; esperado: caminho|url"
+
+    [[ -z "$extra" ]] ||
+      die "linha $line_number tem campos extras; esperado somente: caminho|url"
+
+    [[ "$relative" != /* ]] ||
+      die "linha $line_number usa caminho absoluto: $relative"
+
+    [[ "$relative" != *".."* ]] ||
+      die "linha $line_number contém caminho inseguro: $relative"
+
+    [[ "$url" == https://github.com/*.git ]] ||
+      die "linha $line_number tem URL GitHub inválida: $url"
+
+    ((active_projects += 1))
 
     ensure_repository "$relative" "$url"
-
-    local project="$LOCAL_ROOT/$relative"
-    if project_has_env_examples "$project"; then
-      if ((ssh_checked == 0)); then
-        check_production_ssh
-        ssh_checked=1
-      fi
-      sync_project_envs "$relative"
-    fi
+    sync_project_envs "$relative"
   done < "$MANIFEST"
+
+  ((active_projects > 0)) || die "nenhum projeto ativo no manifesto"
 }
 
-install_project_commands() {
-  local installer="$LOCAL_ROOT/$BOOTSTRAP_PATH/scripts/install-commands.sh"
+run_local_command_installer() {
+  local candidates=(
+    "$LOCAL_ROOT/$DEV_AUTOMATION_REL/scripts/install-commands.sh"
+    "$LOCAL_ROOT/$DEV_AUTOMATION_REL/install-commands.sh"
+  )
 
-  if [[ -x "$installer" ]]; then
-    log "instalando/atualizando comandos globais"
-    "$installer"
-  else
-    warn "instalador de comandos não encontrado ou não executável: $installer"
-  fi
+  local installer
+  for installer in "${candidates[@]}"; do
+    if [[ -x "$installer" ]]; then
+      log "instalando/atualizando comandos locais"
+      "$installer"
+      return
+    fi
+  done
+
+  warn "instalador de comandos não encontrado ou não executável"
 }
 
 main() {
   install_base_packages
-  configure_github_auth
-  mkdir -p "$LOCAL_ROOT"
-  ensure_bootstrap_repository
-  process_manifest
-  install_project_commands
 
-  log "ambiente conferido com sucesso"
+  require_command git
+  require_command ssh
+  require_command scp
+  require_command find
+  require_command cmp
+  require_command mktemp
+
+  mkdir -p "$LOCAL_ROOT"
+
+  ensure_bootstrap_repository
+  check_remote_access
+  process_manifest
+  run_local_command_installer
+
+  log "ambiente local conferido com sucesso"
+  log "o servidor remoto foi usado somente para leitura"
   log "execute: source ~/.bashrc"
 }
 
