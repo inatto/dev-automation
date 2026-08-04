@@ -14,10 +14,10 @@
 #orgs/orbital/orbital-reports
 #orgs/orbital/orbital-ui
 #orgs/orbital/orbital-vouchers
-#orgs/sind-vault
 #orgs/station-app
 #social/murm-app
 bots/dev-automation
 infra/amazon-infra
 orgs/orbital/orbital-app
 orgs/orbital/orbital-mail
+orgs/sind-vault
