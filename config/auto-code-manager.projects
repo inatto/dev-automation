@@ -1,4 +1,3 @@
-#orgs/orbital/orbital-content
 #bots/general-crawler
 #bots/importer
 #bots/int-app
@@ -7,10 +6,10 @@
 #orgs/email-app
 #orgs/inst-app
 #orgs/orbital/orbital-assets
+#orgs/orbital/orbital-content
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-events
 #orgs/orbital/orbital-fin
-#orgs/orbital/orbital-mail
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-reports
 #orgs/orbital/orbital-ui
@@ -21,3 +20,4 @@
 bots/dev-automation
 infra/amazon-infra
 orgs/orbital/orbital-app
+orgs/orbital/orbital-mail
