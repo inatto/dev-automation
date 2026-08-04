@@ -2,6 +2,7 @@
 bots/dev-automation|https://github.com/inatto/dev-automation.git
 bots/general-crawler|https://github.com/sindicattox/general-crawler.git
 infra/amazon-infra|https://github.com/inatto/amazon-infra.git
+infra/oracle-infra|https://github.com/inatto/oracle-infra.git
 orgs/asaclub-app|https://github.com/sindicattox/asaclub-app.git
 orgs/inst-app|https://github.com/sindicattox/inst-app.git
 orgs/orbital/orbital-app|https://github.com/sindicattox/orbital-app.git

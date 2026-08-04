@@ -2,33 +2,10 @@
 set -Eeuo pipefail
 
 LOCAL_ROOT="${LOCAL_ROOT:-$HOME/Code}"
-REMOTE_ROOT="${REMOTE_ROOT:-/home/ubuntu/apps}"
-REMOTE_USER="${REMOTE_USER:-ubuntu}"
-REMOTE_HOST="${REMOTE_HOST:-52.67.135.170}"
-
 DEV_AUTOMATION_REL="bots/dev-automation"
 DEV_AUTOMATION_URL="https://github.com/inatto/dev-automation.git"
 
 MANIFEST="${MANIFEST:-$LOCAL_ROOT/$DEV_AUTOMATION_REL/config/environment.repositories}"
-SSH_KEY="${SSH_KEY:-$LOCAL_ROOT/infra/amazon-infra/ec2/52.67.135.170/core/inatto01-sp.pem}"
-
-SSH_OPTS=(
-  -n
-  -i "$SSH_KEY"
-  -o ServerAliveInterval=30
-  -o ServerAliveCountMax=120
-  -o TCPKeepAlive=yes
-  -o StrictHostKeyChecking=accept-new
-)
-
-SCP_OPTS=(
-  -i "$SSH_KEY"
-  -o ServerAliveInterval=30
-  -o ServerAliveCountMax=120
-  -o TCPKeepAlive=yes
-  -o StrictHostKeyChecking=accept-new
-)
-
 log()  { printf '[environment] %s\n' "$*"; }
 warn() { printf '[environment] AVISO: %s\n' "$*" >&2; }
 die()  { printf '[environment] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -48,11 +25,6 @@ install_base_packages() {
   local packages=()
 
   command -v git >/dev/null 2>&1 || packages+=(git)
-  command -v ssh >/dev/null 2>&1 || packages+=(openssh-client)
-  command -v scp >/dev/null 2>&1 || packages+=(openssh-client)
-  command -v find >/dev/null 2>&1 || packages+=(findutils)
-  command -v cmp >/dev/null 2>&1 || packages+=(diffutils)
-  command -v mktemp >/dev/null 2>&1 || packages+=(coreutils)
 
   ((${#packages[@]} == 0)) && return
 
@@ -128,101 +100,6 @@ ensure_repository() {
   git -C "$target" pull --ff-only origin "$branch"
 }
 
-check_remote_access() {
-  [[ -f "$SSH_KEY" ]] || die "chave SSH não encontrada: $SSH_KEY"
-  chmod 600 "$SSH_KEY"
-
-  ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$REMOTE_HOST" 'printf ready' >/dev/null ||
-    die "não foi possível acessar $REMOTE_USER@$REMOTE_HOST"
-}
-
-remote_file_exists() {
-  local remote_file="$1"
-  ssh "${SSH_OPTS[@]}" "$REMOTE_USER@$REMOTE_HOST" test -f "$remote_file"
-}
-
-download_remote_file() {
-  local remote_file="$1"
-  local local_file="$2"
-
-  scp "${SCP_OPTS[@]}"     "$REMOTE_USER@$REMOTE_HOST:$remote_file"     "$local_file"
-}
-
-sync_one_env() {
-  local project_relative="$1"
-  local project_local="$2"
-  local example_file="$3"
-
-  local example_relative="${example_file#"$project_local"/}"
-  local env_relative
-
-  case "$(basename "$example_file")" in
-    .env.example)
-      env_relative="${example_relative%/.env.example}/.env"
-      ;;
-    .env.sample)
-      env_relative="${example_relative%/.env.sample}/.env"
-      ;;
-    *)
-      return
-      ;;
-  esac
-
-  local local_env="$project_local/$env_relative"
-  local remote_env="$REMOTE_ROOT/$project_relative/$env_relative"
-
-  if ! remote_file_exists "$remote_env"; then
-    warn "não existe no servidor: $remote_env"
-    return
-  fi
-
-  mkdir -p "$(dirname "$local_env")"
-
-  local temporary
-  temporary="$(mktemp)"
-
-  if ! download_remote_file "$remote_env" "$temporary"; then
-    rm -f "$temporary"
-    warn "falha ao baixar: $remote_env"
-    return
-  fi
-
-  chmod 600 "$temporary"
-
-  if [[ -f "$local_env" ]] && cmp -s "$temporary" "$local_env"; then
-    rm -f "$temporary"
-    log "env já atualizado: $local_env"
-    return
-  fi
-
-  if [[ -f "$local_env" ]]; then
-    local backup="${local_env}.before-production-sync.$(date +%Y%m%d-%H%M%S)"
-    cp -p "$local_env" "$backup"
-    log "backup local criado: $backup"
-  fi
-
-  mv "$temporary" "$local_env"
-  chmod 600 "$local_env"
-  log "env sincronizado: $remote_env -> $local_env"
-}
-
-sync_project_envs() {
-  local project_relative="$1"
-  local project_local="$LOCAL_ROOT/$project_relative"
-  local found=0
-
-  while IFS= read -r -d '' example_file; do
-    found=1
-    sync_one_env "$project_relative" "$project_local" "$example_file"
-  done < <(
-    find "$project_local"       -type d -name .git -prune -o       -type d \( -name node_modules -o -name .venv -o -name venv \) -prune -o       -type f \( -name '.env.example' -o -name '.env.sample' \)       -print0
-  )
-
-  if ((found == 0)); then
-    log "nenhum .env.example/.env.sample em: $project_relative"
-  fi
-}
-
 ensure_bootstrap_repository() {
   local target="$LOCAL_ROOT/$DEV_AUTOMATION_REL"
 
@@ -281,14 +158,62 @@ process_manifest() {
     ((active_projects += 1))
 
     ensure_repository "$relative" "$url"
-    sync_project_envs "$relative"
   done < "$MANIFEST"
 
   ((active_projects > 0)) || die "nenhum projeto ativo no manifesto"
 }
 
+
+ensure_oracle_wallet() {
+  local source_dir="$LOCAL_ROOT/orgs/sind-vault/config/sto_wallet"
+  local oracle_dir="$HOME/.oracle"
+  local target_dir="$oracle_dir/Wallet_sindicatto"
+  local encrypted_file
+
+  if [[ -d "$target_dir" ]]; then
+    log "wallet Oracle já existe; cópia ignorada: $target_dir"
+    return
+  fi
+
+  if [[ ! -d "$source_dir" ]]; then
+    warn "origem da wallet não encontrada: $source_dir"
+    return
+  fi
+
+  encrypted_file="$(
+    find "$source_dir" -type f -print0 2>/dev/null |
+      while IFS= read -r -d '' file; do
+        if LC_ALL=C grep -a -q 'GITCRYPT' "$file" 2>/dev/null; then
+          printf '%s' "$file"
+          break
+        fi
+      done
+  )"
+
+  if [[ -n "$encrypted_file" ]]; then
+    warn "wallet protegida pelo git-crypt ainda está bloqueada: $encrypted_file"
+    warn "execute git-crypt unlock no sind-vault e rode o setup novamente"
+    return
+  fi
+
+  if ! find "$source_dir" -mindepth 1 -print -quit | grep -q .; then
+    warn "pasta de origem da wallet está vazia: $source_dir"
+    return
+  fi
+
+  mkdir -p "$oracle_dir"
+  chmod 700 "$oracle_dir"
+
+  mkdir "$target_dir"
+  cp -a "$source_dir"/. "$target_dir"/
+  chmod 700 "$target_dir"
+
+  log "wallet Oracle instalada em: $target_dir"
+}
+
 run_local_command_installer() {
   local candidates=(
+    "$LOCAL_ROOT/$DEV_AUTOMATION_REL/deploy/local/install-commands.sh"
     "$LOCAL_ROOT/$DEV_AUTOMATION_REL/scripts/install-commands.sh"
     "$LOCAL_ROOT/$DEV_AUTOMATION_REL/install-commands.sh"
   )
@@ -309,21 +234,15 @@ main() {
   install_base_packages
 
   require_command git
-  require_command ssh
-  require_command scp
-  require_command find
-  require_command cmp
-  require_command mktemp
 
   mkdir -p "$LOCAL_ROOT"
 
   ensure_bootstrap_repository
-  check_remote_access
   process_manifest
+  ensure_oracle_wallet
   run_local_command_installer
 
   log "ambiente local conferido com sucesso"
-  log "o servidor remoto foi usado somente para leitura"
   log "execute: source ~/.bashrc"
 }
 
