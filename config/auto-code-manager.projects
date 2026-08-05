@@ -11,7 +11,6 @@
 #orgs/orbital/orbital-events
 #orgs/orbital/orbital-fin
 #orgs/orbital/orbital-marketing
-#orgs/orbital/orbital-reports
 #orgs/orbital/orbital-ui
 #orgs/orbital/orbital-vouchers
 #orgs/station-app
@@ -21,4 +20,5 @@ infra/amazon-infra
 infra/oracle-infra
 orgs/orbital/orbital-app
 orgs/orbital/orbital-mail
+orgs/orbital/orbital-reports
 orgs/sind-vault
