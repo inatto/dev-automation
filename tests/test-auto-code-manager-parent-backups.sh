@@ -33,6 +33,54 @@ for module in "${MODULES[@]}"; do
   printf '%s\n' "$module" > "$CODE_ROOT/orgs/orbital/$module/module.txt"
 done
 
+mkdir -p \
+  "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local" \
+  "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/remote" \
+  "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/production" \
+  "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/development" \
+  "$CODE_ROOT/orgs/orbital/orbital-app/config"
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local/.env" <<'ENV'
+DB_HOST=127.0.0.1
+DB_PORT=1521
+DB_USER=orbital
+DB_PASSWORD=local-real-password
+TENANT_CODE=anpprev
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/remote/.env.remote" <<'ENV'
+ORACLE_DSN=remote_high
+ORACLE_PASSWORD="remote-real-password"
+DATABASE_URL=postgresql://orbital:url-real-password@db.example.com:5432/orbital
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/production/settings.env" <<'ENV'
+export DATABASE_PASSWORD='production-real-password'
+SMTP_HOST=smtp.example.com
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/development/.env" <<'ENV'
+DB_PASSWORD=development-real-password
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local/auth.env" <<'ENV'
+SSO_CLIENT_ID=email-app
+SSO_CLIENT_SECRET=local-client-secret
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/config/mailer_config.ini" <<'ENV'
+[mailer]
+host=smtp.example.com
+token=mailer-real-token
+password=mailer-real-password
+ENV
+
+cat > "$CODE_ROOT/orgs/orbital/orbital-app/config/services.env" <<'ENV'
+ORACLE_CLIENT_SECRET=oracle-client-secret
+ORACLE_WALLET_PASSWORD=wallet-real-password
+SMTP2GO_API_KEY=smtp2go-real-api-key
+ENV
+
 printf 'compartilhado\n' > "$CODE_ROOT/orgs/orbital/README-parent.txt"
 printf 'inst\n' > "$CODE_ROOT/orgs/inst-app/inst.txt"
 
@@ -47,6 +95,7 @@ PROJECTS
 
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
+: > "$SOUND_LOG"
 
 PATH="$FAKE_BIN:$PATH" \
 FAKE_PS_LOG="$SOUND_LOG" \
@@ -54,8 +103,8 @@ CODE_ROOT="$CODE_ROOT" \
   "$MANAGER" --backup-once >"$LOG_FILE"
 
 sound_count="$(grep -Fc 'System.Media.SoundPlayer' "$SOUND_LOG" || true)"
-if [ "$sound_count" -ne 1 ]; then
-  printf 'FALHOU: a rodada deveria tocar ding.wav uma vez, mas tocou %s vez(es).\n' "$sound_count" >&2
+if [ "$sound_count" -ne 0 ]; then
+  printf 'FALHOU: a rodada de backup não deveria tocar som, mas tocou %s vez(es).\n' "$sound_count" >&2
   cat "$SOUND_LOG" >&2 || true
   exit 1
 fi
@@ -81,6 +130,47 @@ for archive in "${EXPECTED_ARCHIVES[@]}"; do
   printf 'OK ZIP: %s\n' "$archive"
 done
 
+local_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" apps/api/config/local/.env)"
+remote_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" apps/api/config/remote/.env.remote)"
+production_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" apps/api/config/production/settings.env)"
+development_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" apps/api/config/development/.env)"
+auth_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" apps/api/config/local/auth.env)"
+mailer_ini="$(unzip -p "$CODE_ROOT/orbital-app.zip" config/mailer_config.ini)"
+services_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" config/services.env)"
+
+printf '%s\n' "$local_env" | grep -Fxq 'DB_HOST=127.0.0.1'
+printf '%s\n' "$local_env" | grep -Fxq 'DB_USER=orbital'
+printf '%s\n' "$local_env" | grep -Fxq 'DB_PASSWORD=********'
+printf '%s\n' "$local_env" | grep -Fxq 'TENANT_CODE=anpprev'
+printf '%s\n' "$remote_env" | grep -Fxq 'ORACLE_PASSWORD="********"'
+printf '%s\n' "$remote_env" | grep -Fxq 'DATABASE_URL=postgresql://orbital:********@db.example.com:5432/orbital'
+printf '%s\n' "$production_env" | grep -Fxq "export DATABASE_PASSWORD='********'"
+printf '%s\n' "$production_env" | grep -Fxq 'SMTP_HOST=smtp.example.com'
+printf '%s\n' "$development_env" | grep -Fxq 'DB_PASSWORD=********'
+printf '%s\n' "$auth_env" | grep -Fxq 'SSO_CLIENT_ID=email-app'
+printf '%s\n' "$auth_env" | grep -Fxq 'SSO_CLIENT_SECRET=********'
+printf '%s\n' "$mailer_ini" | grep -Fxq 'host=smtp.example.com'
+printf '%s\n' "$mailer_ini" | grep -Fxq 'token=********'
+printf '%s\n' "$mailer_ini" | grep -Fxq 'password=********'
+printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_CLIENT_SECRET=********'
+printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_WALLET_PASSWORD=********'
+printf '%s\n' "$services_env" | grep -Fxq 'SMTP2GO_API_KEY=********'
+
+grep -Fxq 'DB_PASSWORD=local-real-password' "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local/.env"
+grep -Fxq 'ORACLE_PASSWORD="remote-real-password"' "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/remote/.env.remote"
+grep -Fxq "export DATABASE_PASSWORD='production-real-password'" "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/production/settings.env"
+grep -Fxq 'SSO_CLIENT_SECRET=local-client-secret' "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local/auth.env"
+grep -Fxq 'token=mailer-real-token' "$CODE_ROOT/orgs/orbital/orbital-app/config/mailer_config.ini"
+grep -Fxq 'SMTP2GO_API_KEY=smtp2go-real-api-key' "$CODE_ROOT/orgs/orbital/orbital-app/config/services.env"
+
+if unzip -p "$CODE_ROOT/orbital-app.zip" | grep -Fq 'real-password'; then
+  printf 'FALHOU: uma senha real vazou no ZIP do orbital-app.\n' >&2
+  exit 1
+fi
+
+printf 'OK: configs .env/.ini em qualquer pasta config preservados com apenas os segredos sanitizados\n'
+printf 'OK: arquivos originais permaneceram intactos\n'
+
 # O ZIP pai contém os cinco ZIPs filhos e os arquivos próprios da pasta pai.
 for module in "${MODULES[@]}"; do
   unzip -Z1 "$CODE_ROOT/orbital.zip" | grep -Fxq "$module.zip"
@@ -105,4 +195,4 @@ identified="$(CODE_ROOT="$CODE_ROOT" "$MANAGER" --identify-zip orbital.zip)"
 }
 
 printf 'OK: orbital.zip contém os cinco ZIPs filhos, arquivos do pai e está dentro de Code.zip\n'
-printf 'OK: ding.wav tocou exatamente uma vez após a rodada completa\n'
+printf 'OK: backup concluído sem aviso sonoro\n'
