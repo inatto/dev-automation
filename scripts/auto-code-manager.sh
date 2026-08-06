@@ -724,6 +724,16 @@ import_one_zip() {
     "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
 
+  # Configurações locais/remotas/de produção entram sanitizadas nos backups para
+  # análise, mas nunca devem voltar pelo download/unzip. Isso preserva senhas e
+  # qualquer configuração real já existente, sem bloquear outras pastas config.
+  {
+    echo "- **/config/local/***"
+    echo "- **/config/remote/***"
+    echo "- **/config/production/***"
+  } >> "$unzip_filter_file"
+
+  log "Protegendo no unzip: */config/local/**, */config/remote/** e */config/production/**"
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
     log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
