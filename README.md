@@ -46,10 +46,12 @@ Resultado esperado:
 bots/dev-automation
 ```
 
-#### Backups de grupos com dois níveis
+#### Backups hierárquicos de grupos
 
-Quando os projetos configurados estão dentro de uma pasta agrupadora, o monitor
-mantém os ZIPs individuais e também gera o ZIP da pasta pai. Exemplo:
+Quando projetos ativos configurados estão abaixo de uma pasta agrupadora, o monitor
+mantém os ZIPs individuais e também gera ZIPs para os níveis intermediários abaixo
+da categoria raiz (`orgs`, `infra`, `bots`, etc.). A regra é estrutural e não depende
+do nome da pasta. Exemplo:
 
 ```text
 orgs/orbital/orbital-app     -> orbital-app.zip
@@ -60,13 +62,13 @@ orgs/orbital/orbital-reports -> orbital-reports.zip
 orgs/orbital                  -> orbital.zip
 ```
 
-O `orbital.zip` representa diretamente a raiz de `orgs/orbital`. Ele contém:
+O `orbital.zip` contém exclusivamente os ZIPs dos filhos ativos imediatos:
+`orbital-app.zip`, `orbital-assets.zip`, `orbital-fin.zip`, `orbital-mail.zip` e
+`orbital-reports.zip`. Arquivos soltos e pastas da raiz `orgs/orbital` não entram
+no pacote agrupador.
 
-- os arquivos próprios da pasta pai, como configurações compartilhadas;
-- `orbital-app.zip`, `orbital-assets.zip`, `orbital-fin.zip`,
-  `orbital-mail.zip` e `orbital-reports.zip`.
-
-As pastas completas dos módulos não são duplicadas dentro do ZIP pai. Ao receber
+Em hierarquias mais profundas, cada agrupador contém somente os ZIPs dos filhos
+ativos do nível imediatamente abaixo. Ao receber
 `orbital.zip`, o importador valida primeiro todos os ZIPs filhos e depois extrai
 cada um diretamente em seu módulo correspondente. Os ZIPs filhos não ficam
 soltos em `orgs/orbital` e o ZIP pai só é apagado após todas as conferências.

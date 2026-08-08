@@ -51,12 +51,14 @@ O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
 `/home/daniel/Code`. As entradas continuam sendo usadas pelo backup e pelos
 comandos globais individuais dos projetos.
 
-Quando houver entradas com exatamente três segmentos, como
-`orgs/orbital/orbital-app`, o backup também inclui automaticamente a pasta pai
-`orgs/orbital`, gerando `orbital.zip` além dos ZIPs individuais. O ZIP pai leva
-os arquivos próprios da pasta agrupadora e os ZIPs dos módulos. Na importação,
-os ZIPs filhos são validados e extraídos em suas respectivas pastas antes de o
-ZIP pai ser removido.
+Quando houver níveis intermediários abaixo da categoria raiz, eles são inferidos
+automaticamente como agrupadores, sem nomes ou profundidades específicos. Por
+exemplo, `orgs/orbital/orbital-app` gera `orbital-app.zip` e também participa de
+`orbital.zip`; uma árvore mais profunda gera os agrupadores necessários em cada
+nível. Cada ZIP agrupador contém exclusivamente os ZIPs dos filhos ativos
+imediatos, nunca arquivos soltos ou pastas próprias do agrupador. Na importação,
+os ZIPs filhos são validados e extraídos recursivamente antes de o ZIP pai ser
+removido.
 
 ## Lote de Downloads
 

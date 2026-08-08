@@ -13,6 +13,8 @@ IGNORE_UNZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-unzip"
 PROJECTS_FILE="$PROJECT_ROOT/config/auto-code-manager.projects"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
+STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
+PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
@@ -466,39 +468,53 @@ configured_projects() {
 
 inferred_parent_projects() {
   local project parent
+  local -a parents=()
   declare -A seen=()
 
-  # Um projeto com exatamente três segmentos, por exemplo
-  # orgs/orbital/orbital-app, também gera o backup do grupo pai:
-  # orgs/orbital -> orbital.zip.
+  # O primeiro segmento é a categoria de CODE_ROOT (orgs, infra, bots, ...).
+  # Qualquer nível intermediário abaixo dela vira um agrupador de backup.
+  # Ex.:
+  #   orgs/orbital/orbital-app -> orgs/orbital
+  #   orgs/acme/platform/api   -> orgs/acme/platform e orgs/acme
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     project="${project#./}"
     project="${project%/}"
-
-    [[ "$project" =~ ^[^/]+/[^/]+/[^/]+$ ]] || continue
     parent="${project%/*}"
 
-    if [ -z "${seen[$parent]+x}" ]; then
-      printf '%s\n' "$parent"
-      seen["$parent"]=1
-    fi
+    while [[ "$parent" == */* ]]; do
+      if [ -z "${seen[$parent]+x}" ]; then
+        parents+=("$parent")
+        seen["$parent"]=1
+      fi
+      parent="${parent%/*}"
+    done
   done < <(configured_projects)
+
+  # Grupos mais profundos precisam ser gerados antes dos seus pais para que o
+  # ZIP do filho já exista quando o pacote do nível acima for montado.
+  if [ "${#parents[@]}" -gt 0 ]; then
+    printf '%s\n' "${parents[@]}" \
+      | awk -F/ '{ print NF "\t" $0 }' \
+      | sort -t $'\t' -k1,1nr -k2,2 \
+      | cut -f2-
+  fi
 }
 
 direct_child_projects() {
   local parent="$1"
   local project
 
+  # Filhos imediatos podem ser projetos configurados ou agrupadores inferidos.
+  # Assim a mesma regra funciona em qualquer profundidade sem nomes especiais.
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    project="${project#./}"
-    project="${project%/}"
+    [ "$project" != "$parent" ] || continue
 
     if [ "${project%/*}" = "$parent" ]; then
       printf '%s\n' "$project"
     fi
-  done < <(configured_projects)
+  done < <(backup_targets)
 }
 
 backup_targets() {
@@ -724,9 +740,9 @@ import_one_zip() {
     "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
 
-  # Configurações locais/remotas/de produção entram sanitizadas nos backups para
-  # análise, mas nunca devem voltar pelo download/unzip. Isso preserva senhas e
-  # qualquer configuração real já existente, sem bloquear outras pastas config.
+  # Configurações protegidas nunca sobrescrevem o arquivo real. Elas são retiradas
+  # do rsync normal e comparadas com a referência sanitizada enviada no backup.
+  # Somente arquivos novos ou alterados reaparecem no projeto, com sufixo .external.
   {
     echo "- **/config/local/***"
     echo "- **/config/remote/***"
@@ -737,6 +753,12 @@ import_one_zip() {
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
     log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    return 1
+  fi
+
+  if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
+    log "ERRO: falha ao comparar configs protegidos. O ZIP foi mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
@@ -1238,6 +1260,62 @@ print(f"{changed_files}:{changed_values}")
 PY_SANITIZE
 }
 
+protected_config_relpath() {
+  case "$1" in
+    */config/local/*|*/config/remote/*|*/config/production/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+protected_config_baseline_dir() {
+  local project="$1"
+  printf '%s/%s\n' "$PROTECTED_CONFIG_BASELINES_DIR" "$(project_archive_name "$project")"
+}
+
+save_protected_config_baseline() {
+  local project="$1"
+  local sanitized_root="$2"
+  local baseline_dir rel destination
+
+  baseline_dir="$(protected_config_baseline_dir "$project")"
+  rm -rf -- "$baseline_dir"
+  mkdir -p -- "$baseline_dir"
+
+  while IFS= read -r -d '' rel; do
+    protected_config_relpath "$rel" || continue
+    destination="$baseline_dir/$rel"
+    mkdir -p -- "$(dirname -- "$destination")"
+    cp -p -- "$sanitized_root/$rel" "$destination"
+  done < <(find "$sanitized_root" -type f -printf '%P\0')
+}
+
+materialize_changed_protected_configs() {
+  local project="$1"
+  local source_root="$2"
+  local filtered_root="$3"
+  local baseline_dir rel baseline external changed=0 unchanged=0
+
+  baseline_dir="$(protected_config_baseline_dir "$project")"
+
+  while IFS= read -r -d '' rel; do
+    protected_config_relpath "$rel" || continue
+    baseline="$baseline_dir/$rel"
+
+    if [ -f "$baseline" ] && cmp -s -- "$source_root/$rel" "$baseline"; then
+      unchanged=$((unchanged + 1))
+      continue
+    fi
+
+    external="$filtered_root/$rel.external"
+    mkdir -p -- "$(dirname -- "$external")"
+    cp -p -- "$source_root/$rel" "$external"
+    changed=$((changed + 1))
+    log "ENV EXTERNAL: $rel -> $rel.external"
+  done < <(find "$source_root" -type f -printf '%P\0')
+
+  log "ENV protegidos: $changed alterado(s)/novo(s), $unchanged sem mudança."
+}
+
 backup_project() {
   local project="$1"
   local project_dir
@@ -1245,8 +1323,10 @@ backup_project() {
   local temp_dir
   local temp_zip
   local final_zip
-  local filter_file
-  local child child_name child_zip child_count=0
+  local filter_file=""
+  local child child_name child_zip child_count
+  local sanitize_result sanitized_files sanitized_values
+  local -a children=()
 
   project_dir="$(project_path "$project")"
   archive_name="$(project_archive_name "$project")"
@@ -1258,74 +1338,71 @@ backup_project() {
   fi
 
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
-  filter_file="$(mktemp "/tmp/auto-code-filter-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
   final_zip="$(project_archive_path "$project")"
-
-  make_project_rsync_filter \
-    "$IGNORE_ZIP_FILE" \
-    "$project_dir" \
-    "auto-code-manager.ignore-zip" \
-    "$filter_file"
-
-  # Para uma pasta-pai inferida (orgs/orbital), o pacote contém os arquivos
-  # próprios da pasta-pai e os ZIPs atuais dos módulos. As pastas dos módulos
-  # não são duplicadas dentro do ZIP pai.
-  while IFS= read -r child || [ -n "$child" ]; do
-    [ -n "$child" ] || continue
-    child_name="$(project_archive_name "$child")"
-    printf '%s\n' "- /$child_name/***" >> "$filter_file"
-    printf '%s\n' "- /$child_name.zip" >> "$filter_file"
-    child_count=$((child_count + 1))
-  done < <(direct_child_projects "$project")
+  mapfile -t children < <(direct_child_projects "$project")
+  child_count="${#children[@]}"
 
   log "Gerando backup: $project -> $final_zip"
 
-  if ! rsync -a \
-    --filter="merge $filter_file" \
-    "$project_dir/" \
-    "$temp_dir/"; then
-
-    log "ERRO no rsync do projeto: $project"
-    rm -rf -- "$temp_dir" "$filter_file"
-    return 1
-  fi
-
-  local sanitize_result sanitized_files sanitized_values
-  if ! sanitize_result="$(sanitize_backup_config_passwords "$temp_dir")"; then
-    log "ERRO ao sanitizar senhas dos configs no backup: $project"
-    rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
-    return 1
-  fi
-
-  sanitized_files="${sanitize_result%%:*}"
-  sanitized_values="${sanitize_result##*:}"
-  if [ "${sanitized_values:-0}" -gt 0 ]; then
-    log "Configs sanitizados no ZIP: ${sanitized_values} senha(s) em ${sanitized_files} arquivo(s)."
-  fi
-
   if [ "$child_count" -gt 0 ]; then
-    child_count=0
-    while IFS= read -r child || [ -n "$child" ]; do
-      [ -n "$child" ] || continue
+    # Um agrupador contém exclusivamente os ZIPs dos filhos ativos imediatos.
+    # Nenhum arquivo solto ou pasta do agrupador entra no pacote.
+    for child in "${children[@]}"; do
       child_name="$(project_archive_name "$child")"
       child_zip="$(project_archive_path "$child")"
 
       if [ ! -s "$child_zip" ] || ! unzip -tq "$child_zip" >/dev/null 2>&1; then
         log "ERRO: ZIP filho ausente ou inválido para o pacote pai: $child_zip"
-        rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+        rm -rf -- "$temp_dir" "$temp_zip"
         return 1
       fi
 
       cp -f -- "$child_zip" "$temp_dir/$child_name.zip" || {
         log "ERRO ao incluir ZIP filho no pacote pai: $child_zip"
-        rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+        rm -rf -- "$temp_dir" "$temp_zip"
         return 1
       }
-      child_count=$((child_count + 1))
-    done < <(direct_child_projects "$project")
+    done
 
-    log "Pacote pai preparado com $child_count ZIP(s) filho(s)."
+    log "Pacote pai preparado somente com $child_count ZIP(s) filho(s)."
+  else
+    filter_file="$(mktemp "/tmp/auto-code-filter-${archive_name}-XXXXXX")"
+
+    make_project_rsync_filter \
+      "$IGNORE_ZIP_FILE" \
+      "$project_dir" \
+      "auto-code-manager.ignore-zip" \
+      "$filter_file"
+
+    if ! rsync -a \
+      --filter="merge $filter_file" \
+      "$project_dir/" \
+      "$temp_dir/"; then
+
+      log "ERRO no rsync do projeto: $project"
+      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+      return 1
+    fi
+
+    if ! sanitize_result="$(sanitize_backup_config_passwords "$temp_dir")"; then
+      log "ERRO ao sanitizar senhas dos configs no backup: $project"
+      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+      return 1
+    fi
+
+    sanitized_files="${sanitize_result%%:*}"
+    sanitized_values="${sanitize_result##*:}"
+    if [ "${sanitized_values:-0}" -gt 0 ]; then
+      log "Configs sanitizados no ZIP: ${sanitized_values} senha(s) em ${sanitized_files} arquivo(s)."
+    fi
+
+    if ! save_protected_config_baseline "$project" "$temp_dir"; then
+      log "ERRO ao salvar referência sanitizada dos configs protegidos: $project"
+      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+      return 1
+    fi
+    log "Referência sanitizada dos configs protegidos atualizada."
   fi
 
   if ! (
@@ -1333,18 +1410,19 @@ backup_project() {
     zip -qry "$temp_zip" .
   ); then
     log "ERRO ao compactar projeto: $project"
-    rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
 
   if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
     log "ERRO: validação do backup falhou: $project"
-    rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
 
   mv -f -- "$temp_zip" "$final_zip"
-  rm -rf -- "$temp_dir" "$filter_file"
+  rm -rf -- "$temp_dir"
+  [ -z "$filter_file" ] || rm -f -- "$filter_file"
 
   log "OK backup: $final_zip"
   return 0

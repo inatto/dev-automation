@@ -171,7 +171,7 @@ fi
 printf 'OK: configs .env/.ini em qualquer pasta config preservados com apenas os segredos sanitizados\n'
 printf 'OK: arquivos originais permaneceram intactos\n'
 
-# O ZIP pai contém os cinco ZIPs filhos e os arquivos próprios da pasta pai.
+# O ZIP pai contém exclusivamente os cinco ZIPs filhos ativos.
 for module in "${MODULES[@]}"; do
   unzip -Z1 "$CODE_ROOT/orbital.zip" | grep -Fxq "$module.zip"
 
@@ -181,7 +181,16 @@ for module in "${MODULES[@]}"; do
   fi
 
 done
-unzip -Z1 "$CODE_ROOT/orbital.zip" | grep -Fxq 'README-parent.txt'
+if unzip -Z1 "$CODE_ROOT/orbital.zip" | grep -Fxq 'README-parent.txt'; then
+  printf 'FALHOU: orbital.zip incluiu arquivo solto da pasta pai.\n' >&2
+  exit 1
+fi
+
+if [ "$(unzip -Z1 "$CODE_ROOT/orbital.zip" | wc -l)" -ne "${#MODULES[@]}" ]; then
+  printf 'FALHOU: orbital.zip deve conter somente os ZIPs filhos ativos.\n' >&2
+  unzip -Z1 "$CODE_ROOT/orbital.zip" >&2
+  exit 1
+fi
 
 for archive in "${EXPECTED_ARCHIVES[@]}"; do
   [ "$archive" = 'Code.zip' ] && continue
@@ -194,5 +203,5 @@ identified="$(CODE_ROOT="$CODE_ROOT" "$MANAGER" --identify-zip orbital.zip)"
   exit 1
 }
 
-printf 'OK: orbital.zip contém os cinco ZIPs filhos, arquivos do pai e está dentro de Code.zip\n'
+printf 'OK: orbital.zip contém somente os cinco ZIPs filhos ativos e está dentro de Code.zip\n'
 printf 'OK: backup concluído sem aviso sonoro\n'
