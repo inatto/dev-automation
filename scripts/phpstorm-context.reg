@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\Directory\shell\PhpStorm]
+@="Open in PhpStorm"
+"Icon"="C:\\Program Files\\JetBrains\\PhpStorm 2024.3.7.1\\bin\\phpstorm64.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\PhpStorm\command]
+@="\"C:\\Program Files\\JetBrains\\PhpStorm 2024.3.7.1\\bin\\phpstorm64.exe\" \"%1\""
