@@ -151,28 +151,15 @@ Para criar os desktops que faltam e aplicar os nomes:
 desktops
 ```
 
-Para também abrir o ambiente completo de cada projeto nos três monitores:
-
-```bash
-desktops --apps
-```
-
-Layout automático de cada desktop de projeto:
-
-- monitor físico esquerdo: ChatGPT Desktop;
-- monitor físico central: PhpStorm aberto exatamente naquele projeto;
-- monitor físico direito: Chrome `Profile 2` (Sindicatto) em cima e Windows Terminal embaixo;
-- o Terminal entra na pasta do projeto e executa o comando geral de mesmo nome do projeto.
-
-Os monitores são ordenados pela posição física informada pelo Windows (esquerda → centro → direita), sem depender da numeração 1/2/3. O Desktop 1 não recebe apps de projeto e, ao terminar, o comando volta ao desktop em que foi iniciado.
+O comando `desktops` cuida somente dos desktops virtuais. Ele não abre, move ou posiciona aplicativos.
 
 O mesmo pode ser executado pelo comando geral:
 
 ```bash
-dev-manager desktops --apps
+dev-manager desktops
 ```
 
-Ajustes de perfil/layout ficam em `config/desktops.env`. A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-manager.projects`. Desktops extras existentes não são removidos automaticamente.
+A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-manager.projects`. Desktops extras existentes não são removidos automaticamente.
 
 ### `chromes`
 
@@ -188,7 +175,7 @@ chromes
 ### `phpstorm-dev`
 
 Abre somente `/home/daniel/Code/bots/dev-automation` no PhpStorm. O comando
-`phpstorms` ignora esse projeto para evitar abrir duas vezes.
+`phpstorms` também inclui esse projeto quando ele estiver ativo em `config/auto-code-manager.projects`.
 
 ```bash
 phpstorm-dev

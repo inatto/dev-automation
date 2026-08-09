@@ -13,5 +13,5 @@ orbital-vouchers;module;4110;8110;admin.localhost;/orbital-vouchers
 orbital-legal;module;4111;8111;admin.localhost;/orbital-legal
 station-app;base;4002;8002;painel.localhost;/
 site-inst;base;4003;8003;site-inst.localhost;/
-conv-app;base;4004;8004;conv-app.localhost;/
+asaclub-app;base;4004;8004;conv-app.localhost;/
 amazon-infra-monitor;base;4005;8005;amazon-infra-monitor.localhost;/

@@ -12,5 +12,4 @@ trap cleanup EXIT
 printf '%s\n' 'bots/dev-automation' > "$TEMP_CONFIG"
 
 PHPSTORMS_PROJECTS_FILE="$TEMP_CONFIG" \
-PHPSTORMS_INCLUDE_DEV_AUTOMATION=1 \
   "$SCRIPT_DIR/phpstorms.sh"

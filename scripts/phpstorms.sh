@@ -8,7 +8,6 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 CONFIG_FILE="${PHPSTORMS_PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PHPSTORMS_OPEN_DELAY_SECONDS:-1}"
-INCLUDE_DEV_AUTOMATION="${PHPSTORMS_INCLUDE_DEV_AUTOMATION:-0}"
 
 log() { printf '[phpstorms] %s\n' "$*"; }
 fail() { printf '[phpstorms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -20,9 +19,8 @@ Uso:
   phpstorms --list   Mostra as pastas que seriam abertas, sem iniciar o PhpStorm
   phpstorms --help   Mostra esta ajuda
 
-Regra de agrupamento:
-  orgs/orbital/orbital-app + outros irmãos -> abre orgs/orbital
-  orgs/asaclub-app, orgs/email-app etc.     -> abre cada projeto individualmente
+Regra:
+  abre exatamente cada projeto ativo de auto-code-manager.projects, na mesma ordem usada por desktops
 EOF_HELP
 }
 
@@ -45,11 +43,11 @@ esac
 [[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
 [[ -d "$CODE_ROOT" ]] || fail "raiz de projetos não encontrada: $CODE_ROOT"
 
-# Guarda os projetos válidos usando caminhos relativos à CODE_ROOT. O agrupamento
-# é decidido pela profundidade relativa, não pelo fato de vários projetos terem
-# o mesmo diretório de primeiro nível (como orgs/).
-relative_projects=()
-declare -A seen_relative_projects=()
+# Usa exatamente a mesma fonte canônica e a mesma ordem do comando desktops.
+# Não agrupa projetos irmãos e não ignora dev-automation. Se uma pasta ativa
+# não existir, falha para evitar que phpstorms fique diferente de desktops.
+resolved_projects=()
+declare -A seen_projects=()
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="${line#"${line%%[![:space:]]*}"}"
@@ -59,55 +57,16 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   [[ -n "$line" ]] || continue
 
   project_path="$CODE_ROOT/$line"
-  if [[ ! -d "$project_path" ]]; then
-    log "ignorado; pasta não encontrada: $project_path"
-    continue
-  fi
+  [[ -d "$project_path" ]] || fail "projeto ativo não encontrado: $project_path"
 
   project_real_path="$(cd -- "$project_path" && pwd -P)"
-  if [[ "$INCLUDE_DEV_AUTOMATION" != "1" && "$project_real_path" == "$PROJECT_ROOT" ]]; then
-    log "ignorado no comando phpstorms: $project_path"
-    continue
-  fi
-
-  if [[ -z "${seen_relative_projects["$line"]:-}" ]]; then
-    seen_relative_projects["$line"]=1
-    relative_projects+=("$line")
+  if [[ -z "${seen_projects["$project_real_path"]:-}" ]]; then
+    seen_projects["$project_real_path"]=1
+    resolved_projects+=("$project_real_path")
   fi
 done < "$CONFIG_FILE"
 
-((${#relative_projects[@]} > 0)) || fail 'nenhum projeto válido encontrado na configuração.'
-
-# Conta somente grupos exatamente no padrão categoria/grupo/projeto.
-# Isso impede que orgs/asaclub-app + orgs/email-app sejam reduzidos para orgs/.
-declare -A group_counts=()
-for relative in "${relative_projects[@]}"; do
-  if [[ "$relative" == */*/* && "$relative" != */*/*/* ]]; then
-    group="${relative%/*}"
-    group_counts["$group"]=$(( ${group_counts["$group"]:-0} + 1 ))
-  fi
-done
-
-resolved_projects=()
-declare -A seen_projects=()
-for relative in "${relative_projects[@]}"; do
-  target_relative="$relative"
-
-  if [[ "$relative" == */*/* && "$relative" != */*/*/* ]]; then
-    group="${relative%/*}"
-    if (( ${group_counts["$group"]:-0} >= 2 )); then
-      target_relative="$group"
-    fi
-  fi
-
-  target_path="$(cd -- "$CODE_ROOT/$target_relative" && pwd -P)"
-  if [[ -z "${seen_projects["$target_path"]:-}" ]]; then
-    seen_projects["$target_path"]=1
-    resolved_projects+=("$target_path")
-  fi
-done
-
-((${#resolved_projects[@]} > 0)) || fail 'nenhum projeto restou após resolver os agrupamentos.'
+((${#resolved_projects[@]} > 0)) || fail 'nenhum projeto ativo encontrado na configuração.'
 
 if ((LIST_ONLY == 1)); then
   printf '%s\n' "${resolved_projects[@]}"
