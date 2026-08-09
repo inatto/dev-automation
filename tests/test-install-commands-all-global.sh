@@ -37,6 +37,7 @@ commands=(
   chromes
   phpstorms
   phpstorm-dev
+  local-nginx
   oracle-monitor
   sample-app
 )

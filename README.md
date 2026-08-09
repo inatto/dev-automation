@@ -14,6 +14,7 @@ desktops
 chromes
 phpstorms
 phpstorm-dev
+local-nginx
 orbital-app
 station-app
 inst-app
@@ -127,6 +128,15 @@ dos projetos configurados. Para atualizar sem iniciar o monitor:
 
 ```bash
 dev-manager commands
+```
+
+O instalador geral também cria o comando global `local-nginx`, dedicado somente
+ao gateway Nginx local:
+
+```bash
+local-nginx            # gera, instala, valida e recarrega o Nginx
+local-nginx --validate # somente valida os arquivos de configuração
+local-nginx --render   # mostra a configuração gerada sem instalar
 ```
 
 Para encerrar, pressione `Ctrl+C`. Não existe sessão separada para anexar ou
