@@ -4,6 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SERVICES_FILE="${SERVICES_FILE:-$PROJECT_ROOT/config/services.csv}"
+STATIC_LOCATIONS_FILE="${STATIC_LOCATIONS_FILE:-$PROJECT_ROOT/config/static-locations.csv}"
 MANAGED_NAME="${MANAGED_NAME:-dev-automation-local}"
 NGINX_AVAILABLE_DIR="${NGINX_AVAILABLE_DIR:-/etc/nginx/sites-available}"
 NGINX_ENABLED_DIR="${NGINX_ENABLED_DIR:-/etc/nginx/sites-enabled}"
@@ -31,7 +32,7 @@ validate_services() {
 
   local line_number=0
   local application type web_port api_port host path extra
-  local -A web_ports=() api_ports=() routes=()
+  local -A applications=() web_ports=() api_ports=() routes=()
   local services=0
 
   while IFS=';' read -r application type web_port api_port host path extra || [[ -n "${application:-}${type:-}${web_port:-}${api_port:-}${host:-}${path:-}${extra:-}" ]]; do
@@ -63,8 +64,19 @@ validate_services() {
     [[ "$path" == /* ]] || fail "linha $line_number tem path inválido: $path"
     [[ "$path" == '/' || "$path" != */ ]] || fail "linha $line_number não deve terminar path com /: $path"
 
-    [[ -z "${web_ports[$web_port]+x}" ]] || fail "porta Web duplicada: $web_port (${web_ports[$web_port]} e $application)"
-    [[ -z "${api_ports[$api_port]+x}" ]] || fail "porta API duplicada: $api_port (${api_ports[$api_port]} e $application)"
+    local signature="$type|$web_port|$api_port"
+    if [[ -n "${applications[$application]+x}" ]]; then
+      [[ "${applications[$application]}" == "$signature" ]] ||
+        fail "aplicação $application repetida com tipo ou portas diferentes"
+    else
+      [[ -z "${web_ports[$web_port]+x}" ]] ||
+        fail "porta Web duplicada: $web_port (${web_ports[$web_port]} e $application)"
+      [[ -z "${api_ports[$api_port]+x}" ]] ||
+        fail "porta API duplicada: $api_port (${api_ports[$api_port]} e $application)"
+      applications[$application]="$signature"
+      web_ports[$web_port]="$application"
+      api_ports[$api_port]="$application"
+    fi
 
     local route_key="$host|$path"
     [[ -z "${routes[$route_key]+x}" ]] || fail "path duplicado no host $host: $path (${routes[$route_key]} e $application)"
@@ -73,14 +85,59 @@ validate_services() {
       fail "linha $line_number: módulo não pode usar path /"
     fi
 
-    web_ports[$web_port]="$application"
-    api_ports[$api_port]="$application"
     routes[$route_key]="$application"
     ((services += 1))
   done < "$SERVICES_FILE"
 
   ((services > 0)) || fail "nenhum serviço cadastrado"
   [[ "${routes['admin.localhost|/']:-}" == 'orbital-app' ]] || fail "admin.localhost / deve pertencer ao orbital-app"
+}
+
+validate_static_locations() {
+  [[ -f "$STATIC_LOCATIONS_FILE" ]] || fail "arquivo não encontrado: $STATIC_LOCATIONS_FILE"
+
+  local application type web_port api_port host path extra
+  local -A applications=() routes=()
+  while IFS=';' read -r application type web_port api_port host path extra; do
+    [[ "$application" == 'application' ]] && continue
+    application="$(trim "$application")"
+    [[ -n "$application" ]] && applications[$application]=1
+  done < "$SERVICES_FILE"
+
+  local line_number=0 public_path physical_path
+  local locations=0
+  while IFS=';' read -r application public_path physical_path extra || [[ -n "${application:-}${public_path:-}${physical_path:-}${extra:-}" ]]; do
+    ((line_number += 1))
+
+    application="$(trim "${application:-}")"
+    public_path="$(trim "${public_path:-}")"
+    physical_path="$(trim "${physical_path:-}")"
+    extra="$(trim "${extra:-}")"
+
+    if ((line_number == 1)); then
+      [[ "$application;$public_path;$physical_path" == 'application;public_path;physical_path' && -z "$extra" ]] ||
+        fail "cabeçalho inválido em $STATIC_LOCATIONS_FILE"
+      continue
+    fi
+
+    [[ -n "$application" && -n "$public_path" && -n "$physical_path" ]] ||
+      fail "linha $line_number de $STATIC_LOCATIONS_FILE tem campo obrigatório vazio"
+    [[ -z "$extra" ]] || fail "linha $line_number de $STATIC_LOCATIONS_FILE tem campos extras"
+    [[ -n "${applications[$application]+x}" ]] ||
+      fail "linha $line_number referencia aplicação desconhecida: $application"
+    [[ "$public_path" == /*/ ]] ||
+      fail "linha $line_number tem caminho público inválido: $public_path"
+    [[ "$physical_path" == /*/ ]] ||
+      fail "linha $line_number tem caminho físico inválido: $physical_path"
+
+    local route_key="$application|$public_path"
+    [[ -z "${routes[$route_key]+x}" ]] ||
+      fail "rota estática duplicada para $application: $public_path"
+    routes[$route_key]=1
+    ((locations += 1))
+  done < "$STATIC_LOCATIONS_FILE"
+
+  ((locations > 0)) || fail "nenhuma rota estática cadastrada"
 }
 
 collect_hosts() {
@@ -97,8 +154,38 @@ emit_proxy_headers() {
 EOF_HEADERS
 }
 
+emit_static_locations_for_host() {
+  local target_host="$1"
+  local application type web_port api_port host path extra
+  local -A host_applications=()
+
+  while IFS=';' read -r application type web_port api_port host path extra; do
+    [[ "$application" == 'application' ]] && continue
+    application="$(trim "$application")"
+    host="$(trim "$host")"
+    [[ "$host" == "$target_host" ]] && host_applications[$application]=1
+  done < "$SERVICES_FILE"
+
+  local public_path physical_path
+  while IFS=';' read -r application public_path physical_path extra; do
+    [[ "$application" == 'application' ]] && continue
+    application="$(trim "$application")"
+    public_path="$(trim "$public_path")"
+    physical_path="$(trim "$physical_path")"
+    [[ -n "${host_applications[$application]+x}" ]] || continue
+
+    cat <<EOF_STATIC
+    location ^~ $public_path {
+        alias $physical_path;
+    }
+
+EOF_STATIC
+  done < "$STATIC_LOCATIONS_FILE"
+}
+
 generate_config() {
   validate_services
+  validate_static_locations
 
   local host application type web_port api_port row_host path extra
   local -a hosts=()
@@ -162,6 +249,8 @@ $(emit_proxy_headers)
 
 EOF_LOCATION
     done < "$SERVICES_FILE"
+
+    emit_static_locations_for_host "$host"
 
     printf '}\n\n'
   done
@@ -300,6 +389,7 @@ activate_nginx() {
 install_config() {
   ensure_nginx
   validate_services
+  validate_static_locations
   ensure_tls_certificate
 
   local temp_file backup_file had_previous=0
@@ -347,7 +437,8 @@ case "${1:-}" in
     ;;
   --validate)
     validate_services
-    log 'services.csv válido'
+    validate_static_locations
+    log 'services.csv e static-locations.csv válidos'
     ;;
   ''|--install)
     install_config

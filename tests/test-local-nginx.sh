@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SCRIPT="$PROJECT_ROOT/scripts/local-nginx.sh"
 SERVICES="$PROJECT_ROOT/config/services.csv"
+STATIC_LOCATIONS="$PROJECT_ROOT/config/static-locations.csv"
 TEMP_ROOT="$(mktemp -d /tmp/local-nginx-test-XXXXXX)"
 
 cleanup() {
@@ -37,16 +38,18 @@ cmp -s "$config_one" "$config_two" || fail 'render repetido não é idempotente'
 # Hosts base: codinomes locais e nomes próprios.
 grep -Fq 'server_name admin.localhost;' "$config_one" || fail 'admin.localhost ausente'
 grep -Fq 'server_name painel.localhost;' "$config_one" || fail 'painel.localhost ausente'
-grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'site-inst.localhost ausente'
+grep -Fq 'server_name anpprev.localhost;' "$config_one" || fail 'anpprev.localhost ausente'
+grep -Fq 'server_name sinproprev.localhost;' "$config_one" || fail 'sinproprev.localhost ausente'
+! grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'alias tecnico site-inst.localhost permaneceu publico'
 grep -Fq 'server_name conv-app.localhost;' "$config_one" || fail 'conv-app.localhost ausente'
 grep -Fq 'server_name amazon-infra-monitor.localhost;' "$config_one" || fail 'amazon-infra-monitor.localhost ausente'
-[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq 5 ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
-[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq 5 ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
-[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq 5 ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
-[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq 5 ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
-[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq 5 ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
-[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq 5 ]] || fail 'cada gateway HTTPS deve usar certificado'
-[[ "$(grep -c '^    location / {$' "$config_one")" -eq 5 ]] || fail 'cada app-base deve ter exatamente um location /'
+[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
+[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
+[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
+[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
+[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq 6 ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
+[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq 6 ]] || fail 'cada gateway HTTPS deve usar certificado'
+[[ "$(grep -c '^    location / {$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve ter exatamente um location /'
 
 # Orbital é o foco do admin.localhost.
 admin_block="$TEMP_ROOT/admin.conf"
@@ -72,16 +75,27 @@ for module_name in orbital-assets orbital-content orbital-crm orbital-events orb
   grep -Fq "location /$module_name/ {" "$admin_block" || fail "módulo ausente: $module_name"
 done
 
-# Demais apps-base usam host próprio sem tenants do site-inst no dev-automation.
+# Demais apps-base usam host próprio; tenants compartilham as portas do inst-app.
 painel_block="$TEMP_ROOT/painel.conf"
 awk '/server_name painel\.localhost;/{count++; if (count == 2) on=1} on{print} on && /^}$/{exit}' "$config_one" > "$painel_block"
 grep -Fq '127.0.0.1:4002' "$painel_block" || fail 'painel não usa station-app 4002'
 grep -Fq '127.0.0.1:8002/' "$painel_block" || fail 'painel não usa API station-app 8002'
-site_block="$TEMP_ROOT/site.conf"
-awk '/server_name site-inst\.localhost;/{count++; if (count == 2) on=1} on{print} on && /^}$/{exit}' "$config_one" > "$site_block"
-grep -Fq '127.0.0.1:4003' "$site_block" || fail 'site-inst não usa Web 4003'
-grep -Fq '127.0.0.1:8003/' "$site_block" || fail 'site-inst não usa API 8003'
-! grep -Eq 'anpprev|sinproprev' "$SERVICES" || fail 'tenant do site-inst não deve existir no services.csv'
+for tenant in anpprev sinproprev; do
+  site_block="$TEMP_ROOT/$tenant.conf"
+  awk -v target="$tenant.localhost" '
+    $0 ~ "server_name " target ";" {count++; if (count == 2) on=1}
+    on {print}
+    on && /^}$/ {exit}
+  ' "$config_one" > "$site_block"
+  grep -Fq '127.0.0.1:4003' "$site_block" || fail "$tenant não usa Web 4003"
+  grep -Fq '127.0.0.1:8003/' "$site_block" || fail "$tenant não usa API 8003"
+  grep -Fq 'location ^~ /tenants/ {' "$site_block" || fail "$tenant não publica /tenants/"
+  grep -Fq 'alias /home/daniel/storage/tenants/;' "$site_block" || fail "$tenant usa storage de tenants incorreto"
+  grep -Fq 'location ^~ /static/inst-app/ {' "$site_block" || fail "$tenant não publica /static/inst-app/"
+  grep -Fq 'alias /home/daniel/storage/static/inst-app/;' "$site_block" || fail "$tenant usa storage estático incorreto"
+done
+grep -Fxq 'site-inst;/tenants/;/home/daniel/storage/tenants/' "$STATIC_LOCATIONS"
+grep -Fxq 'site-inst;/static/inst-app/;/home/daniel/storage/static/inst-app/' "$STATIC_LOCATIONS"
 
 # O gerador não conhece módulos ou apps individualmente.
 if grep -Eq 'orbital-(assets|content|crm|events|fin|mail|marketing|reports|ui|vouchers|legal)|station-app|site-inst|conv-app|amazon-infra-monitor|painel\.localhost' "$SCRIPT"; then
@@ -181,7 +195,15 @@ case "${1:-}" in
 esac
 exit 0
 EOF_SYSTEMCTL
-chmod +x "$fake_bin/nginx" "$fake_bin/mkcert" "$fake_bin/systemctl"
+cat > "$fake_bin/certutil.exe" <<'EOF_CERTUTIL'
+#!/usr/bin/env bash
+exit 0
+EOF_CERTUTIL
+cat > "$fake_bin/sudo" <<'EOF_SUDO'
+#!/usr/bin/env bash
+exec "$@"
+EOF_SUDO
+chmod +x "$fake_bin/nginx" "$fake_bin/mkcert" "$fake_bin/systemctl" "$fake_bin/certutil.exe" "$fake_bin/sudo"
 
 PATH="$fake_bin:$PATH" \
 NGINX_BIN=nginx \

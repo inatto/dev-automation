@@ -1,0 +1,3 @@
+application;public_path;physical_path
+site-inst;/tenants/;/home/daniel/storage/tenants/
+site-inst;/static/inst-app/;/home/daniel/storage/static/inst-app/
