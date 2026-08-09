@@ -10,6 +10,7 @@ Depois da instalação:
 ```bash
 auto-code-manager
 dev-manager
+desktops
 chromes
 phpstorms
 phpstorm-dev
@@ -130,6 +131,48 @@ dev-manager commands
 
 Para encerrar, pressione `Ctrl+C`. Não existe sessão separada para anexar ou
 manter em segundo plano.
+
+### `desktops`
+
+Sincroniza os desktops virtuais do Windows com os projetos ativos de
+`config/auto-code-manager.projects`. O Desktop 1 é sempre preservado para uso
+pessoal. A partir do Desktop 2, cada projeto ativo recebe um desktop na mesma
+ordem do arquivo. Linhas comentadas com `#` são ignoradas.
+
+Para conferir a ordem sem alterar o Windows:
+
+```bash
+desktops --list
+```
+
+Para criar os desktops que faltam e aplicar os nomes:
+
+```bash
+desktops
+```
+
+Para também abrir o ambiente completo de cada projeto nos três monitores:
+
+```bash
+desktops --apps
+```
+
+Layout automático de cada desktop de projeto:
+
+- monitor físico esquerdo: ChatGPT Desktop;
+- monitor físico central: PhpStorm aberto exatamente naquele projeto;
+- monitor físico direito: Chrome `Profile 2` (Sindicatto) em cima e Windows Terminal embaixo;
+- o Terminal entra na pasta do projeto e executa o comando geral de mesmo nome do projeto.
+
+Os monitores são ordenados pela posição física informada pelo Windows (esquerda → centro → direita), sem depender da numeração 1/2/3. O Desktop 1 não recebe apps de projeto e, ao terminar, o comando volta ao desktop em que foi iniciado.
+
+O mesmo pode ser executado pelo comando geral:
+
+```bash
+dev-manager desktops --apps
+```
+
+Ajustes de perfil/layout ficam em `config/desktops.env`. A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-manager.projects`. Desktops extras existentes não são removidos automaticamente.
 
 ### `chromes`
 

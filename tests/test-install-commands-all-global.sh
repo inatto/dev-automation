@@ -33,6 +33,7 @@ PROJECTS_FILE="$PROJECTS_FILE" \
 commands=(
   auto-code-manager
   dev-manager
+  desktops
   chromes
   phpstorms
   phpstorm-dev

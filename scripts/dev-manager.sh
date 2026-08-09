@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 AUTO_MANAGER="${DEV_MANAGER_AUTO_MANAGER:-$PROJECT_ROOT/scripts/auto-code-manager.sh}"
 COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/install-commands.sh}"
+DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
 
 fail() {
   printf '[dev-manager] ERRO: %s\n' "$*" >&2
@@ -21,6 +22,7 @@ Uso:
   dev-manager --test-sound Testa o aviso sonoro
   dev-manager --test-backup-sound Testa o aviso sutil de backup
   dev-manager commands     Atualiza todos os comandos globais
+  dev-manager desktops     Cria/nomeia desktops pelos projetos ativos
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
   dev-manager help         Mostra esta ajuda
@@ -69,6 +71,12 @@ case "$action" in
     ;;
   commands|refresh-commands|install-commands)
     refresh_global_commands
+    ;;
+  desktops)
+    shift || true
+    [[ -f "$DESKTOPS_SCRIPT" ]] || fail "script de desktops não encontrado: $DESKTOPS_SCRIPT"
+    [[ -x "$DESKTOPS_SCRIPT" ]] || chmod +x "$DESKTOPS_SCRIPT"
+    exec "$DESKTOPS_SCRIPT" "$@"
     ;;
   status)
     status_manager
