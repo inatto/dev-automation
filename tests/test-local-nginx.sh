@@ -48,6 +48,8 @@ grep -Fq 'server_name amazon-infra-monitor.localhost;' "$config_one" || fail 'am
 [[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
 [[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
 [[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq 6 ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
+[[ "$(grep -c '^    location = /api {$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve normalizar /api para /api/'
+[[ "$(grep -c '^        return 308 /api/;$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve preservar o redirect /api do remoto'
 [[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq 6 ]] || fail 'cada gateway HTTPS deve usar certificado'
 [[ "$(grep -c '^    location / {$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve ter exatamente um location /'
 

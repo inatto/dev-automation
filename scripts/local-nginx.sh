@@ -222,6 +222,10 @@ EOF_REDIRECT
 
       if [[ "$path" == '/' ]]; then
         cat <<EOF_LOCATION
+    location = /api {
+        return 308 /api/;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:$api_port/;
 $(emit_proxy_headers)
