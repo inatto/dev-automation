@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 CONFIG_FILE="${PHPSTORMS_PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
-OPEN_DELAY_SECONDS="${PHPSTORMS_OPEN_DELAY_SECONDS:-1}"
+OPEN_DELAY_SECONDS="${PHPSTORMS_OPEN_DELAY_SECONDS:-5}"
 
 log() { printf '[phpstorms] %s\n' "$*"; }
 fail() { printf '[phpstorms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -132,11 +132,145 @@ $projects = @($json | ConvertFrom-Json)
 Write-Host "[phpstorms] Executável: $($phpStorm.FullName)"
 
 $processName = [System.IO.Path]::GetFileNameWithoutExtension($phpStorm.Name)
+
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class PhpStormWindowEnumerator
+{
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll")]
+    public static extern int GetWindowTextLength(IntPtr hWnd);
+}
+'@
+
+function Get-PhpStormWindowTitles {
+    $processIds = @(
+        Get-Process -Name $processName -ErrorAction SilentlyContinue |
+            ForEach-Object { [uint32]$_.Id }
+    )
+
+    if ($processIds.Count -eq 0) {
+        return @()
+    }
+
+    $titles = [System.Collections.Generic.List[string]]::new()
+    $callback = [PhpStormWindowEnumerator+EnumWindowsProc]{
+        param([IntPtr]$hWnd, [IntPtr]$lParam)
+
+        if (-not [PhpStormWindowEnumerator]::IsWindowVisible($hWnd)) {
+            return $true
+        }
+
+        [uint32]$windowProcessId = 0
+        [void][PhpStormWindowEnumerator]::GetWindowThreadProcessId($hWnd, [ref]$windowProcessId)
+        if ($processIds -notcontains $windowProcessId) {
+            return $true
+        }
+
+        $length = [PhpStormWindowEnumerator]::GetWindowTextLength($hWnd)
+        if ($length -le 0) {
+            return $true
+        }
+
+        $buffer = [System.Text.StringBuilder]::new($length + 1)
+        [void][PhpStormWindowEnumerator]::GetWindowText($hWnd, $buffer, $buffer.Capacity)
+        $title = $buffer.ToString().Trim()
+        if (-not [string]::IsNullOrWhiteSpace($title)) {
+            [void]$titles.Add($title)
+        }
+
+        return $true
+    }
+
+    [void][PhpStormWindowEnumerator]::EnumWindows($callback, [IntPtr]::Zero)
+    return @($titles)
+}
+
+function Get-ProjectWindowNames {
+    param([Parameter(Mandatory = $true)][string]$Project)
+
+    $names = [System.Collections.Generic.List[string]]::new()
+    $leaf = Split-Path -Leaf $Project.TrimEnd('\')
+    if (-not [string]::IsNullOrWhiteSpace($leaf)) {
+        [void]$names.Add($leaf.Trim())
+    }
+
+    $ideaNameFile = Join-Path $Project '.idea\.name'
+    if (Test-Path -LiteralPath $ideaNameFile) {
+        $ideaName = Get-Content -LiteralPath $ideaNameFile -Raw -ErrorAction SilentlyContinue
+        if ($null -ne $ideaName) {
+            $ideaName = $ideaName.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($ideaName) -and $names -notcontains $ideaName) {
+                [void]$names.Add($ideaName)
+            }
+        }
+    }
+
+    return @($names)
+}
+
+function Test-ProjectOpen {
+    param([Parameter(Mandatory = $true)][string]$Project)
+
+    $titles = @(Get-PhpStormWindowTitles)
+    if ($titles.Count -eq 0) {
+        return $false
+    }
+
+    foreach ($name in @(Get-ProjectWindowNames -Project $Project)) {
+        foreach ($title in $titles) {
+            if ($title.IndexOf($name, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Wait-ProjectWindow {
+    param(
+        [Parameter(Mandatory = $true)][string]$Project,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        if (Test-ProjectOpen -Project $Project) {
+            return $true
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+
+    return $false
+}
+
 $phpStormWasRunning = @(Get-Process -Name $processName -ErrorAction SilentlyContinue).Count -gt 0
 
 if (-not $phpStormWasRunning) {
-    Write-Host '[phpstorms] PhpStorm está fechado; iniciando e aguardando ficar pronto...'
-    Start-Process -FilePath $phpStorm.FullName | Out-Null
+    $firstProject = [string]$projects[0]
+    Write-Host "[phpstorms] PhpStorm está fechado; abrindo diretamente: $firstProject"
+
+    # Evita que o PhpStorm restaure automaticamente a sessão anterior e depois
+    # receba a mesma lista novamente pelo script.
+    Start-Process -FilePath $phpStorm.FullName -ArgumentList @('dontReopenProjects', $firstProject) | Out-Null
 
     $deadline = (Get-Date).AddSeconds(60)
     do {
@@ -148,12 +282,25 @@ if (-not $phpStormWasRunning) {
         throw 'O PhpStorm não iniciou dentro de 60 segundos.'
     }
 
-    Start-Sleep -Seconds 4
+    if (-not (Wait-ProjectWindow -Project $firstProject -TimeoutSeconds 60)) {
+        throw "O PhpStorm iniciou, mas a janela do primeiro projeto não apareceu: $firstProject"
+    }
+
+    if ($DelaySeconds -gt 0) {
+        Start-Sleep -Milliseconds ([int]($DelaySeconds * 1000))
+    }
 }
 
 foreach ($project in $projects) {
+    $project = [string]$project
+
+    if (Test-ProjectOpen -Project $project) {
+        Write-Host "[phpstorms] Já aberto; ignorando: $project"
+        continue
+    }
+
     Write-Host "[phpstorms] Abrindo: $project"
-    Start-Process -FilePath $phpStorm.FullName -ArgumentList @([string]$project) | Out-Null
+    Start-Process -FilePath $phpStorm.FullName -ArgumentList @($project) | Out-Null
 
     if ($DelaySeconds -gt 0) {
         Start-Sleep -Milliseconds ([int]($DelaySeconds * 1000))

@@ -31,8 +31,29 @@ if (-not $chrome) { throw 'Google Chrome não encontrado.' }
 [void][System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $leftWidth = [Math]::Floor($area.Width / 2)
+$centralScreen = [System.Windows.Forms.Screen]::AllScreens |
+    Where-Object { $_.DeviceName -eq '\\.\DISPLAY2' } |
+    Select-Object -First 1
+if (-not $centralScreen) { throw 'Monitor 2 (DISPLAY2) não encontrado.' }
 
-Write-Host '[chromes] Abrindo somente o Chrome Sindicatto na metade esquerda...'
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class WindowPlacement {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+}
+'@
+
+Write-Host '[chromes] Abrindo Chrome Daniel...'
+Start-Process -FilePath $chrome -ArgumentList @(
+    '--profile-directory="Default"',
+    '--new-window',
+    'https://chatgpt.com/'
+)
+
+Write-Host '[chromes] Abrindo Chrome Sindicatto na metade esquerda...'
 Start-Process -FilePath $chrome -ArgumentList @(
     '--profile-directory="Profile 2"',
     '--new-window',
@@ -40,6 +61,44 @@ Start-Process -FilePath $chrome -ArgumentList @(
     "--window-size=$leftWidth,$($area.Height)",
     'chrome://newtab/'
 )
+
+Write-Host '[chromes] Abrindo Explorer no monitor central (2)...'
+$shell = New-Object -ComObject Shell.Application
+$beforeExplorerWindows = @(
+    $shell.Windows() |
+        Where-Object { $_.FullName -and ([System.IO.Path]::GetFileName($_.FullName) -ieq 'explorer.exe') } |
+        ForEach-Object { [int64]$_.HWND }
+)
+Start-Process -FilePath 'explorer.exe' | Out-Null
+
+$explorerWindow = $null
+$deadline = (Get-Date).AddSeconds(10)
+do {
+    Start-Sleep -Milliseconds 200
+    $explorerWindow = $shell.Windows() |
+        Where-Object {
+            $_.FullName -and
+            ([System.IO.Path]::GetFileName($_.FullName) -ieq 'explorer.exe') -and
+            ($beforeExplorerWindows -notcontains [int64]$_.HWND)
+        } |
+        Select-Object -First 1
+} while (-not $explorerWindow -and (Get-Date) -lt $deadline)
+
+if (-not $explorerWindow) {
+    throw 'A nova janela do Explorer não foi encontrada.'
+}
+
+$centralArea = $centralScreen.WorkingArea
+$placed = [WindowPlacement]::SetWindowPos(
+    [IntPtr]([int64]$explorerWindow.HWND),
+    [IntPtr]::Zero,
+    $centralArea.X,
+    $centralArea.Y,
+    $centralArea.Width,
+    $centralArea.Height,
+    0x0040
+)
+if (-not $placed) { throw 'Não foi possível posicionar o Explorer no monitor 2.' }
 
 POWERSHELL
 

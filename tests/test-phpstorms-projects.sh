@@ -40,4 +40,19 @@ if grep -q 'target_relative="$group"\|INCLUDE_DEV_AUTOMATION' "$ROOT/scripts/php
   exit 1
 fi
 
-echo 'OK: phpstorms usa exatamente os projetos ativos, na mesma ordem, sem agrupamento.'
+grep -q "dontReopenProjects" "$ROOT/scripts/phpstorms.sh" || {
+  echo 'FALHOU: phpstorms não bloqueia o restore automático da sessão anterior' >&2
+  exit 1
+}
+
+grep -q "function Test-ProjectOpen" "$ROOT/scripts/phpstorms.sh" || {
+  echo 'FALHOU: phpstorms não detecta projetos já abertos' >&2
+  exit 1
+}
+
+grep -q 'Já aberto; ignorando' "$ROOT/scripts/phpstorms.sh" || {
+  echo 'FALHOU: phpstorms não ignora projeto já aberto' >&2
+  exit 1
+}
+
+echo 'OK: phpstorms usa exatamente os projetos ativos, na mesma ordem, sem agrupamento e de forma idempotente.'
