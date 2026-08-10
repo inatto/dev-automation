@@ -25,6 +25,7 @@ constexpr UINT kStatusMessage = WM_APP + 41;
 constexpr UINT kTrayMessage = WM_APP + 42;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kPauseMenuId = 1001;
+constexpr UINT kSoundMenuId = 1002;
 constexpr GUID kTrayGuid{
     0xda5b2f34, 0x66d5, 0x4176, {0x8f, 0xa5, 0x08, 0x74, 0xc6, 0x0c, 0x7c, 0x34}
 };
@@ -314,10 +315,10 @@ bool PauseFileExists(const std::wstring& path) {
     return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
-bool SetPaused(const std::wstring& path, bool paused) {
+bool SetMarkerFile(const std::wstring& path, bool present) {
     if (path.empty()) return false;
 
-    if (!paused) {
+    if (!present) {
         if (DeleteFileW(path.c_str())) return true;
         return GetLastError() == ERROR_FILE_NOT_FOUND;
     }
@@ -335,6 +336,20 @@ bool SetPaused(const std::wstring& path, bool paused) {
     return true;
 }
 
+bool SetPaused(const std::wstring& path, bool paused) {
+    return SetMarkerFile(path, paused);
+}
+
+bool SetSoundDisabled(const std::wstring& path, bool disabled) {
+    return SetMarkerFile(path, disabled);
+}
+
+std::wstring SoundDisabledFileForPause(const std::wstring& pauseFile) {
+    const auto separator = pauseFile.find_last_of(L"\\/");
+    if (separator == std::wstring::npos) return {};
+    return pauseFile.substr(0, separator + 1) + L"dev-manager.sound-disabled";
+}
+
 void ShowTrayMenu(HWND hwnd, AppState& app) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
@@ -343,6 +358,13 @@ void ShowTrayMenu(HWND hwnd, AppState& app) {
     const bool paused = available && PauseFileExists(app.pauseFile);
     const wchar_t* label = paused ? L"Despausar dev-manager" : L"Pausar dev-manager";
     AppendMenuW(menu, MF_STRING | (available ? 0 : MF_GRAYED), kPauseMenuId, label);
+
+    const std::wstring soundDisabledFile = SoundDisabledFileForPause(app.pauseFile);
+    const bool soundAvailable = !soundDisabledFile.empty();
+    const bool soundDisabled = soundAvailable && PauseFileExists(soundDisabledFile);
+    const wchar_t* soundLabel = soundDisabled ? L"Ativar som" : L"Desativar som";
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (soundAvailable ? 0 : MF_GRAYED), kSoundMenuId, soundLabel);
 
     POINT point{};
     GetCursorPos(&point);
@@ -358,8 +380,13 @@ void ShowTrayMenu(HWND hwnd, AppState& app) {
     PostMessageW(hwnd, WM_NULL, 0, 0);
     DestroyMenu(menu);
 
-    if (command != kPauseMenuId || !available) return;
-    SetPaused(app.pauseFile, !paused);
+    if (command == kPauseMenuId && available) {
+        SetPaused(app.pauseFile, !paused);
+        return;
+    }
+    if (command == kSoundMenuId && soundAvailable) {
+        SetSoundDisabled(soundDisabledFile, !soundDisabled);
+    }
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {

@@ -100,3 +100,7 @@ as cores sem mudar o restante do comportamento:
 ```bash
 NO_COLOR=1 dev-manager
 ```
+
+## Som pela bandeja
+
+No ícone do Dev Automation, use o botão direito e escolha `Desativar som` ou `Ativar som`. A preferência fica persistida entre execuções.

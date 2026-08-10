@@ -16,6 +16,7 @@ FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
 PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 PAUSE_FILE="$STATE_DIR/dev-manager.paused"
+SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
@@ -242,6 +243,8 @@ line() {
 }
 
 soft_beep() {
+  [ ! -f "$SOUND_DISABLED_FILE" ] || return 0
+
   local repeats="${BEEP_REPEATS:-2}"
   local gap_ms="${BEEP_GAP_MS:-220}"
   local mode="${BEEP_MODE:-wave}"
@@ -388,6 +391,7 @@ soft_beep() {
 }
 
 backup_beep() {
+  [ ! -f "$SOUND_DISABLED_FILE" ] || return 0
   [ "${BACKUP_BEEP_ENABLED:-true}" = "true" ] || return 0
 
   local windows_wave="${BACKUP_WINDOWS_WAVE_FILE:-C:\\Windows\\Media\\ding.wav}"
