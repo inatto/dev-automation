@@ -31,10 +31,9 @@ if (-not $chrome) { throw 'Google Chrome não encontrado.' }
 [void][System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms")
 $area = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
 $leftWidth = [Math]::Floor($area.Width / 2)
-$centralScreen = [System.Windows.Forms.Screen]::AllScreens |
-    Where-Object { $_.DeviceName -eq '\\.\DISPLAY2' } |
-    Select-Object -First 1
-if (-not $centralScreen) { throw 'Monitor 2 (DISPLAY2) não encontrado.' }
+$screens = @([System.Windows.Forms.Screen]::AllScreens | Sort-Object { $_.WorkingArea.X })
+if ($screens.Count -lt 3) { throw 'São necessários 3 monitores para identificar esquerda, centro e direita.' }
+$centralScreen = $screens[[Math]::Floor($screens.Count / 2)]
 
 Add-Type @'
 using System;
@@ -62,7 +61,7 @@ Start-Process -FilePath $chrome -ArgumentList @(
     'chrome://newtab/'
 )
 
-Write-Host '[chromes] Abrindo Explorer no monitor central (2)...'
+Write-Host "[chromes] Abrindo Explorer no monitor central: $($centralScreen.DeviceName)..."
 $shell = New-Object -ComObject Shell.Application
 $beforeExplorerWindows = @(
     $shell.Windows() |
@@ -98,7 +97,7 @@ $placed = [WindowPlacement]::SetWindowPos(
     $centralArea.Height,
     0x0040
 )
-if (-not $placed) { throw 'Não foi possível posicionar o Explorer no monitor 2.' }
+if (-not $placed) { throw 'Não foi possível posicionar o Explorer no monitor central.' }
 
 POWERSHELL
 

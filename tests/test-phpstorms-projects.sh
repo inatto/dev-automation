@@ -40,6 +40,16 @@ if grep -q 'target_relative="$group"\|INCLUDE_DEV_AUTOMATION' "$ROOT/scripts/php
   exit 1
 fi
 
+
+grep -q 'ConvertFrom-Json -InputObject \$json' "$ROOT/scripts/phpstorms.sh" || {
+  echo 'FALHOU: phpstorms não normaliza a lista JSON antes de acessar o primeiro projeto' >&2
+  exit 1
+}
+
+if grep -Fq '$projects = @($json | ConvertFrom-Json)' "$ROOT/scripts/phpstorms.sh"; then
+  echo 'FALHOU: parsing antigo pode aninhar todos os projetos em projects[0] no Windows PowerShell 5.1' >&2
+  exit 1
+fi
 grep -q "dontReopenProjects" "$ROOT/scripts/phpstorms.sh" || {
   echo 'FALHOU: phpstorms não bloqueia o restore automático da sessão anterior' >&2
   exit 1

@@ -127,7 +127,12 @@ if ([string]::IsNullOrWhiteSpace($json)) {
     throw 'A lista de projetos está vazia.'
 }
 
-$projects = @($json | ConvertFrom-Json)
+$parsedProjects = ConvertFrom-Json -InputObject $json
+$projects = @(
+    foreach ($project in $parsedProjects) {
+        [string]$project
+    }
+)
 
 Write-Host "[phpstorms] Executável: $($phpStorm.FullName)"
 
