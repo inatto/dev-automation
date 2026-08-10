@@ -15,6 +15,7 @@ ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
 PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
+PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
@@ -34,6 +35,7 @@ BACKUP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\ding.wav"
 TASKBAR_STATUS_ENABLED=true
 DEV_STATUS_INVOKE_PS1="$PROJECT_ROOT/apps/dev-status/invoke.ps1"
 DEV_STATUS_EXE="$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe"
+PAUSE_CONTROL_ACTIVE=false
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -167,6 +169,7 @@ taskbar_status() {
   local state="$1"
   local detail="${2:-}"
   local invoke_windows
+  local pause_file_windows
 
   [ "${TASKBAR_STATUS_ENABLED:-true}" = true ] || return 0
   [ -f "$DEV_STATUS_EXE" ] || return 0
@@ -175,8 +178,45 @@ taskbar_status() {
   command -v wslpath >/dev/null 2>&1 || return 0
 
   invoke_windows="$(wslpath -w "$DEV_STATUS_INVOKE_PS1" 2>/dev/null)" || return 0
+  pause_file_windows="$(wslpath -w "$PAUSE_FILE" 2>/dev/null)" || return 0
   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-    -File "$invoke_windows" -State "$state" -Detail "$detail" </dev/null >/dev/null 2>&1 || true
+    -File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true
+}
+
+initialize_pause_control() {
+  mkdir -p -- "$STATE_DIR"
+  rm -f -- "$PAUSE_FILE"
+  PAUSE_CONTROL_ACTIVE=true
+}
+
+wait_if_paused() {
+  local announced=false
+
+  [ "$PAUSE_CONTROL_ACTIVE" = true ] || return 0
+
+  while [ -f "$PAUSE_FILE" ]; do
+    if [ "$announced" = false ]; then
+      taskbar_status paused "Pausado"
+      LOG_CONTEXT=wait log "PAUSADO — botão direito no ícone da bandeja para despausar."
+      announced=true
+    fi
+    sleep 0.25
+  done
+
+  if [ "$announced" = true ]; then
+    LOG_CONTEXT=wait log "DESPAUSADO — monitor retomado."
+    taskbar_status idle "Monitorando"
+  fi
+}
+
+sleep_with_pause() {
+  local tick
+  local ticks=$((INTERVAL * 4))
+
+  for ((tick = 0; tick < ticks; tick++)); do
+    wait_if_paused
+    sleep 0.25
+  done
 }
 
 run_stage() {
@@ -185,6 +225,7 @@ run_stage() {
   local description="$3"
   shift 3
 
+  wait_if_paused
   stage "$context" start "$title — INÍCIO" "$description"
   if LOG_CONTEXT="$context" "$@"; then
     stage "$context" end "$title — CONCLUÍDO"
@@ -906,6 +947,7 @@ import_downloads() {
   log "LOTE DE DOWNLOADS: $total ZIP(s) serão processados em sequência antes de continuar o ciclo."
 
   for ((index = 0; index < total; index++)); do
+    wait_if_paused
     zip_file="${zip_files[$index]}"
     log "LOTE [$((index + 1))/$total]: $(basename -- "$zip_file")"
 
@@ -1177,6 +1219,7 @@ zip_configured_sql_folders() {
 
   while IFS= read -r folder || [ -n "$folder" ]; do
     [ -n "$folder" ] || continue
+    wait_if_paused
     zip_sql_folder "$folder" || failed=1
   done < <(configured_sql_zip_folders)
 
@@ -1473,6 +1516,7 @@ clean_unmanaged_backup_zips() {
   log "Limpando ZIPs de backup fora dos projetos e grupos gerenciados em $CODE_ROOT"
 
   while IFS= read -r -d '' zip_file; do
+    wait_if_paused
     case "$zip_file" in
       "$CODE_ROOT/Code.zip"|"$CODE_ROOT/code.zip") continue ;;
     esac
@@ -1513,6 +1557,7 @@ create_code_zip() {
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
+    wait_if_paused
     archive_name="$(project_archive_name "$project")"
     project_zip="$(project_archive_path "$project")"
 
@@ -1586,6 +1631,7 @@ backup_all() {
   # Nunca apaga o Code.zip válido antes de o novo estar pronto.
   for project in "${projects[@]}"; do
     [ -n "$project" ] || continue
+    wait_if_paused
     backup_project "$project" || failed=1
   done
 
@@ -1595,6 +1641,7 @@ backup_all() {
   fi
 
   log "Todos os projetos e grupos pais foram compactados; chamando create_code_zip agora."
+  wait_if_paused
   if ! create_code_zip; then
     return 1
   fi
@@ -1604,6 +1651,9 @@ backup_all() {
 }
 
 stop() {
+  if [ "$PAUSE_CONTROL_ACTIVE" = true ]; then
+    rm -f -- "$PAUSE_FILE"
+  fi
   taskbar_status exit "Auto Code Manager encerrado"
   echo
   line
@@ -1742,9 +1792,11 @@ line
 cycle=1
 last_backup=0
 last_zone=0
+initialize_pause_control
 taskbar_status idle "Monitorando"
 
 while true; do
+  wait_if_paused
   now="$(date +%s)"
 
   stage cycle start "CICLO #$cycle — INÍCIO" "Executa, nesta ordem: importar ZIPs, compactar SQLs, limpar Zone.Identifier quando devido e gerar backups quando devidos."
@@ -1760,6 +1812,7 @@ while true; do
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
+    wait_if_paused
     taskbar_status backup "Gerando backups"
     stage backup start "BACKUP — INÍCIO" "Gera os ZIPs dos projetos autorizados e, ao final, atualiza o Code.zip geral."
     LOG_CONTEXT=backup clean_unmanaged_backup_zips
@@ -1780,5 +1833,5 @@ while true; do
   LOG_CONTEXT=wait log "Próximo ciclo em ${INTERVAL}s."
 
   cycle=$((cycle + 1))
-  sleep "$INTERVAL"
+  sleep_with_pause
 done

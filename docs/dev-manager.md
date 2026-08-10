@@ -41,6 +41,16 @@ recria os comandos dos projetos listados em `config/auto-code-manager.projects`.
 
 Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 
+O ícone do `Dev Automation` na bandeja do Windows também aceita botão direito:
+
+- `Pausar dev-manager`: termina apenas a operação indivisível já em andamento e
+  não inicia a próxima etapa/projeto;
+- `Despausar dev-manager`: retoma o mesmo processo, sem reiniciar o monitor.
+
+Enquanto estiver efetivamente pausado, o ícone mostra `P` e o status `Pausado`.
+O controle é cooperativo para nunca interromper no meio uma gravação/importação
+ou substituição de ZIP.
+
 Quando toda a rodada de backups termina com sucesso, incluindo a validação do
 `Code.zip`, o monitor toca `C:\\Windows\\Media\\ding.wav` uma única vez.
 Não toca após cada projeto individual.

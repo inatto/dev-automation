@@ -6,7 +6,8 @@ Indicador nativo do `dev-automation` na taskbar do Windows 10/11.
 - Uma única instância residente.
 - IPC local por Named Pipe com acesso restrito ao usuário atual e clientes remotos rejeitados.
 - Ícone persistente na área de notificação (system tray) via `Shell_NotifyIcon`, visível em qualquer desktop virtual.
-- Overlay e título mudam conforme `backup`, `unzip`, `zip`, `sync`, `clean`, `done` e `error`.
+- Overlay e título mudam conforme `backup`, `unzip`, `zip`, `sync`, `clean`, `done`, `error` e `paused`.
+- Botão direito no ícone alterna `Pausar dev-manager` / `Despausar dev-manager` quando o monitor está ativo.
 - O cliente inicia o servidor automaticamente quando necessário.
 
 ## Build
@@ -32,6 +33,7 @@ dev-status zip 40
 dev-status sync
 dev-status done
 dev-status error
+dev-status paused
 dev-status idle
 dev-status exit
 ```
@@ -42,4 +44,4 @@ Ao executar `dev-manager`, o build C++ é tentado automaticamente quando o execu
 
 ## Cores do indicador
 
-O ícone segue cada etapa do terminal: `S` ciclo/sync ciano, `U` importação azul, `Z` SQL magenta, `C` Zone.Identifier amarelo, `B` backup verde, `D` espera cinza e `!` erro vermelho. A própria letra e o contorno do ícone usam a cor da etapa. Ao concluir manualmente com `done`, o `V` mantém a cor da última etapa.
+O ícone segue cada etapa do terminal: `S` ciclo/sync ciano, `U` importação azul, `Z` SQL magenta, `C` Zone.Identifier amarelo, `B` backup verde, `D` espera cinza, `P` pausa laranja e `!` erro vermelho. A própria letra e o contorno do ícone usam a cor da etapa. Ao concluir manualmente com `done`, o `V` mantém a cor da última etapa.

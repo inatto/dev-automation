@@ -1,13 +1,15 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('idle','backup','unzip','zip','sync','clean','done','error','exit')]
+    [ValidateSet('idle','backup','unzip','zip','sync','clean','done','error','paused','exit')]
     [string]$State,
 
     [ValidateRange(-1, 100)]
     [int]$Progress = -1,
 
-    [string]$Detail = ''
+    [string]$Detail = '',
+
+    [string]$PauseFile = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,7 +20,14 @@ if (-not (Test-Path -LiteralPath $exe)) {
 
 $argsList = @($State)
 if ($Progress -ge 0) { $argsList += [string]$Progress }
-if ($Detail) { $argsList += $Detail }
+if ($PauseFile) {
+    $argsList += '--pause-file'
+    $argsList += $PauseFile
+}
+if ($Detail) {
+    $argsList += '--detail'
+    $argsList += $Detail
+}
 
 & $exe @argsList
 exit $LASTEXITCODE

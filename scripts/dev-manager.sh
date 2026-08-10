@@ -33,6 +33,8 @@ Uso:
 
 O monitor não cria sessão em segundo plano. Para encerrar, pressione Ctrl+C
 no mesmo terminal em que ele está executando.
+Para pausar/despausar sem encerrar, clique com o botão direito no ícone do
+Dev Automation na bandeja do Windows.
 EOF_HELP
 }
 

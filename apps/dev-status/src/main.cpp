@@ -24,11 +24,12 @@ constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\dev-automation-status-v2";
 constexpr UINT kStatusMessage = WM_APP + 41;
 constexpr UINT kTrayMessage = WM_APP + 42;
 constexpr UINT kTrayIconId = 1;
+constexpr UINT kPauseMenuId = 1001;
 constexpr GUID kTrayGuid{
     0xda5b2f34, 0x66d5, 0x4176, {0x8f, 0xa5, 0x08, 0x74, 0xc6, 0x0c, 0x7c, 0x34}
 };
 constexpr std::uint32_t kProtocolMagic = 0x44565331; // DVS1
-constexpr std::uint32_t kProtocolVersion = 2;
+constexpr std::uint32_t kProtocolVersion = 3;
 constexpr int kNoProgress = -1;
 
 UINT g_taskbarCreated = 0;
@@ -42,7 +43,8 @@ enum class StatusCode : std::uint32_t {
     Clean = 5,
     Done = 6,
     Error = 7,
-    Exit = 8,
+    Paused = 8,
+    Exit = 9,
 };
 
 struct StatusPacket {
@@ -51,15 +53,17 @@ struct StatusPacket {
     StatusCode state = StatusCode::Idle;
     std::int32_t progress = kNoProgress;
     wchar_t detail[240]{};
+    wchar_t pauseFile[512]{};
 };
 
-static_assert(sizeof(StatusPacket) <= 1024);
+static_assert(sizeof(StatusPacket) <= 2048);
 
 struct AppState {
     StatusPacket current{};
     StatusCode lastWorkState = StatusCode::Idle;
     HICON trayIcon = nullptr;
     bool trayAdded = false;
+    std::wstring pauseFile;
 };
 
 std::wstring ToLower(std::wstring value) {
@@ -79,6 +83,7 @@ bool TryParseState(const std::wstring& raw, StatusCode& state) {
     else if (value == L"clean") state = StatusCode::Clean;
     else if (value == L"done" || value == L"ok") state = StatusCode::Done;
     else if (value == L"error" || value == L"fail") state = StatusCode::Error;
+    else if (value == L"paused" || value == L"pause") state = StatusCode::Paused;
     else if (value == L"exit" || value == L"stop") state = StatusCode::Exit;
     else return false;
     return true;
@@ -103,6 +108,7 @@ std::wstring StateLabel(StatusCode state) {
         case StatusCode::Clean: return L"Limpando";
         case StatusCode::Done: return L"Concluído";
         case StatusCode::Error: return L"Erro";
+        case StatusCode::Paused: return L"Pausado";
         case StatusCode::Exit: return L"Encerrando";
     }
     return L"Dev Automation";
@@ -118,6 +124,7 @@ wchar_t StateGlyph(StatusCode state) {
         case StatusCode::Clean: return L'C';
         case StatusCode::Done: return L'V';
         case StatusCode::Error: return L'!';
+        case StatusCode::Paused: return L'P';
         default: return L'D';
     }
 }
@@ -133,6 +140,7 @@ COLORREF StateColor(StatusCode state) {
         case StatusCode::Clean: return RGB(255, 220, 0);     // 1;33 amarelo
         case StatusCode::Backup: return RGB(0, 230, 0);      // 1;32 verde
         case StatusCode::Error: return RGB(255, 70, 70);     // 1;31 vermelho
+        case StatusCode::Paused: return RGB(255, 170, 0);    // pausa
         case StatusCode::Idle: return RGB(145, 145, 145);    // 2;37 cinza
         case StatusCode::Done: return RGB(0, 230, 0);        // fallback; normalmente herda a etapa
         default: return RGB(145, 145, 145);
@@ -293,8 +301,65 @@ void ApplyStatus(HWND hwnd, AppState& app, const StatusPacket& packet) {
         default:
             break;
     }
+    if (packet.pauseFile[0] != L'\0') {
+        app.pauseFile = packet.pauseFile;
+    }
     app.current = packet;
     UpdateTrayIcon(hwnd, app);
+}
+
+bool PauseFileExists(const std::wstring& path) {
+    if (path.empty()) return false;
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+bool SetPaused(const std::wstring& path, bool paused) {
+    if (path.empty()) return false;
+
+    if (!paused) {
+        if (DeleteFileW(path.c_str())) return true;
+        return GetLastError() == ERROR_FILE_NOT_FOUND;
+    }
+
+    HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(file);
+    return true;
+}
+
+void ShowTrayMenu(HWND hwnd, AppState& app) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+
+    const bool available = !app.pauseFile.empty();
+    const bool paused = available && PauseFileExists(app.pauseFile);
+    const wchar_t* label = paused ? L"Despausar dev-manager" : L"Pausar dev-manager";
+    AppendMenuW(menu, MF_STRING | (available ? 0 : MF_GRAYED), kPauseMenuId, label);
+
+    POINT point{};
+    GetCursorPos(&point);
+    SetForegroundWindow(hwnd);
+    const UINT command = TrackPopupMenu(
+        menu,
+        TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+        point.x,
+        point.y,
+        0,
+        hwnd,
+        nullptr);
+    PostMessageW(hwnd, WM_NULL, 0, 0);
+    DestroyMenu(menu);
+
+    if (command != kPauseMenuId || !available) return;
+    SetPaused(app.pauseFile, !paused);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -320,9 +385,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             if (packet->state == StatusCode::Exit) DestroyWindow(hwnd);
             return 0;
         }
-        case kTrayMessage:
-            // O ícone é apenas indicador de status. Não abre janelas ao clicar.
+        case kTrayMessage: {
+            if (!app) return 0;
+            const UINT event = LOWORD(static_cast<DWORD_PTR>(lParam));
+            if (event == WM_CONTEXTMENU || event == WM_RBUTTONUP) {
+                ShowTrayMenu(hwnd, *app);
+            }
             return 0;
+        }
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
@@ -391,7 +461,8 @@ bool IsValidPacket(const StatusPacket& packet) {
            packet.version == kProtocolVersion &&
            rawState <= static_cast<std::uint32_t>(StatusCode::Exit) &&
            packet.progress >= kNoProgress && packet.progress <= 100 &&
-           packet.detail[std::size(packet.detail) - 1] == L'\0';
+           packet.detail[std::size(packet.detail) - 1] == L'\0' &&
+           packet.pauseFile[std::size(packet.pauseFile) - 1] == L'\0';
 }
 
 void PipeServerLoop(HWND hwnd) {
@@ -507,22 +578,38 @@ StatusPacket PacketFromArgs(int argc, wchar_t** argv, bool& ok) {
     ok = false;
     if (argc < 2 || !TryParseState(argv[1], packet.state)) return packet;
 
-    int detailStart = 2;
-    if (argc >= 3) {
+    int index = 2;
+    if (index < argc) {
         int progress = kNoProgress;
-        if (TryParseProgress(argv[2], progress)) {
+        if (TryParseProgress(argv[index], progress)) {
             packet.progress = progress;
-            detailStart = 3;
+            ++index;
         }
     }
 
     std::wstring detail;
-    for (int i = detailStart; i < argc; ++i) {
+    std::wstring pauseFile;
+    while (index < argc) {
+        if (_wcsicmp(argv[index], L"--pause-file") == 0) {
+            if (++index >= argc) return packet;
+            pauseFile = argv[index++];
+            continue;
+        }
+        if (_wcsicmp(argv[index], L"--detail") == 0) {
+            if (++index >= argc) return packet;
+            detail = argv[index++];
+            continue;
+        }
+
         if (!detail.empty()) detail += L" ";
-        detail += argv[i];
+        detail += argv[index++];
     }
+
     if (detail.size() >= std::size(packet.detail)) detail.resize(std::size(packet.detail) - 1);
     if (!detail.empty()) wcscpy_s(packet.detail, detail.c_str());
+
+    if (pauseFile.size() >= std::size(packet.pauseFile)) pauseFile.resize(std::size(packet.pauseFile) - 1);
+    if (!pauseFile.empty()) wcscpy_s(packet.pauseFile, pauseFile.c_str());
 
     ok = true;
     return packet;

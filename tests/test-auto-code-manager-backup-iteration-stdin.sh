@@ -11,7 +11,7 @@ grep -Fq 'for project in "${projects[@]}"; do' "$SCRIPT" || {
   echo 'backup_all deve iterar sobre array materializado.' >&2
   exit 1
 }
-grep -Fq -- '-File "$invoke_windows" -State "$state" -Detail "$detail" </dev/null >/dev/null 2>&1 || true' "$SCRIPT" || {
+grep -Fq -- '-File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true' "$SCRIPT" || {
   echo 'taskbar_status deve isolar stdin do PowerShell.' >&2
   exit 1
 }

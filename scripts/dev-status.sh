@@ -33,6 +33,7 @@ Uso:
   dev-status clean
   dev-status done
   dev-status error
+  dev-status paused
   dev-status exit
 EOF
     ;;
