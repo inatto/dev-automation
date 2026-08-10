@@ -30,7 +30,7 @@ New-Item -ItemType Directory -Force -Path $bin, $build | Out-Null
 $command = @"
 call "$vcvars" >nul &&
 pushd "$root" &&
-cl.exe /nologo /std:c++20 /O2 /EHsc /W4 /permissive- /utf-8 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Fo"build\\" /Fe"bin\\dev-status.exe" "src\\main.cpp" /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib ole32.lib advapi32.lib gdi32.lib &&
+cl.exe /nologo /std:c++20 /O2 /EHsc /W4 /permissive- /utf-8 /MT /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Fo"build\\" /Fe"bin\\dev-status.exe" "src\\main.cpp" /link /SUBSYSTEM:WINDOWS user32.lib shell32.lib advapi32.lib gdi32.lib &&
 popd
 "@ -replace "`r?`n", ' '
 

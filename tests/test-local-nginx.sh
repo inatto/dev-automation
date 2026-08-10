@@ -41,7 +41,7 @@ grep -Fq 'server_name painel.localhost;' "$config_one" || fail 'painel.localhost
 grep -Fq 'server_name anpprev.localhost;' "$config_one" || fail 'anpprev.localhost ausente'
 grep -Fq 'server_name sinproprev.localhost;' "$config_one" || fail 'sinproprev.localhost ausente'
 ! grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'alias tecnico site-inst.localhost permaneceu publico'
-grep -Fq 'server_name conv-app.localhost;' "$config_one" || fail 'conv-app.localhost ausente'
+grep -Fq 'server_name asaclub.localhost;' "$config_one" || fail 'asaclub.localhost ausente'
 grep -Fq 'server_name amazon-infra-monitor.localhost;' "$config_one" || fail 'amazon-infra-monitor.localhost ausente'
 [[ "$(grep -c '^    listen 80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
 [[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv6 na porta 80'

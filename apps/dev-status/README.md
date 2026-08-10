@@ -5,7 +5,7 @@ Indicador nativo do `dev-automation` na taskbar do Windows 10/11.
 - C++20 + Win32/COM, sem .NET, Electron ou Python em runtime.
 - Uma única instância residente.
 - IPC local por Named Pipe com acesso restrito ao usuário atual e clientes remotos rejeitados.
-- Barra de progresso da taskbar via `ITaskbarList3`.
+- Ícone persistente na área de notificação (system tray) via `Shell_NotifyIcon`, visível em qualquer desktop virtual.
 - Overlay e título mudam conforme `backup`, `unzip`, `zip`, `sync`, `clean`, `done` e `error`.
 - O cliente inicia o servidor automaticamente quando necessário.
 

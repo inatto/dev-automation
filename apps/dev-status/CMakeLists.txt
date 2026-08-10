@@ -8,7 +8,7 @@ endif()
 add_executable(dev-status WIN32 src/main.cpp)
 target_compile_features(dev-status PRIVATE cxx_std_20)
 target_compile_definitions(dev-status PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
-target_link_libraries(dev-status PRIVATE user32 shell32 ole32 advapi32 gdi32)
+target_link_libraries(dev-status PRIVATE user32 shell32 advapi32 gdi32)
 
 if(MSVC)
     target_compile_options(dev-status PRIVATE /W4 /permissive- /EHsc /utf-8)

@@ -16,7 +16,8 @@ for file in \
   [[ -f "$file" ]] || { printf 'FALHOU: arquivo ausente: %s\n' "$file" >&2; exit 1; }
 done
 
-grep -Fq 'ITaskbarList3' "$APP/src/main.cpp"
+grep -Fq 'Shell_NotifyIconW' "$APP/src/main.cpp"
+grep -Fq 'WS_EX_TOOLWINDOW' "$APP/src/main.cpp"
 grep -Fq 'CreateNamedPipeW' "$APP/src/main.cpp"
 grep -Fq 'PIPE_REJECT_REMOTE_CLIENTS' "$APP/src/main.cpp"
 grep -Fq 'SetEntriesInAclW' "$APP/src/main.cpp"
@@ -25,4 +26,4 @@ grep -Fq 'taskbar_status idle "Monitorando"' "$AUTO"
 grep -Fq 'taskbar_status exit "Auto Code Manager encerrado"' "$AUTO"
 grep -Fq '[ -f "$DEV_STATUS_EXE" ] || return 0' "$AUTO"
 
-printf 'OK: dev-status nativo e integração não bloqueante presentes\n'
+printf 'OK: dev-status tray nativo e integração não bloqueante presentes\n'

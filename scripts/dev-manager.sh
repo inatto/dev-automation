@@ -48,7 +48,7 @@ ensure_dev_status() {
   [[ -f "$DEV_STATUS_EXE" ]] && return 0
 
   if [[ ! -f "$DEV_STATUS_SCRIPT" ]]; then
-    printf '[dev-manager] AVISO: dev-status ausente; seguindo sem indicador da taskbar.\n' >&2
+    printf '[dev-manager] AVISO: dev-status ausente; seguindo sem indicador no system tray.\n' >&2
     return 0
   fi
 
@@ -62,7 +62,7 @@ ensure_dev_status() {
     fi
   fi
 
-  printf '[dev-manager] AVISO: não foi possível compilar dev-status; seguindo sem indicador da taskbar.\n' >&2
+  printf '[dev-manager] AVISO: não foi possível compilar dev-status; seguindo sem indicador no system tray.\n' >&2
   return 0
 }
 

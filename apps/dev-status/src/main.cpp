@@ -3,7 +3,6 @@
 #include <windows.h>
 #include <aclapi.h>
 #include <shellapi.h>
-#include <shobjidl.h>
 
 #include <algorithm>
 #include <array>
@@ -19,15 +18,17 @@
 
 namespace {
 
-constexpr wchar_t kWindowClass[] = L"DevAutomationStatusWindow.v1";
+constexpr wchar_t kWindowClass[] = L"DevAutomationStatusTrayWindow.v2";
 constexpr wchar_t kMutexName[] = L"Local\\DevAutomationStatus.Server.v1";
 constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\dev-automation-status-v1";
 constexpr UINT kStatusMessage = WM_APP + 41;
+constexpr UINT kTrayMessage = WM_APP + 42;
+constexpr UINT kTrayIconId = 1;
 constexpr std::uint32_t kProtocolMagic = 0x44565331; // DVS1
 constexpr std::uint32_t kProtocolVersion = 1;
 constexpr int kNoProgress = -1;
 
-UINT g_taskbarButtonCreated = 0;
+UINT g_taskbarCreated = 0;
 
 enum class StatusCode : std::uint32_t {
     Idle = 0,
@@ -51,15 +52,10 @@ struct StatusPacket {
 
 static_assert(sizeof(StatusPacket) <= 1024);
 
-struct ComReleaser {
-    void operator()(ITaskbarList3* ptr) const noexcept {
-        if (ptr) ptr->Release();
-    }
-};
-
 struct AppState {
-    std::unique_ptr<ITaskbarList3, ComReleaser> taskbar;
     StatusPacket current{};
+    HICON trayIcon = nullptr;
+    bool trayAdded = false;
 };
 
 std::wstring ToLower(std::wstring value) {
@@ -110,6 +106,7 @@ std::wstring StateLabel(StatusCode state) {
 
 wchar_t StateGlyph(StatusCode state) {
     switch (state) {
+        case StatusCode::Idle: return L'D';
         case StatusCode::Backup: return L'B';
         case StatusCode::Unzip: return L'U';
         case StatusCode::Zip: return L'Z';
@@ -117,7 +114,7 @@ wchar_t StateGlyph(StatusCode state) {
         case StatusCode::Clean: return L'C';
         case StatusCode::Done: return L'V';
         case StatusCode::Error: return L'!';
-        default: return L' ';
+        default: return L'D';
     }
 }
 
@@ -130,14 +127,12 @@ COLORREF StateColor(StatusCode state) {
         case StatusCode::Clean: return RGB(96, 96, 96);
         case StatusCode::Done: return RGB(16, 124, 16);
         case StatusCode::Error: return RGB(196, 43, 28);
-        default: return RGB(96, 96, 96);
+        default: return RGB(80, 80, 80);
     }
 }
 
-HICON CreateOverlayIcon(StatusCode state) {
-    if (state == StatusCode::Idle || state == StatusCode::Exit) return nullptr;
-
-    constexpr int size = 16;
+HICON CreateStatusIcon(StatusCode state) {
+    constexpr int size = 32;
     HDC screen = GetDC(nullptr);
     if (!screen) return nullptr;
 
@@ -163,23 +158,26 @@ HICON CreateOverlayIcon(StatusCode state) {
     FillRect(maskDc, &rect, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
     HBRUSH colorBrush = CreateSolidBrush(StateColor(state));
-    HBRUSH blackBrush = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
-    HPEN nullPen = static_cast<HPEN>(GetStockObject(NULL_PEN));
-
     const auto oldColorBrush = SelectObject(colorDc, colorBrush);
-    const auto oldColorPen = SelectObject(colorDc, nullPen);
-    Ellipse(colorDc, 1, 1, 15, 15);
+    const auto oldColorPen = SelectObject(colorDc, GetStockObject(NULL_PEN));
+    Ellipse(colorDc, 1, 1, size - 1, size - 1);
 
-    const auto oldMaskBrush = SelectObject(maskDc, blackBrush);
-    const auto oldMaskPen = SelectObject(maskDc, nullPen);
-    Ellipse(maskDc, 1, 1, 15, 15);
+    const auto oldMaskBrush = SelectObject(maskDc, GetStockObject(BLACK_BRUSH));
+    const auto oldMaskPen = SelectObject(maskDc, GetStockObject(NULL_PEN));
+    Ellipse(maskDc, 1, 1, size - 1, size - 1);
 
     wchar_t glyph[2]{StateGlyph(state), L'\0'};
     SetBkMode(colorDc, TRANSPARENT);
     SetTextColor(colorDc, RGB(255, 255, 255));
-    const auto oldFont = SelectObject(colorDc, GetStockObject(DEFAULT_GUI_FONT));
+
+    HFONT font = CreateFontW(
+        -20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+    const auto oldFont = SelectObject(colorDc, font ? font : GetStockObject(DEFAULT_GUI_FONT));
     DrawTextW(colorDc, glyph, 1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     SelectObject(colorDc, oldFont);
+    if (font) DeleteObject(font);
 
     SelectObject(colorDc, oldColorBrush);
     SelectObject(colorDc, oldColorPen);
@@ -202,59 +200,72 @@ HICON CreateOverlayIcon(StatusCode state) {
     return icon;
 }
 
-std::wstring WindowTitle(const StatusPacket& packet) {
-    std::wstring title = L"Dev Automation — " + StateLabel(packet.state);
+std::wstring StatusText(const StatusPacket& packet) {
+    std::wstring text = L"Dev Automation — " + StateLabel(packet.state);
     if (packet.progress >= 0 && packet.progress <= 100 &&
         packet.state != StatusCode::Done && packet.state != StatusCode::Error) {
-        title += L" (" + std::to_wstring(packet.progress) + L"%)";
+        text += L" (" + std::to_wstring(packet.progress) + L"%)";
     }
     if (packet.detail[0] != L'\0') {
-        title += L" — ";
-        title += packet.detail;
+        text += L" — ";
+        text += packet.detail;
     }
-    return title;
+    return text;
 }
 
-void ApplyTaskbarState(HWND hwnd, AppState& app) {
-    if (!app.taskbar) return;
+void RemoveTrayIcon(HWND hwnd, AppState& app) {
+    if (app.trayAdded) {
+        NOTIFYICONDATAW data{};
+        data.cbSize = sizeof(data);
+        data.hWnd = hwnd;
+        data.uID = kTrayIconId;
+        Shell_NotifyIconW(NIM_DELETE, &data);
+        app.trayAdded = false;
+    }
+    if (app.trayIcon) {
+        DestroyIcon(app.trayIcon);
+        app.trayIcon = nullptr;
+    }
+}
 
-    const auto state = app.current.state;
-    const int progress = app.current.progress;
-
-    switch (state) {
-        case StatusCode::Idle:
-            app.taskbar->SetProgressState(hwnd, TBPF_NOPROGRESS);
-            break;
-        case StatusCode::Done:
-            app.taskbar->SetProgressState(hwnd, TBPF_NORMAL);
-            app.taskbar->SetProgressValue(hwnd, 100, 100);
-            break;
-        case StatusCode::Error:
-            app.taskbar->SetProgressState(hwnd, TBPF_ERROR);
-            app.taskbar->SetProgressValue(hwnd, 100, 100);
-            break;
-        case StatusCode::Exit:
-            app.taskbar->SetProgressState(hwnd, TBPF_NOPROGRESS);
-            break;
-        default:
-            if (progress >= 0 && progress <= 100) {
-                app.taskbar->SetProgressState(hwnd, TBPF_NORMAL);
-                app.taskbar->SetProgressValue(hwnd, static_cast<ULONGLONG>(progress), 100);
-            } else {
-                app.taskbar->SetProgressState(hwnd, TBPF_INDETERMINATE);
-            }
-            break;
+void UpdateTrayIcon(HWND hwnd, AppState& app, bool forceAdd = false) {
+    if (app.current.state == StatusCode::Exit) {
+        RemoveTrayIcon(hwnd, app);
+        return;
     }
 
-    HICON overlay = CreateOverlayIcon(state);
-    app.taskbar->SetOverlayIcon(hwnd, overlay, StateLabel(state).c_str());
-    if (overlay) DestroyIcon(overlay);
+    HICON icon = CreateStatusIcon(app.current.state);
+    if (!icon) icon = LoadIconW(nullptr, IDI_APPLICATION);
+
+    NOTIFYICONDATAW data{};
+    data.cbSize = sizeof(data);
+    data.hWnd = hwnd;
+    data.uID = kTrayIconId;
+    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+    data.uCallbackMessage = kTrayMessage;
+    data.hIcon = icon;
+
+    std::wstring tip = StatusText(app.current);
+    if (tip.size() >= std::size(data.szTip)) tip.resize(std::size(data.szTip) - 1);
+    wcscpy_s(data.szTip, tip.c_str());
+
+    if (forceAdd || !app.trayAdded) {
+        if (Shell_NotifyIconW(NIM_ADD, &data)) {
+            app.trayAdded = true;
+            data.uVersion = NOTIFYICON_VERSION_4;
+            Shell_NotifyIconW(NIM_SETVERSION, &data);
+        }
+    } else {
+        Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+
+    if (app.trayIcon) DestroyIcon(app.trayIcon);
+    app.trayIcon = (icon && icon != LoadIconW(nullptr, IDI_APPLICATION)) ? icon : nullptr;
 }
 
 void ApplyStatus(HWND hwnd, AppState& app, const StatusPacket& packet) {
     app.current = packet;
-    SetWindowTextW(hwnd, WindowTitle(packet).c_str());
-    ApplyTaskbarState(hwnd, app);
+    UpdateTrayIcon(hwnd, app);
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -266,8 +277,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
     }
 
-    if (message == g_taskbarButtonCreated && app) {
-        ApplyTaskbarState(hwnd, *app);
+    if (message == g_taskbarCreated && app) {
+        app->trayAdded = false;
+        UpdateTrayIcon(hwnd, *app, true);
         return 0;
     }
 
@@ -279,10 +291,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lPara
             if (packet->state == StatusCode::Exit) DestroyWindow(hwnd);
             return 0;
         }
+        case kTrayMessage:
+            // O ícone é apenas indicador de status. Não abre janelas ao clicar.
+            return 0;
         case WM_CLOSE:
             DestroyWindow(hwnd);
             return 0;
         case WM_DESTROY:
+            if (app) RemoveTrayIcon(hwnd, *app);
             PostQuitMessage(0);
             return 0;
         default:
@@ -450,9 +466,6 @@ int SendCommand(StatusPacket packet) {
     if (SendPacket(packet)) return 0;
     if (!StartServerProcess()) return 4;
 
-    // WaitNamedPipe falha imediatamente quando o pipe ainda não foi criado.
-    // Faça tentativas curtas durante o bootstrap do servidor para eliminar a
-    // corrida entre CreateProcess e o primeiro CreateNamedPipe.
     for (int attempt = 0; attempt < 50; ++attempt) {
         if (SendPacket(packet)) return 0;
         Sleep(100);
@@ -494,17 +507,10 @@ int RunServer(HINSTANCE instance) {
         return 0;
     }
 
-    const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const bool comInitialized = SUCCEEDED(comResult);
+    g_taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
 
     AppState app{};
-    ITaskbarList3* taskbar = nullptr;
-    if (comInitialized && SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&taskbar)))) {
-        if (SUCCEEDED(taskbar->HrInit())) app.taskbar.reset(taskbar);
-        else taskbar->Release();
-    }
-
-    g_taskbarButtonCreated = RegisterWindowMessageW(L"TaskbarButtonCreated");
+    app.current.state = StatusCode::Idle;
 
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
@@ -513,40 +519,35 @@ int RunServer(HINSTANCE instance) {
     windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     windowClass.lpszClassName = kWindowClass;
 
     if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-        if (comInitialized) CoUninitialize();
         CloseHandle(mutex);
         return 11;
     }
 
+    // Janela oculta somente para receber mensagens do Shell/IPC. WS_EX_TOOLWINDOW
+    // impede botão próprio na taskbar; o estado aparece exclusivamente no tray.
     HWND hwnd = CreateWindowExW(
-        0,
+        WS_EX_TOOLWINDOW,
         kWindowClass,
-        L"Dev Automation — Monitorando",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
-        420,
-        140,
+        L"Dev Automation Status",
+        WS_POPUP,
+        0,
+        0,
+        0,
+        0,
         nullptr,
         nullptr,
         instance,
         &app);
 
     if (!hwnd) {
-        if (comInitialized) CoUninitialize();
         CloseHandle(mutex);
         return 12;
     }
 
-    ShowWindow(hwnd, SW_SHOWMINNOACTIVE);
-    ShowWindow(hwnd, SW_MINIMIZE);
-    UpdateWindow(hwnd);
-    ApplyTaskbarState(hwnd, app);
-
+    UpdateTrayIcon(hwnd, app, true);
     std::thread(PipeServerLoop, hwnd).detach();
 
     MSG message{};
@@ -555,7 +556,6 @@ int RunServer(HINSTANCE instance) {
         DispatchMessageW(&message);
     }
 
-    if (comInitialized) CoUninitialize();
     ReleaseMutex(mutex);
     CloseHandle(mutex);
     return 0;
