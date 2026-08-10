@@ -47,6 +47,9 @@ DB_PASSWORD=senha-producao-real
 ENV
 printf 'desenvolvimento-antigo\n' > "$DEST/apps/api/config/development/database.env"
 printf 'codigo-antigo\n' > "$DEST/app.py"
+cat > "$DEST/apps/api/config/local/app.env.external" <<'ENV'
+PUBLIC_API_URL=/api-antiga
+ENV
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
 orgs/sample-app
@@ -100,6 +103,16 @@ NEW_URL=http://127.0.0.1:9999
 NEW_PASSWORD=********
 ENV
 
+# Já external: deve reutilizar o mesmo caminho, sem gerar .external.external.
+cat > "$PACKAGE/apps/api/config/local/app.env.external" <<'ENV'
+PUBLIC_API_URL=/api-nova
+ENV
+
+# Mesmo que venha poluído com sufixo repetido, deve normalizar para um único .external.
+cat > "$PACKAGE/apps/api/config/local/legacy.env.external.external" <<'ENV'
+LEGACY_URL=/legacy
+ENV
+
 printf 'desenvolvimento-novo\n' > "$PACKAGE/apps/api/config/development/database.env"
 printf 'codigo-novo\n' > "$PACKAGE/app.py"
 
@@ -129,14 +142,20 @@ grep -Fxq 'PORT=8110' "$DEST/apps/api/config/remote/database.env.external"
 grep -Fxq 'DB_PASSWORD=********' "$DEST/apps/api/config/remote/database.env.external"
 grep -Fxq 'NEW_URL=http://127.0.0.1:9999' "$DEST/apps/api/config/local/new.env.external"
 [ ! -e "$DEST/apps/api/config/local/new.env" ]
+grep -Fxq 'PUBLIC_API_URL=/api-nova' "$DEST/apps/api/config/local/app.env.external"
+[ ! -e "$DEST/apps/api/config/local/app.env.external.external" ]
+grep -Fxq 'LEGACY_URL=/legacy' "$DEST/apps/api/config/local/legacy.env.external"
+[ ! -e "$DEST/apps/api/config/local/legacy.env.external.external" ]
 
 # Outras pastas config e código continuam atualizando normalmente.
 grep -Fxq 'desenvolvimento-novo' "$DEST/apps/api/config/development/database.env"
 grep -Fxq 'codigo-novo' "$DEST/app.py"
 
 [ ! -e "$DOWNLOADS_DIR/sample-app.zip" ]
-grep -Fq 'ENV protegidos: 2 alterado(s)/novo(s), 2 sem mudança.' "$LOG_FILE"
+grep -Fq 'ENV protegidos: 4 alterado(s)/novo(s), 2 sem mudança.' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/remote/database.env -> apps/api/config/remote/database.env.external' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/local/new.env -> apps/api/config/local/new.env.external' "$LOG_FILE"
+grep -Fq 'ENV EXTERNAL: apps/api/config/local/app.env.external -> apps/api/config/local/app.env.external' "$LOG_FILE"
+grep -Fq 'ENV EXTERNAL: apps/api/config/local/legacy.env.external.external -> apps/api/config/local/legacy.env.external' "$LOG_FILE"
 
-printf 'OK: env igual é descartado; alterado/novo vira .external; env real permanece intacto\n'
+printf 'OK: env igual é descartado; alterado/novo vira .external; .external é idempotente; env real permanece intacto\n'

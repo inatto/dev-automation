@@ -1374,28 +1374,44 @@ save_protected_config_baseline() {
   done < <(find "$sanitized_root" -type f -printf '%P\0')
 }
 
+canonical_external_relpath() {
+  local rel="$1"
+
+  while [[ "$rel" == *.external ]]; do
+    rel="${rel%.external}"
+  done
+
+  printf '%s.external\n' "$rel"
+}
+
 materialize_changed_protected_configs() {
   local project="$1"
   local source_root="$2"
   local filtered_root="$3"
-  local baseline_dir rel baseline external changed=0 unchanged=0
+  local baseline_dir rel baseline_rel baseline external_rel external changed=0 unchanged=0
 
   baseline_dir="$(protected_config_baseline_dir "$project")"
 
   while IFS= read -r -d '' rel; do
     protected_config_relpath "$rel" || continue
-    baseline="$baseline_dir/$rel"
+
+    external_rel="$(canonical_external_relpath "$rel")"
+    baseline_rel="$rel"
+    if [[ "$rel" == *.external ]]; then
+      baseline_rel="$external_rel"
+    fi
+    baseline="$baseline_dir/$baseline_rel"
 
     if [ -f "$baseline" ] && cmp -s -- "$source_root/$rel" "$baseline"; then
       unchanged=$((unchanged + 1))
       continue
     fi
 
-    external="$filtered_root/$rel.external"
+    external="$filtered_root/$external_rel"
     mkdir -p -- "$(dirname -- "$external")"
     cp -p -- "$source_root/$rel" "$external"
     changed=$((changed + 1))
-    log "ENV EXTERNAL: $rel -> $rel.external"
+    log "ENV EXTERNAL: $rel -> $external_rel"
   done < <(find "$source_root" -type f -printf '%P\0')
 
   log "ENV protegidos: $changed alterado(s)/novo(s), $unchanged sem mudança."
