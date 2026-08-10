@@ -18,3 +18,4 @@ node_modules/
 temp/
 tmp/
 venv/
+apps/dev-status/bin/

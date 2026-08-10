@@ -125,6 +125,19 @@ log() {
   fi
 }
 
+tray_state_for_context() {
+  case "$1" in
+    cycle) printf 'sync' ;;
+    downloads) printf 'unzip' ;;
+    sql) printf 'zip' ;;
+    zone) printf 'clean' ;;
+    backup) printf 'backup' ;;
+    wait) printf 'idle' ;;
+    error) printf 'error' ;;
+    *) printf 'idle' ;;
+  esac
+}
+
 stage() {
   local context="$1"
   local state="$2"
@@ -134,6 +147,8 @@ stage() {
 
   [ "$state" = 'end' ] && marker='✓'
   [ "$state" = 'skip' ] && marker='·'
+
+  taskbar_status "$(tray_state_for_context "$context")" "$title"
 
   printf '\n'
   paint "$context" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -161,7 +176,7 @@ taskbar_status() {
 
   invoke_windows="$(wslpath -w "$DEV_STATUS_INVOKE_PS1" 2>/dev/null)" || return 0
   powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-    -File "$invoke_windows" -State "$state" -Detail "$detail" >/dev/null 2>&1 || true
+    -File "$invoke_windows" -State "$state" -Detail "$detail" </dev/null >/dev/null 2>&1 || true
 }
 
 run_stage() {
@@ -1562,13 +1577,17 @@ create_code_zip() {
 backup_all() {
   local project
   local failed=0
+  local -a projects=()
+
+  # Materializa a lista antes de iniciar os backups. Assim nenhum subprocesso
+  # executado por backup_project pode consumir o stdin e interromper a rodada.
+  mapfile -t projects < <(backup_targets)
 
   # Nunca apaga o Code.zip válido antes de o novo estar pronto.
-
-  while IFS= read -r project || [ -n "$project" ]; do
+  for project in "${projects[@]}"; do
     [ -n "$project" ] || continue
     backup_project "$project" || failed=1
-  done < <(backup_targets)
+  done
 
   if [ "$failed" -ne 0 ]; then
     log "ERRO: um ou mais projetos falharam; Code.zip anterior foi mantido; o novo não foi criado neste ciclo."
@@ -1756,8 +1775,8 @@ while true; do
     stage wait skip "BACKUP — AINDA NÃO VENCEU" "Nenhum backup agora; será executado quando completar o intervalo de ${BACKUP_EVERY}s."
   fi
 
-  taskbar_status idle "Monitorando"
   stage cycle end "CICLO #$cycle — CONCLUÍDO"
+  taskbar_status idle "Monitorando"
   LOG_CONTEXT=wait log "Próximo ciclo em ${INTERVAL}s."
 
   cycle=$((cycle + 1))

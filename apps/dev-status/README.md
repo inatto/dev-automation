@@ -39,3 +39,7 @@ dev-status exit
 O `auto-code-manager` usa o indicador automaticamente quando o `.exe` existe. A ausência do executável nunca bloqueia backup/importação.
 
 Ao executar `dev-manager`, o build C++ é tentado automaticamente quando o executável ainda não existe **ou quando `src/main.cpp`/`build.ps1` são mais novos que o binário**. Assim uma atualização do indicador nunca reutiliza silenciosamente um `.exe` antigo. Depois de atualizado, os próximos starts reutilizam o executável existente.
+
+## Cores do indicador
+
+O ícone segue cada etapa do terminal: `S` ciclo/sync ciano, `U` importação azul, `Z` SQL magenta, `C` Zone.Identifier amarelo, `B` backup verde, `D` espera cinza e `!` erro vermelho. A própria letra e o contorno do ícone usam a cor da etapa. Ao concluir manualmente com `done`, o `V` mantém a cor da última etapa.

@@ -18,9 +18,9 @@
 
 namespace {
 
-constexpr wchar_t kWindowClass[] = L"DevAutomationStatusTrayWindow.v2";
-constexpr wchar_t kMutexName[] = L"Local\\DevAutomationStatus.Server.v1";
-constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\dev-automation-status-v1";
+constexpr wchar_t kWindowClass[] = L"DevAutomationStatusTrayWindow.v3";
+constexpr wchar_t kMutexName[] = L"Local\\DevAutomationStatus.Server.v2";
+constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\dev-automation-status-v2";
 constexpr UINT kStatusMessage = WM_APP + 41;
 constexpr UINT kTrayMessage = WM_APP + 42;
 constexpr UINT kTrayIconId = 1;
@@ -28,7 +28,7 @@ constexpr GUID kTrayGuid{
     0xda5b2f34, 0x66d5, 0x4176, {0x8f, 0xa5, 0x08, 0x74, 0xc6, 0x0c, 0x7c, 0x34}
 };
 constexpr std::uint32_t kProtocolMagic = 0x44565331; // DVS1
-constexpr std::uint32_t kProtocolVersion = 1;
+constexpr std::uint32_t kProtocolVersion = 2;
 constexpr int kNoProgress = -1;
 
 UINT g_taskbarCreated = 0;
@@ -57,6 +57,7 @@ static_assert(sizeof(StatusPacket) <= 1024);
 
 struct AppState {
     StatusPacket current{};
+    StatusCode lastWorkState = StatusCode::Idle;
     HICON trayIcon = nullptr;
     bool trayAdded = false;
 };
@@ -122,19 +123,24 @@ wchar_t StateGlyph(StatusCode state) {
 }
 
 COLORREF StateColor(StatusCode state) {
+    // Cores fortes equivalentes aos contextos ANSI do auto-code-manager.sh.
+    // O tray usa a cor no contorno e na própria letra para permanecer legível
+    // em taskbars claras ou escuras.
     switch (state) {
-        case StatusCode::Backup: return RGB(111, 66, 193);
-        case StatusCode::Unzip: return RGB(0, 120, 215);
-        case StatusCode::Zip: return RGB(202, 80, 16);
-        case StatusCode::Sync: return RGB(0, 153, 153);
-        case StatusCode::Clean: return RGB(96, 96, 96);
-        case StatusCode::Done: return RGB(16, 124, 16);
-        case StatusCode::Error: return RGB(196, 43, 28);
-        default: return RGB(80, 80, 80);
+        case StatusCode::Sync: return RGB(0, 230, 230);      // 1;36 ciano
+        case StatusCode::Unzip: return RGB(70, 120, 255);    // 1;34 azul
+        case StatusCode::Zip: return RGB(255, 0, 220);       // 1;35 magenta
+        case StatusCode::Clean: return RGB(255, 220, 0);     // 1;33 amarelo
+        case StatusCode::Backup: return RGB(0, 230, 0);      // 1;32 verde
+        case StatusCode::Error: return RGB(255, 70, 70);     // 1;31 vermelho
+        case StatusCode::Idle: return RGB(145, 145, 145);    // 2;37 cinza
+        case StatusCode::Done: return RGB(0, 230, 0);        // fallback; normalmente herda a etapa
+        default: return RGB(145, 145, 145);
     }
 }
 
-HICON CreateStatusIcon(StatusCode state) {
+
+HICON CreateStatusIcon(StatusCode state, StatusCode colorState) {
     constexpr int size = 32;
     HDC screen = GetDC(nullptr);
     if (!screen) return nullptr;
@@ -160,10 +166,12 @@ HICON CreateStatusIcon(StatusCode state) {
     FillRect(colorDc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
     FillRect(maskDc, &rect, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
 
-    HBRUSH colorBrush = CreateSolidBrush(StateColor(state));
+    const COLORREF statusColor = StateColor(colorState);
+    HBRUSH colorBrush = CreateSolidBrush(RGB(28, 28, 28));
+    HPEN colorPen = CreatePen(PS_SOLID, 3, statusColor);
     const auto oldColorBrush = SelectObject(colorDc, colorBrush);
-    const auto oldColorPen = SelectObject(colorDc, GetStockObject(NULL_PEN));
-    Ellipse(colorDc, 1, 1, size - 1, size - 1);
+    const auto oldColorPen = SelectObject(colorDc, colorPen);
+    Ellipse(colorDc, 2, 2, size - 2, size - 2);
 
     const auto oldMaskBrush = SelectObject(maskDc, GetStockObject(BLACK_BRUSH));
     const auto oldMaskPen = SelectObject(maskDc, GetStockObject(NULL_PEN));
@@ -171,7 +179,7 @@ HICON CreateStatusIcon(StatusCode state) {
 
     wchar_t glyph[2]{StateGlyph(state), L'\0'};
     SetBkMode(colorDc, TRANSPARENT);
-    SetTextColor(colorDc, RGB(255, 255, 255));
+    SetTextColor(colorDc, statusColor);
 
     HFONT font = CreateFontW(
         -20, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
@@ -195,6 +203,7 @@ HICON CreateStatusIcon(StatusCode state) {
     info.hbmColor = colorBitmap;
     HICON icon = CreateIconIndirect(&info);
 
+    DeleteObject(colorPen);
     DeleteObject(colorBrush);
     DeleteObject(colorBitmap);
     DeleteObject(maskBitmap);
@@ -239,7 +248,10 @@ void UpdateTrayIcon(HWND hwnd, AppState& app, bool forceAdd = false) {
         return;
     }
 
-    HICON icon = CreateStatusIcon(app.current.state);
+    const StatusCode colorState = app.current.state == StatusCode::Done
+        ? app.lastWorkState
+        : app.current.state;
+    HICON icon = CreateStatusIcon(app.current.state, colorState);
     if (!icon) icon = LoadIconW(nullptr, IDI_APPLICATION);
 
     NOTIFYICONDATAW data{};
@@ -270,6 +282,17 @@ void UpdateTrayIcon(HWND hwnd, AppState& app, bool forceAdd = false) {
 }
 
 void ApplyStatus(HWND hwnd, AppState& app, const StatusPacket& packet) {
+    switch (packet.state) {
+        case StatusCode::Backup:
+        case StatusCode::Unzip:
+        case StatusCode::Zip:
+        case StatusCode::Sync:
+        case StatusCode::Clean:
+            app.lastWorkState = packet.state;
+            break;
+        default:
+            break;
+    }
     app.current = packet;
     UpdateTrayIcon(hwnd, app);
 }
