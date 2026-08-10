@@ -8,6 +8,8 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 AUTO_MANAGER="${DEV_MANAGER_AUTO_MANAGER:-$PROJECT_ROOT/scripts/auto-code-manager.sh}"
 COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/install-commands.sh}"
 DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
+DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status.sh}"
+DEV_STATUS_EXE="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
 
 fail() {
   printf '[dev-manager] ERRO: %s\n' "$*" >&2
@@ -42,6 +44,28 @@ refresh_global_commands() {
   printf '[dev-manager] comandos globais atualizados.\n'
 }
 
+ensure_dev_status() {
+  [[ -f "$DEV_STATUS_EXE" ]] && return 0
+
+  if [[ ! -f "$DEV_STATUS_SCRIPT" ]]; then
+    printf '[dev-manager] AVISO: dev-status ausente; seguindo sem indicador da taskbar.\n' >&2
+    return 0
+  fi
+
+  [[ -x "$DEV_STATUS_SCRIPT" ]] || chmod +x "$DEV_STATUS_SCRIPT"
+
+  printf '[dev-manager] dev-status.exe ausente; compilando uma vez...\n'
+  if "$DEV_STATUS_SCRIPT" --build; then
+    if [[ -f "$DEV_STATUS_EXE" ]]; then
+      printf '[dev-manager] dev-status pronto.\n'
+      return 0
+    fi
+  fi
+
+  printf '[dev-manager] AVISO: não foi possível compilar dev-status; seguindo sem indicador da taskbar.\n' >&2
+  return 0
+}
+
 status_manager() {
   local matches
   matches="$(pgrep -af '[a]uto-code-manager\.sh' || true)"
@@ -60,6 +84,7 @@ case "$action" in
   start|run)
     shift || true
     refresh_global_commands
+    ensure_dev_status
     printf '[dev-manager] executando em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"
     ;;

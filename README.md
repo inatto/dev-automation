@@ -112,6 +112,22 @@ Para executar uma única rodada completa sobre todos os ZIPs presentes em Downlo
 auto-code-manager --import-downloads-once
 ```
 
+
+### `dev-status`
+
+Indicador nativo C++/Win32 do `auto-code-manager` na taskbar do Windows. O código fica em `apps/dev-status` e o monitor o usa automaticamente quando o executável estiver compilado.
+
+```bash
+dev-status --build
+dev-status backup
+dev-status unzip
+dev-status done
+```
+
+Sem o executável, o `auto-code-manager` continua funcionando normalmente; o indicador é observabilidade e nunca bloqueia backup/importação.
+
+Ao executar `dev-manager`, se `apps/dev-status/bin/dev-status.exe` ainda não existir, o build C++ é tentado automaticamente uma única vez. Depois de gerado, os próximos starts reutilizam o executável existente.
+
 ### `dev-manager`
 
 Executa o `auto-code-manager` diretamente no terminal atual:

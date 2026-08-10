@@ -31,6 +31,9 @@ BACKUP_BEEP_ENABLED=true
 BACKUP_BEEP_VOLUME=18
 BACKUP_BEEP_WAVE_FILE="$PROJECT_ROOT/assets/sounds/backup-complete.wav"
 BACKUP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\ding.wav"
+TASKBAR_STATUS_ENABLED=true
+DEV_STATUS_INVOKE_PS1="$PROJECT_ROOT/apps/dev-status/invoke.ps1"
+DEV_STATUS_EXE="$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe"
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -145,6 +148,22 @@ stage() {
   printf '\n'
 }
 
+taskbar_status() {
+  local state="$1"
+  local detail="${2:-}"
+  local invoke_windows
+
+  [ "${TASKBAR_STATUS_ENABLED:-true}" = true ] || return 0
+  [ -f "$DEV_STATUS_EXE" ] || return 0
+  [ -f "$DEV_STATUS_INVOKE_PS1" ] || return 0
+  command -v powershell.exe >/dev/null 2>&1 || return 0
+  command -v wslpath >/dev/null 2>&1 || return 0
+
+  invoke_windows="$(wslpath -w "$DEV_STATUS_INVOKE_PS1" 2>/dev/null)" || return 0
+  powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+    -File "$invoke_windows" -State "$state" -Detail "$detail" >/dev/null 2>&1 || true
+}
+
 run_stage() {
   local context="$1"
   local title="$2"
@@ -157,6 +176,7 @@ run_stage() {
     return 0
   fi
 
+  taskbar_status error "$title"
   LOG_CONTEXT=error log "ERRO: etapa '$title' terminou com falha."
   return 1
 }
@@ -651,6 +671,7 @@ import_one_zip() {
     return 0
   fi
 
+  taskbar_status unzip "$zip_name"
   archive_name="$(project_archive_name "$project")"
   project_dir="$(project_path "$project")"
   temp_dir="$(mktemp -d "/tmp/auto-code-import-${archive_name}-XXXXXX")"
@@ -886,6 +907,7 @@ import_downloads() {
 }
 
 clean_zone() {
+  taskbar_status clean "Zone.Identifier"
   log "Limpando Zone.Identifier em $CODE_ROOT"
 
   find "$CODE_ROOT" \
@@ -1072,6 +1094,7 @@ zip_sql_folder() {
 
   [ "${#sql_files[@]}" -gt 0 ] || return 0
 
+  taskbar_status zip "$(basename -- "$folder")"
   stamp="$(date '+%Y%m%d-%H%M')"
   final_zip="$folder/$stamp.zip"
   temp_dir="$(mktemp -d '/tmp/auto-code-folder-sql-zip-XXXXXX')"
@@ -1337,6 +1360,7 @@ backup_project() {
     return 1
   fi
 
+  taskbar_status backup "$archive_name"
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
   final_zip="$(project_archive_path "$project")"
@@ -1561,6 +1585,7 @@ backup_all() {
 }
 
 stop() {
+  taskbar_status exit "Auto Code Manager encerrado"
   echo
   line
   echo "Encerrado."
@@ -1615,8 +1640,12 @@ if [ "${1:-}" = "--import-downloads-once" ]; then
     exit 1
   fi
 
-  import_downloads
-  exit $?
+  if import_downloads; then
+    taskbar_status done "Importação concluída"
+    exit 0
+  fi
+  taskbar_status error "Falha na importação"
+  exit 1
 fi
 
 if [ "${1:-}" = "--import-one" ]; then
@@ -1635,8 +1664,13 @@ if [ "${1:-}" = "--import-one" ]; then
     exit 1
   fi
 
-  import_one_zip "$2"
-  exit $?
+  taskbar_status unzip "Importando $(basename -- "$2")"
+  if import_one_zip "$2"; then
+    taskbar_status done "Importação concluída"
+    exit 0
+  fi
+  taskbar_status error "Falha na importação"
+  exit 1
 fi
 
 if [ "${1:-}" = "--sql-zip-once" ]; then
@@ -1645,8 +1679,12 @@ if [ "${1:-}" = "--sql-zip-once" ]; then
     exit 1
   fi
 
-  zip_configured_sql_folders
-  exit $?
+  if zip_configured_sql_folders; then
+    taskbar_status done "SQLs compactados"
+    exit 0
+  fi
+  taskbar_status error "Falha ao compactar SQLs"
+  exit 1
 fi
 
 if [ ! -d "$CODE_ROOT" ]; then
@@ -1660,10 +1698,13 @@ if ! validate_projects; then
 fi
 
 if [ "${1:-}" = "--backup-once" ]; then
-  zip_configured_sql_folders || exit 1
-  clean_unmanaged_backup_zips
-  backup_all
-  exit $?
+  taskbar_status backup "Backup manual"
+  if zip_configured_sql_folders && clean_unmanaged_backup_zips && backup_all; then
+    taskbar_status done "Backup concluído"
+    exit 0
+  fi
+  taskbar_status error "Falha no backup"
+  exit 1
 fi
 
 line
@@ -1682,6 +1723,7 @@ line
 cycle=1
 last_backup=0
 last_zone=0
+taskbar_status idle "Monitorando"
 
 while true; do
   now="$(date +%s)"
@@ -1699,12 +1741,14 @@ while true; do
   fi
 
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
+    taskbar_status backup "Gerando backups"
     stage backup start "BACKUP — INÍCIO" "Gera os ZIPs dos projetos autorizados e, ao final, atualiza o Code.zip geral."
     LOG_CONTEXT=backup clean_unmanaged_backup_zips
     if LOG_CONTEXT=backup backup_all; then
       LOG_CONTEXT=backup log "Ciclo de backup concluído com Code.zip."
       stage backup end "BACKUP — CONCLUÍDO"
     else
+      taskbar_status error "Backup falhou"
       LOG_CONTEXT=error log "ERRO: ciclo de backup terminou sem Code.zip."
     fi
     last_backup="$now"
@@ -1712,6 +1756,7 @@ while true; do
     stage wait skip "BACKUP — AINDA NÃO VENCEU" "Nenhum backup agora; será executado quando completar o intervalo de ${BACKUP_EVERY}s."
   fi
 
+  taskbar_status idle "Monitorando"
   stage cycle end "CICLO #$cycle — CONCLUÍDO"
   LOG_CONTEXT=wait log "Próximo ciclo em ${INTERVAL}s."
 

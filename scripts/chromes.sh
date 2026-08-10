@@ -61,14 +61,15 @@ Start-Process -FilePath $chrome -ArgumentList @(
     'chrome://newtab/'
 )
 
-Write-Host "[chromes] Abrindo Explorer no monitor central: $($centralScreen.DeviceName)..."
+$explorerTarget = '\\wsl.localhost\Ubuntu-22.04-D\home\daniel\Code'
+Write-Host "[chromes] Abrindo Explorer no monitor central: $($centralScreen.DeviceName) -> $explorerTarget..."
 $shell = New-Object -ComObject Shell.Application
 $beforeExplorerWindows = @(
     $shell.Windows() |
         Where-Object { $_.FullName -and ([System.IO.Path]::GetFileName($_.FullName) -ieq 'explorer.exe') } |
         ForEach-Object { [int64]$_.HWND }
 )
-Start-Process -FilePath 'explorer.exe' | Out-Null
+Start-Process -FilePath 'explorer.exe' -ArgumentList $explorerTarget | Out-Null
 
 $explorerWindow = $null
 $deadline = (Get-Date).AddSeconds(10)

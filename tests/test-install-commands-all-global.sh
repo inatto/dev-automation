@@ -38,6 +38,7 @@ commands=(
   phpstorms
   phpstorm-dev
   local-nginx
+  dev-status
   oracle-monitor
   sample-app
 )
