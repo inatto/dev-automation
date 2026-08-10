@@ -6,7 +6,6 @@
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
-#orgs/sind-vault
 #orgs/station-app
 #social/murm-app
 bots/dev-automation
@@ -23,3 +22,4 @@ orgs/orbital/orbital-legal
 orgs/orbital/orbital-mail
 orgs/orbital/orbital-reports
 orgs/orbital/orbital-ui
+orgs/sind-vault
