@@ -25,6 +25,32 @@ if (-not (Test-Path -LiteralPath $vcvars)) {
 
 New-Item -ItemType Directory -Force -Path $bin, $build | Out-Null
 
+# O executável fica residente no system tray. Ao recompilar uma versão nova,
+# encerra somente a instância carregada a partir deste mesmo caminho para que
+# o linker possa substituir o binário sem deixar a versão antiga em memória.
+if (Test-Path -LiteralPath $exe) {
+    try {
+        & $exe exit *> $null
+    } catch {
+        # A versão antiga pode não responder; a checagem de processo abaixo resolve.
+    }
+    Start-Sleep -Milliseconds 250
+
+    $targetExe = [System.IO.Path]::GetFullPath($exe)
+    Get-Process -Name 'dev-status' -ErrorAction SilentlyContinue | ForEach-Object {
+        try {
+            $processExe = [System.IO.Path]::GetFullPath($_.Path)
+            if ([string]::Equals($processExe, $targetExe, [System.StringComparison]::OrdinalIgnoreCase)) {
+                Stop-Process -Id $_.Id -Force -ErrorAction Stop
+                $_.WaitForExit(2000) | Out-Null
+            }
+        } catch {
+            # Processo já saiu ou não foi possível consultar o caminho; o build
+            # continuará e o linker será a validação final de que o arquivo está livre.
+        }
+    }
+}
+
 # pushd aceita caminho UNC (\\wsl.localhost\...) e cria um drive temporário,
 # evitando a limitação do cmd.exe com diretório atual UNC.
 $command = @"

@@ -10,6 +10,8 @@ COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/in
 DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
 DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status.sh}"
 DEV_STATUS_EXE="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
+DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/src/main.cpp}"
+DEV_STATUS_BUILD_PS1="${DEV_MANAGER_DEV_STATUS_BUILD_PS1:-$PROJECT_ROOT/apps/dev-status/build.ps1}"
 
 fail() {
   printf '[dev-manager] ERRO: %s\n' "$*" >&2
@@ -44,8 +46,17 @@ refresh_global_commands() {
   printf '[dev-manager] comandos globais atualizados.\n'
 }
 
+dev_status_needs_build() {
+  [[ -f "$DEV_STATUS_EXE" ]] || return 0
+  [[ -f "$DEV_STATUS_SOURCE" && "$DEV_STATUS_SOURCE" -nt "$DEV_STATUS_EXE" ]] && return 0
+  [[ -f "$DEV_STATUS_BUILD_PS1" && "$DEV_STATUS_BUILD_PS1" -nt "$DEV_STATUS_EXE" ]] && return 0
+  return 1
+}
+
 ensure_dev_status() {
-  [[ -f "$DEV_STATUS_EXE" ]] && return 0
+  if ! dev_status_needs_build; then
+    return 0
+  fi
 
   if [[ ! -f "$DEV_STATUS_SCRIPT" ]]; then
     printf '[dev-manager] AVISO: dev-status ausente; seguindo sem indicador no system tray.\n' >&2
@@ -54,9 +65,14 @@ ensure_dev_status() {
 
   [[ -x "$DEV_STATUS_SCRIPT" ]] || chmod +x "$DEV_STATUS_SCRIPT"
 
-  printf '[dev-manager] dev-status.exe ausente; compilando uma vez...\n'
+  if [[ -f "$DEV_STATUS_EXE" ]]; then
+    printf '[dev-manager] dev-status.exe desatualizado; recompilando...\n'
+  else
+    printf '[dev-manager] dev-status.exe ausente; compilando uma vez...\n'
+  fi
+
   if "$DEV_STATUS_SCRIPT" --build; then
-    if [[ -f "$DEV_STATUS_EXE" ]]; then
+    if [[ -f "$DEV_STATUS_EXE" ]] && ! dev_status_needs_build; then
       printf '[dev-manager] dev-status pronto.\n'
       return 0
     fi

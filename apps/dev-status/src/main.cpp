@@ -24,6 +24,9 @@ constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\dev-automation-status-v1";
 constexpr UINT kStatusMessage = WM_APP + 41;
 constexpr UINT kTrayMessage = WM_APP + 42;
 constexpr UINT kTrayIconId = 1;
+constexpr GUID kTrayGuid{
+    0xda5b2f34, 0x66d5, 0x4176, {0x8f, 0xa5, 0x08, 0x74, 0xc6, 0x0c, 0x7c, 0x34}
+};
 constexpr std::uint32_t kProtocolMagic = 0x44565331; // DVS1
 constexpr std::uint32_t kProtocolVersion = 1;
 constexpr int kNoProgress = -1;
@@ -219,6 +222,8 @@ void RemoveTrayIcon(HWND hwnd, AppState& app) {
         data.cbSize = sizeof(data);
         data.hWnd = hwnd;
         data.uID = kTrayIconId;
+        data.uFlags = NIF_GUID;
+        data.guidItem = kTrayGuid;
         Shell_NotifyIconW(NIM_DELETE, &data);
         app.trayAdded = false;
     }
@@ -241,9 +246,10 @@ void UpdateTrayIcon(HWND hwnd, AppState& app, bool forceAdd = false) {
     data.cbSize = sizeof(data);
     data.hWnd = hwnd;
     data.uID = kTrayIconId;
-    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+    data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP | NIF_GUID;
     data.uCallbackMessage = kTrayMessage;
     data.hIcon = icon;
+    data.guidItem = kTrayGuid;
 
     std::wstring tip = StatusText(app.current);
     if (tip.size() >= std::size(data.szTip)) tip.resize(std::size(data.szTip) - 1);
@@ -529,7 +535,7 @@ int RunServer(HINSTANCE instance) {
     // Janela oculta somente para receber mensagens do Shell/IPC. WS_EX_TOOLWINDOW
     // impede botão próprio na taskbar; o estado aparece exclusivamente no tray.
     HWND hwnd = CreateWindowExW(
-        WS_EX_TOOLWINDOW,
+        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         kWindowClass,
         L"Dev Automation Status",
         WS_POPUP,
@@ -547,6 +553,7 @@ int RunServer(HINSTANCE instance) {
         return 12;
     }
 
+    ShowWindow(hwnd, SW_HIDE);
     UpdateTrayIcon(hwnd, app, true);
     std::thread(PipeServerLoop, hwnd).detach();
 

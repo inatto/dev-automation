@@ -17,6 +17,9 @@ for file in \
 done
 
 grep -Fq 'Shell_NotifyIconW' "$APP/src/main.cpp"
+grep -Fq 'NIF_GUID' "$APP/src/main.cpp"
+grep -Fq 'kTrayGuid' "$APP/src/main.cpp"
+grep -Fq 'SW_HIDE' "$APP/src/main.cpp"
 grep -Fq 'WS_EX_TOOLWINDOW' "$APP/src/main.cpp"
 grep -Fq 'CreateNamedPipeW' "$APP/src/main.cpp"
 grep -Fq 'PIPE_REJECT_REMOTE_CLIENTS' "$APP/src/main.cpp"
@@ -25,5 +28,7 @@ grep -Fq 'taskbar_status backup "Gerando backups"' "$AUTO"
 grep -Fq 'taskbar_status idle "Monitorando"' "$AUTO"
 grep -Fq 'taskbar_status exit "Auto Code Manager encerrado"' "$AUTO"
 grep -Fq '[ -f "$DEV_STATUS_EXE" ] || return 0' "$AUTO"
+grep -Fq 'dev_status_needs_build' "$PROJECT_ROOT/scripts/dev-manager.sh"
+grep -Fq 'dev-status.exe desatualizado; recompilando' "$PROJECT_ROOT/scripts/dev-manager.sh"
 
 printf 'OK: dev-status tray nativo e integração não bloqueante presentes\n'
