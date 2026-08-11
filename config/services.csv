@@ -17,3 +17,4 @@ site-inst;base;4003;8003;anpprev.localhost;/
 site-inst;base;4003;8003;sinproprev.localhost;/
 asaclub-app;base;4004;8004;asaclub.localhost;/
 amazon-infra-monitor;base;4005;8005;amazon-infra-monitor.localhost;/
+general-crawler;base;4113;8113;general.localhost;/

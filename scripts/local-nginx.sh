@@ -331,7 +331,7 @@ ensure_tls_certificate() {
     regenerate=1
   fi
 
-  ((regenerate)) || return
+  ((regenerate)) || return 0
 
   temp_dir="$(mktemp -d /tmp/dev-automation-tls-XXXXXX)"
   temp_cert="$temp_dir/cert.pem"
