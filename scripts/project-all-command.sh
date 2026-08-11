@@ -67,22 +67,82 @@ fi
 
 action="${1:-setup}"
 
-run_remote_sequential() {
-  printf '[%s] %d projeto(s) ativo(s) com deploy remote; execução sequencial.\n' "$COMMAND_NAME" "$total"
+run_remote_parallel() {
+  local state_base run_id log_dir log_file status_file pid current final_status status ok_count fail_count
+  local -a pids=() status_files=()
+
+  state_base="${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation/remote-all"
+  run_id="$(date '+%Y%m%d-%H%M%S')-$$"
+  log_dir="$state_base/$run_id"
+  mkdir -p "$log_dir"
+
+  printf '[%s] %d projeto(s) ativo(s) com deploy remote; execução paralela.\n' "$COMMAND_NAME" "$total"
+  printf '[%s] logs: %s\n' "$COMMAND_NAME" "$log_dir"
+
   for ((i = 0; i < total; i += 1)); do
     current=$((i + 1))
-    printf '\n[%s] [%d/%d] %s\n' "$COMMAND_NAME" "$current" "$total" "${project_names[$i]}"
+    log_file="$log_dir/${project_names[$i]}.log"
+    status_file="$log_dir/${project_names[$i]}.status"
+    status_files+=("$status_file")
 
-    if DEV_AUTOMATION_SKIP_CLEAR=1 "${project_commands[$i]}" "$@"; then
-      printf '[%s] [%d/%d] OK: %s\n' "$COMMAND_NAME" "$current" "$total" "${project_names[$i]}"
+    printf '[%s] [%d/%d] INICIANDO: %s\n' \
+      "$COMMAND_NAME" "$current" "$total" "${project_names[$i]}"
+
+    (
+      set +e
+      DEV_AUTOMATION_SKIP_CLEAR=1 "${project_commands[$i]}" "$@" 2>&1 | \
+        while IFS= read -r line || [[ -n "$line" ]]; do
+          printf '[%s] %s\n' "${project_names[$i]}" "$line"
+          printf '%s\n' "$line" >> "$log_file"
+        done
+      status=${PIPESTATUS[0]}
+      printf '%d\n' "$status" > "$status_file"
+      if ((status == 0)); then
+        printf '[%s] OK\n' "${project_names[$i]}"
+      else
+        printf '[%s] ERRO (%d)\n' "${project_names[$i]}" "$status" >&2
+      fi
+      exit "$status"
+    ) &
+    pid=$!
+    pids+=("$pid")
+  done
+
+  final_status=0
+  for ((i = 0; i < total; i += 1)); do
+    if wait "${pids[$i]}"; then
+      :
     else
       status=$?
-      printf '[%s] [%d/%d] FALHOU (%d): %s\n' "$COMMAND_NAME" "$current" "$total" "$status" "${project_names[$i]}" >&2
-      exit "$status"
+      ((final_status == 0)) && final_status=$status
     fi
   done
 
-  printf '\n[%s] concluído: %d/%d projeto(s).\n' "$COMMAND_NAME" "$total" "$total"
+  ok_count=0
+  fail_count=0
+  printf '\n========== %s RESUMO ==========\n' "$COMMAND_NAME"
+  for ((i = 0; i < total; i += 1)); do
+    if [[ -f "${status_files[$i]}" ]]; then
+      status="$(cat "${status_files[$i]}")"
+    else
+      status=125
+      ((final_status == 0)) && final_status=$status
+    fi
+
+    if [[ "$status" == "0" ]]; then
+      printf 'OK    %s\n' "${project_names[$i]}"
+      ok_count=$((ok_count + 1))
+    else
+      printf 'ERRO  %s (código %s)\n' "${project_names[$i]}" "$status"
+      fail_count=$((fail_count + 1))
+    fi
+  done
+  printf '=================================\n'
+  printf '[%s] %d OK | %d ERRO | logs: %s\n' "$COMMAND_NAME" "$ok_count" "$fail_count" "$log_dir"
+
+  if ((final_status != 0)); then
+    exit "$final_status"
+  fi
 }
 
 run_local_setup_detached() {
@@ -164,7 +224,7 @@ run_local_parallel_wait() {
 }
 
 if [[ "$DEPLOY_MODE" == "remote" ]]; then
-  run_remote_sequential "$@"
+  run_remote_parallel "$@"
 elif [[ "$action" == "setup" ]]; then
   run_local_setup_detached "$@"
 else

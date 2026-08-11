@@ -34,6 +34,9 @@ printf '%s:%s:%s:%s\n' '$project' '$mode' '$action' "\${*:-}" >> "\${RUN_LOG:?}"
 if [[ '$mode' == 'local' && '$action' == 'setup' && -n "\${LOCAL_SETUP_SLEEP:-}" ]]; then
   sleep "\$LOCAL_SETUP_SLEEP"
 fi
+if [[ '$mode' == 'remote' && -n "\${REMOTE_SLEEP:-}" ]]; then
+  sleep "\$REMOTE_SLEEP"
+fi
 if [[ "\${FAIL_PROJECT:-}" == '$project' ]]; then
   exit $status
 fi
@@ -100,27 +103,46 @@ grep -Fxq 'beta:local:test:' "$RUN_LOG"
 grep -Fxq 'local-only:local:test:' "$RUN_LOG"
 grep -Fxq 'gamma:local:test:' "$RUN_LOG"
 
-# Remoto permanece sequencial e na ordem configurada.
+# Remoto roda todos os projetos em paralelo, mostra prefixos ao vivo e espera todos terminarem.
 : > "$RUN_LOG"
-RUN_LOG="$RUN_LOG" "$TARGET_DIR/remote-all" >/dev/null
-cat > "$TMP/expected-remote" <<'EXPECTED'
-alpha:remote:setup:
-beta:remote:setup:
-gamma:remote:setup:
-EXPECTED
-cmp -s "$TMP/expected-remote" "$RUN_LOG"
+start_ns="$(date +%s%N)"
+RUN_LOG="$RUN_LOG" REMOTE_SLEEP=1 XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/remote-all" >"$TMP/remote.out" 2>"$TMP/remote.err"
+end_ns="$(date +%s%N)"
+elapsed_ms=$(((end_ns - start_ns) / 1000000))
+((elapsed_ms < 2200))
+for expected in \
+  'alpha:remote:setup:' \
+  'beta:remote:setup:' \
+  'gamma:remote:setup:'; do
+  grep -Fxq "$expected" "$RUN_LOG"
+done
+[[ "$(wc -l < "$RUN_LOG")" -eq 3 ]]
+grep -Fq '[remote-all] [1/3] INICIANDO: remote-alpha' "$TMP/remote.out"
+grep -Fq '[remote-all] [2/3] INICIANDO: remote-beta' "$TMP/remote.out"
+grep -Fq '[remote-all] [3/3] INICIANDO: remote-gamma' "$TMP/remote.out"
+grep -Fq '[remote-alpha] [remote-alpha] executando: ./deploy/remote/setup.sh' "$TMP/remote.out"
+grep -Fq 'OK    remote-alpha' "$TMP/remote.out"
+grep -Fq 'OK    remote-beta' "$TMP/remote.out"
+grep -Fq 'OK    remote-gamma' "$TMP/remote.out"
+grep -Fq '[remote-all] 3 OK | 0 ERRO' "$TMP/remote.out"
 
-# Remoto continua fail-fast.
+# Falha remota é agregada: não cancela nem impede nenhum dos outros jobs.
 : > "$RUN_LOG"
 set +e
-RUN_LOG="$RUN_LOG" FAIL_PROJECT=beta "$TARGET_DIR/remote-all" test >/dev/null 2>&1
+RUN_LOG="$RUN_LOG" FAIL_PROJECT=beta REMOTE_SLEEP=0.1 XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/remote-all" test >"$TMP/remote-fail.out" 2>"$TMP/remote-fail.err"
 status=$?
 set -e
 [[ "$status" -eq 9 ]]
-cat > "$TMP/expected-remote-fail" <<'EXPECTED'
-alpha:remote:test:
-beta:remote:test:
-EXPECTED
-cmp -s "$TMP/expected-remote-fail" "$RUN_LOG"
+for expected in \
+  'alpha:remote:test:' \
+  'beta:remote:test:' \
+  'gamma:remote:test:'; do
+  grep -Fxq "$expected" "$RUN_LOG"
+done
+[[ "$(wc -l < "$RUN_LOG")" -eq 3 ]]
+grep -Fq 'OK    remote-alpha' "$TMP/remote-fail.out"
+grep -Fq 'ERRO  remote-beta (código 9)' "$TMP/remote-fail.out"
+grep -Fq 'OK    remote-gamma' "$TMP/remote-fail.out"
+grep -Fq '[remote-all] 2 OK | 1 ERRO' "$TMP/remote-fail.out"
 
-printf 'OK: local-all setup paralelo/desacoplado; demais ações locais paralelas; remote-all sequencial/fail-fast\n'
+printf 'OK: local-all paralelo; remote-all paralelo, independente, com logs prefixados e resumo agregado\n'
