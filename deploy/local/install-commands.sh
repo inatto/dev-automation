@@ -10,6 +10,7 @@ AUTO_SOURCE="$PROJECT_ROOT/scripts/auto-code-manager.sh"
 AUTO_TARGET="$TARGET_DIR/auto-code-manager"
 PROJECT_INSTALLER="$PROJECT_ROOT/deploy/local/install-project-commands.sh"
 PROJECT_RUNNER="$PROJECT_ROOT/scripts/project-command.sh"
+PROJECT_ALL_RUNNER="$PROJECT_ROOT/scripts/project-all-command.sh"
 ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
 CHATGPTS_SOURCE="$PROJECT_ROOT/scripts/chatgpts.sh"
@@ -27,6 +28,7 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$AUTO_SOURCE" ]] || fail "script não encontrado: $AUTO_SOURCE"
 [[ -f "$PROJECT_INSTALLER" ]] || fail "instalador não encontrado: $PROJECT_INSTALLER"
 [[ -f "$PROJECT_RUNNER" ]] || fail "executor de projetos não encontrado: $PROJECT_RUNNER"
+[[ -f "$PROJECT_ALL_RUNNER" ]] || fail "executor geral de projetos não encontrado: $PROJECT_ALL_RUNNER"
 [[ -d "$ORACLE_MONITOR_DIR" ]] || fail "aplicação não encontrada: $ORACLE_MONITOR_DIR"
 [[ -f "$CHROMES_SOURCE" ]] || fail "script não encontrado: $CHROMES_SOURCE"
 [[ -f "$CHATGPTS_SOURCE" ]] || fail "script não encontrado: $CHATGPTS_SOURCE"
@@ -39,7 +41,7 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
+chmod +x "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -98,4 +100,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  phpstorms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  orbital-app help\n  station-app dir\n'

@@ -146,6 +146,21 @@ dos projetos configurados. Para atualizar sem iniciar o monitor:
 dev-manager commands
 ```
 
+Os mesmos projetos ativos (linhas descomentadas de `config/auto-code-manager.projects`)
+podem ser executados em sequência pelos comandos gerais. Cada comando ignora projetos
+sem o respectivo `deploy/<modo>/setup.sh`, preserva a ordem do arquivo e interrompe na
+primeira falha:
+
+```bash
+local-all           # executa o setup local de todos os projetos ativos compatíveis
+local-all test      # executa o test local de todos, na mesma ordem
+remote-all          # executa o setup remoto de todos os projetos ativos compatíveis
+remote-all test     # executa o test remoto de todos, na mesma ordem
+```
+
+A tela é limpa uma única vez no início de `local-all`/`remote-all`, para preservar o
+log completo da sequência.
+
 O instalador geral também cria o comando global `local-nginx`, dedicado somente
 ao gateway Nginx local:
 

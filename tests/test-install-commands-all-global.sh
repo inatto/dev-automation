@@ -41,6 +41,8 @@ commands=(
   dev-status
   oracle-monitor
   sample-app
+  local-all
+  remote-all
 )
 
 for command_name in "${commands[@]}"; do

@@ -15,7 +15,9 @@ if (($# > 0)); then
   shift
 fi
 
-[[ -f "$CLEAR_TERMINAL" ]] && bash "$CLEAR_TERMINAL"
+if [[ "${DEV_AUTOMATION_SKIP_CLEAR:-0}" != "1" && -f "$CLEAR_TERMINAL" ]]; then
+  bash "$CLEAR_TERMINAL"
+fi
 
 fail() {
   printf '[%s] ERRO: %s\n' "$PROJECT_NAME" "$*" >&2

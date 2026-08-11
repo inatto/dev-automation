@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 COMMAND_RUNNER="${COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-command.sh}"
+ALL_COMMAND_RUNNER="${ALL_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-all-command.sh}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 MANIFEST_FILE="$TARGET_DIR/.dev-automation-project-commands"
@@ -16,8 +17,9 @@ fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$PROJECTS_FILE" ]] || fail "arquivo de projetos não encontrado: $PROJECTS_FILE"
 [[ -f "$COMMAND_RUNNER" ]] || fail "executor não encontrado: $COMMAND_RUNNER"
+[[ -f "$ALL_COMMAND_RUNNER" ]] || fail "executor geral não encontrado: $ALL_COMMAND_RUNNER"
 
-chmod +x "$COMMAND_RUNNER"
+chmod +x "$COMMAND_RUNNER" "$ALL_COMMAND_RUNNER"
 mkdir -p "$TARGET_DIR"
 
 if [[ -f "$MANIFEST_FILE" ]]; then
@@ -53,6 +55,22 @@ EOF_WRAPPER
   ((created += 1))
 }
 
+create_all_command() {
+  local command_name="$1"
+  local deploy_mode="$2"
+  local target="$TARGET_DIR/$command_name"
+
+  cat > "$target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-project-commands
+exec "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "\$@"
+EOF_WRAPPER
+  chmod +x "$target"
+  printf '%s\n' "$command_name" >> "$new_manifest"
+  log "criado: $command_name -> projetos ativos com deploy/$deploy_mode"
+  ((created += 1))
+}
+
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="$(printf '%s' "$line" | xargs)"
@@ -82,6 +100,9 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     ((skipped += 1))
   fi
 done < "$PROJECTS_FILE"
+
+create_all_command "local-all" local
+create_all_command "remote-all" remote
 
 sort -u "$new_manifest" > "$MANIFEST_FILE"
 

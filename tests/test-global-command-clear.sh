@@ -57,4 +57,9 @@ grep -Fq "bash \"$ROOT/scripts/clear-terminal.sh\"" "$TARGET_DIR/local-nginx"
 grep -Fq "exec \"$ROOT/scripts/project-command.sh\"" "$TARGET_DIR/sample-app"
 grep -Fq "exec \"$ROOT/scripts/project-command.sh\"" "$TARGET_DIR/oracle-monitor"
 
+# local-all limpa uma vez; os comandos individuais internos preservam o log completo.
+: > "$MARKER"
+PATH="$FAKE_BIN:$PATH" TERM=xterm script -q -e -c "'$TARGET_DIR/local-all'" /dev/null >/dev/null
+[[ "$(wc -l < "$MARKER")" -eq 1 ]]
+
 printf 'OK: comandos globais limpam terminal interativo sem afetar automacao nao interativa\n'
