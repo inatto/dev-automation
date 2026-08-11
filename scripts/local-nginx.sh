@@ -16,6 +16,7 @@ TLS_KEY_FILE="$TLS_DIR/key.pem"
 TLS_HOSTS_FILE="$TLS_DIR/hosts.txt"
 NGINX_BIN="${NGINX_BIN:-nginx}"
 MKCERT_BIN="${MKCERT_BIN:-mkcert}"
+CLIENT_MAX_BODY_SIZE="${CLIENT_MAX_BODY_SIZE:-32m}"
 
 log() { printf '[local-nginx] %s\n' "$*"; }
 fail() { printf '[local-nginx] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -25,6 +26,11 @@ trim() {
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   printf '%s' "$value"
+}
+
+validate_client_max_body_size() {
+  [[ "$CLIENT_MAX_BODY_SIZE" =~ ^[1-9][0-9]*[kKmMgG]$ ]] ||
+    fail "CLIENT_MAX_BODY_SIZE inválido: $CLIENT_MAX_BODY_SIZE"
 }
 
 validate_services() {
@@ -184,6 +190,7 @@ EOF_STATIC
 }
 
 generate_config() {
+  validate_client_max_body_size
   validate_services
   validate_static_locations
 
@@ -208,6 +215,7 @@ server {
 
     ssl_certificate $TLS_CERT_FILE;
     ssl_certificate_key $TLS_KEY_FILE;
+    client_max_body_size $CLIENT_MAX_BODY_SIZE;
 
 EOF_REDIRECT
 
