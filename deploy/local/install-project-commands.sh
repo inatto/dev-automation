@@ -102,6 +102,26 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
 done < "$PROJECTS_FILE"
 
 create_all_command "local-all" local
+
+create_special_all_command() {
+  local command_name="$1"
+  local deploy_mode="$2"
+  local forced_action="$3"
+  local target="$TARGET_DIR/$command_name"
+
+  cat > "$target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-project-commands
+exec "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "$forced_action" "\$@"
+EOF_WRAPPER
+  chmod +x "$target"
+  printf '%s\n' "$command_name" >> "$new_manifest"
+  log "criado: $command_name -> ação geral $forced_action ($deploy_mode)"
+  ((created += 1))
+}
+
+create_special_all_command "local-status-all" local __status
+create_special_all_command "local-stop-all" local __stop
 create_all_command "remote-all" remote
 
 sort -u "$new_manifest" > "$MANIFEST_FILE"

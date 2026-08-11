@@ -31,6 +31,9 @@ make_script() {
   cat > "$path" <<SCRIPT
 #!/usr/bin/env bash
 printf '%s:%s:%s:%s\n' '$project' '$mode' '$action' "\${*:-}" >> "\${RUN_LOG:?}"
+if [[ "\${FAIL_PROJECT:-}" == '$project' && "\${LOCAL_FAIL_FAST:-0}" == '1' ]]; then
+  exit $status
+fi
 if [[ '$mode' == 'local' && '$action' == 'setup' && -n "\${LOCAL_SETUP_SLEEP:-}" ]]; then
   sleep "\$LOCAL_SETUP_SLEEP"
 fi
@@ -57,16 +60,20 @@ HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" PROJECTS_FILE="
   "$ROOT/deploy/local/install-project-commands.sh" >/dev/null
 
 [[ -x "$TARGET_DIR/local-all" ]]
+[[ -x "$TARGET_DIR/local-status-all" ]]
+[[ -x "$TARGET_DIR/local-stop-all" ]]
 [[ -x "$TARGET_DIR/remote-all" ]]
 [[ ! -e "$TARGET_DIR/ignored" ]]
 
 # setup local: dispara todos em paralelo/desacoplados e devolve o terminal sem esperar os setups terminarem.
 : > "$RUN_LOG"
 start_ns="$(date +%s%N)"
-RUN_LOG="$RUN_LOG" LOCAL_SETUP_SLEEP=2 XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-all" >/dev/null
+RUN_LOG="$RUN_LOG" LOCAL_SETUP_SLEEP=2 LOCAL_ALL_FEEDBACK_DELAY=0.05 XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-all" >"$TMP/local.out"
 end_ns="$(date +%s%N)"
 elapsed_ms=$(((end_ns - start_ns) / 1000000))
 ((elapsed_ms < 1000))
+grep -Fq "terminal liberado. Acompanhe ao vivo: local-status-all watch" "$TMP/local.out"
+grep -Fq "para tudo: local-stop-all" "$TMP/local.out"
 
 for _ in $(seq 1 100); do
   [[ "$(wc -l < "$RUN_LOG")" -ge 4 ]] && break
@@ -77,6 +84,35 @@ grep -Fxq 'alpha:local:setup:' "$RUN_LOG"
 grep -Fxq 'beta:local:setup:' "$RUN_LOG"
 grep -Fxq 'local-only:local:setup:' "$RUN_LOG"
 grep -Fxq 'gamma:local:setup:' "$RUN_LOG"
+
+
+# Status local mostra os processos desacoplados e a última linha de cada projeto.
+RUN_LOG="$RUN_LOG" XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-status-all" >"$TMP/local-status.out"
+grep -Eq 'RODANDO +alpha' "$TMP/local-status.out"
+grep -Eq 'RODANDO +beta' "$TMP/local-status.out"
+grep -Eq 'RODANDO +local-only' "$TMP/local-status.out"
+grep -Eq 'RODANDO +gamma' "$TMP/local-status.out"
+grep -Fq 'resumo: 4 RODANDO | 0 OK | 0 ERRO | 0 PARADO | 0 OUTRO' "$TMP/local-status.out"
+
+# local-stop-all não depende de stop.sh: encerra os grupos do último local-all em paralelo.
+RUN_LOG="$RUN_LOG" XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-stop-all" >"$TMP/local-stop.out"
+grep -Fq '[local-stop-all] OK: alpha' "$TMP/local-stop.out"
+grep -Fq '[local-stop-all] OK: beta' "$TMP/local-stop.out"
+grep -Fq '[local-stop-all] OK: local-only' "$TMP/local-stop.out"
+grep -Fq '[local-stop-all] OK: gamma' "$TMP/local-stop.out"
+RUN_LOG="$RUN_LOG" XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-status-all" >"$TMP/local-status-stopped.out"
+grep -Eq 'PARADO +alpha' "$TMP/local-status-stopped.out"
+grep -Fq 'resumo: 0 RODANDO | 0 OK | 0 ERRO | 4 PARADO | 0 OUTRO' "$TMP/local-status-stopped.out"
+
+# Erro de setup local fica persistido e visível sem impedir os demais projetos.
+: > "$RUN_LOG"
+RUN_LOG="$RUN_LOG" FAIL_PROJECT=beta LOCAL_FAIL_FAST=1 LOCAL_SETUP_SLEEP=2 LOCAL_ALL_FEEDBACK_DELAY=0.2 XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-all" >"$TMP/local-fail.out"
+grep -Eq 'ERRO\(9\) +beta' "$TMP/local-fail.out"
+RUN_LOG="$RUN_LOG" XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-status-all" >"$TMP/local-fail-status.out"
+grep -Eq 'ERRO\(9\) +beta' "$TMP/local-fail-status.out"
+grep -Eq 'RODANDO +alpha' "$TMP/local-fail-status.out"
+grep -Eq 'RODANDO +gamma' "$TMP/local-fail-status.out"
+RUN_LOG="$RUN_LOG" XDG_STATE_HOME="$TMP/state" "$TARGET_DIR/local-stop-all" >/dev/null
 
 # Ações locais que terminam (test/stop/etc.) também rodam em paralelo, mas aguardam e agregam o resultado.
 : > "$RUN_LOG"
@@ -145,4 +181,4 @@ grep -Fq 'ERRO  remote-beta (código 9)' "$TMP/remote-fail.out"
 grep -Fq 'OK    remote-gamma' "$TMP/remote-fail.out"
 grep -Fq '[remote-all] 2 OK | 1 ERRO' "$TMP/remote-fail.out"
 
-printf 'OK: local-all paralelo; remote-all paralelo, independente, com logs prefixados e resumo agregado\n'
+printf 'OK: local-all paralelo com status/stop; remote-all paralelo e independente\n'
