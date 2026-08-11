@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+CLEAR_TERMINAL="$SCRIPT_DIR/clear-terminal.sh"
+
 PROJECT_NAME="${1:-}"
 PROJECT_DIR="${2:-}"
 DEPLOY_MODE="${3:-local}"
@@ -11,6 +14,8 @@ ACTION="${1:-setup}"
 if (($# > 0)); then
   shift
 fi
+
+[[ -f "$CLEAR_TERMINAL" ]] && bash "$CLEAR_TERMINAL"
 
 fail() {
   printf '[%s] ERRO: %s\n' "$PROJECT_NAME" "$*" >&2

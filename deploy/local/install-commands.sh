@@ -19,6 +19,7 @@ DEV_MANAGER_SOURCE="$PROJECT_ROOT/scripts/dev-manager.sh"
 DESKTOPS_SOURCE="$PROJECT_ROOT/scripts/desktops.sh"
 LOCAL_NGINX_SOURCE="$PROJECT_ROOT/scripts/local-nginx.sh"
 DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
+CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -35,14 +36,16 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$DESKTOPS_SOURCE" ]] || fail "script não encontrado: $DESKTOPS_SOURCE"
 [[ -f "$LOCAL_NGINX_SOURCE" ]] || fail "script não encontrado: $LOCAL_NGINX_SOURCE"
 [[ -f "$DEV_STATUS_SOURCE" ]] || fail "script não encontrado: $DEV_STATUS_SOURCE"
+[[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE"
+chmod +x "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
+bash "$CLEAR_TERMINAL_SOURCE"
 exec "$AUTO_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$AUTO_TARGET"
@@ -65,6 +68,7 @@ for command_name in chromes chatgpts phpstorms phpstorm-dev dev-manager desktops
   cat > "$target_file" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
+bash "$CLEAR_TERMINAL_SOURCE"
 exec "$source_file" "\$@"
 EOF_WRAPPER
   chmod +x "$target_file"

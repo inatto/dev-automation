@@ -9,6 +9,7 @@ TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 TARGET="$TARGET_DIR/dev-manager"
 SOURCE="$PROJECT_ROOT/scripts/dev-manager.sh"
 AUTO_SOURCE="$PROJECT_ROOT/scripts/auto-code-manager.sh"
+CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 
 fail() {
   printf '[install-dev-manager] ERRO: %s\n' "$*" >&2
@@ -17,13 +18,15 @@ fail() {
 
 [[ -f "$SOURCE" ]] || fail "script não encontrado: $SOURCE"
 [[ -f "$AUTO_SOURCE" ]] || fail "script não encontrado: $AUTO_SOURCE"
+[[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$SOURCE" "$AUTO_SOURCE"
+chmod +x "$SOURCE" "$AUTO_SOURCE" "$CLEAR_TERMINAL_SOURCE"
 
 cat > "$TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
+bash "$CLEAR_TERMINAL_SOURCE"
 exec "$SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$TARGET"

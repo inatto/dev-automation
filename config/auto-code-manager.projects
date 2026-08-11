@@ -1,14 +1,12 @@
-#bots/general-crawler
 #bots/importer
 #bots/int-app
-#govbr/siga-app
-#orgs/email-app
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
 #orgs/station-app
 #social/murm-app
 bots/dev-automation
+bots/general-crawler
 infra/amazon-infra
 infra/oracle-infra
 orgs/asaclub-app
