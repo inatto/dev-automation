@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-11-event-driven-v23-wsl-downloads-1s"
+SCRIPT_VERSION="2026-08-12-event-driven-v24-runtime-restart"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -17,6 +17,7 @@ STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-auto
 PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
+RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 # O monitor principal é 100% dirigido por eventos; não existe intervalo de polling.
@@ -32,6 +33,7 @@ BACKUP_BEEP_ENABLED=true
 BACKUP_BEEP_VOLUME=18
 BACKUP_BEEP_WAVE_FILE="$PROJECT_ROOT/assets/sounds/backup-complete.wav"
 BACKUP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\ding.wav"
+ERROR_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\Windows Critical Stop.wav"
 TASKBAR_STATUS_ENABLED=true
 DEV_STATUS_INVOKE_PS1="$PROJECT_ROOT/apps/dev-status/invoke.ps1"
 DEV_STATUS_EXE="$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe"
@@ -45,6 +47,8 @@ INOTIFY_DIR_EXCLUDE_REGEX=""
 WATCH_RELOAD_REQUESTED=false
 FORCE_FULL_BACKUP_AFTER_RELOAD=false
 LAST_SOURCE_CHANGE=0
+MONITOR_LOCK_FILE="$STATE_DIR/auto-code-manager.monitor.lock"
+MONITOR_LOCK_FD=""
 declare -A DIRTY_BACKUP_TARGETS=()
 
 load_env() {
@@ -191,6 +195,26 @@ taskbar_status() {
     -File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true
 }
 
+acquire_monitor_lock() {
+  mkdir -p -- "$STATE_DIR"
+  command -v flock >/dev/null 2>&1 || {
+    log "ERRO: flock não encontrado; monitor único não pode ser garantido."
+    return 1
+  }
+
+  exec {MONITOR_LOCK_FD}>>"$MONITOR_LOCK_FILE"
+  if ! flock -n "$MONITOR_LOCK_FD"; then
+    local active_pid
+    active_pid="$(head -n 1 "$MONITOR_LOCK_FILE" 2>/dev/null || true)"
+    log "ERRO: já existe um Auto Code Manager ativo${active_pid:+ (PID $active_pid)}."
+    return 1
+  fi
+
+  : > "$MONITOR_LOCK_FILE"
+  printf '%s\n' "$$" >&"$MONITOR_LOCK_FD"
+  return 0
+}
+
 initialize_pause_control() {
   mkdir -p -- "$STATE_DIR"
   rm -f -- "$PAUSE_FILE"
@@ -232,6 +256,7 @@ run_stage() {
 
   taskbar_status error "$title"
   LOG_CONTEXT=error log "ERRO: etapa '$title' terminou com falha."
+  error_beep
   return 1
 }
 
@@ -385,6 +410,23 @@ soft_beep() {
   fi
   line
   return 1
+}
+
+error_beep() {
+  [ ! -f "$SOUND_DISABLED_FILE" ] || return 0
+
+  # Erro usa um som diferente do aviso de importação. No Windows tentamos o
+  # Critical Stop; sem interoperabilidade, caímos no beep eletrônico/TTY.
+  (
+    BEEP_REPEATS=2
+    BEEP_GAP_MS=140
+    BEEP_MODE="wave"
+    BEEP_VOLUME=28
+    BEEP_WAVE_FILE="__dev_automation_error_wave_missing__"
+    BEEP_WINDOWS_WAVE_FILE="${ERROR_WINDOWS_WAVE_FILE:-C:\\Windows\\Media\\Windows Critical Stop.wav}"
+    soft_beep
+  ) >/dev/null 2>&1 || true
+  return 0
 }
 
 backup_beep() {
@@ -915,11 +957,112 @@ project_for_zip() {
   echo "$best"
 }
 
+project_update_scope() {
+  local source_dir="$1"
+  local rel
+  local api=false web=false shared=false runtime=false
+
+  while IFS= read -r -d '' rel; do
+    case "$rel" in
+      apps/api/tests/*|apps/api/.env.example|apps/web/tests/*|apps/web/.env.example)
+        ;;
+      apps/api/*)
+        api=true; runtime=true ;;
+      apps/web/*)
+        web=true; runtime=true ;;
+      deploy/local/*api*.sh)
+        api=true; runtime=true ;;
+      deploy/local/*web*.sh)
+        web=true; runtime=true ;;
+      deploy/local/setup.sh|deploy/local/start.sh|config/*|scripts/*)
+        shared=true; runtime=true ;;
+      deploy/remote/*|tests/*|docs/*|README|README.*|CHANGELOG|CHANGELOG.*|*.md|.gitignore|.gitattributes)
+        ;;
+      *)
+        # Arquivo de runtime fora das árvores canônicas: por segurança trata
+        # como compartilhado. Não reinicia por documentação/testes.
+        shared=true; runtime=true ;;
+    esac
+  done < <(find "$source_dir" -type f -printf '%P\0' 2>/dev/null)
+
+  if [ "$runtime" = false ]; then
+    printf 'none\n'
+  elif [ "$shared" = true ] || { [ "$api" = true ] && [ "$web" = true ]; }; then
+    printf 'both\n'
+  elif [ "$api" = true ]; then
+    printf 'api\n'
+  elif [ "$web" = true ]; then
+    printf 'web\n'
+  else
+    printf 'both\n'
+  fi
+}
+
+action_matches_update_scope() {
+  local action="$1" scope="$2"
+  case "$scope" in
+    api)
+      [[ "$action" == *api* || "$action" == "setup" || "$action" == "start" || "$action" == "run" ]] ;;
+    web)
+      [[ "$action" == *web* || "$action" == "setup" || "$action" == "start" || "$action" == "run" ]] ;;
+    both)
+      return 0 ;;
+    *)
+      return 1 ;;
+  esac
+}
+
+notify_running_project_update() {
+  local project_dir="$1" scope="$2"
+  local state_file request_file request_temp pid state_project_dir action signaled=0 stale=0
+
+  [ "$scope" != "none" ] || {
+    log "ATUALIZAÇÃO: somente arquivos sem efeito de runtime; nenhum restart necessário."
+    return 0
+  }
+  [ -d "$RUNNING_PROJECTS_DIR" ] || {
+    log "ATUALIZAÇÃO: $scope; nenhum comando local ativo registrado para reiniciar."
+    return 0
+  }
+
+  while IFS= read -r -d '' state_file; do
+    pid="$(awk -F= '$1=="PID" {print substr($0,5); exit}' "$state_file" 2>/dev/null || true)"
+    state_project_dir="$(awk -F= '$1=="PROJECT_DIR" {print substr($0,13); exit}' "$state_file" 2>/dev/null || true)"
+    action="$(awk -F= '$1=="ACTION" {print substr($0,8); exit}' "$state_file" 2>/dev/null || true)"
+
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+      rm -f -- "$state_file" 2>/dev/null || true
+      stale=$((stale + 1))
+      continue
+    fi
+    [ "$state_project_dir" = "$project_dir" ] || continue
+    action_matches_update_scope "$action" "$scope" || continue
+
+    request_file="$state_file.request"
+    request_temp="$request_file.tmp.$$"
+    printf '%s\n' "$scope" > "$request_temp"
+    mv -f -- "$request_temp" "$request_file"
+    if kill -USR1 "$pid" 2>/dev/null; then
+      signaled=$((signaled + 1))
+      log "RESTART SOLICITADO: escopo=$scope ação=$action PID=$pid"
+    else
+      rm -f -- "$request_file" 2>/dev/null || true
+    fi
+  done < <(find "$RUNNING_PROJECTS_DIR" -maxdepth 1 -type f -name '*.state' -print0 2>/dev/null)
+
+  if [ "$signaled" -eq 0 ]; then
+    log "ATUALIZAÇÃO: $scope; projeto não estava rodando por comando global supervisionado. Nada foi iniciado à força."
+  else
+    log "ATUALIZAÇÃO: $scope; $signaled comando(s) ativo(s) sinalizado(s) após a importação completa."
+  fi
+  [ "$stale" -eq 0 ] || log "RUNTIME: removido(s) $stale registro(s) obsoleto(s)."
+}
+
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
   local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
-  local total_files checked_files rel destination
+  local total_files checked_files rel destination update_scope="none"
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
   local -A nested_seen=() expected_targets=()
@@ -1130,6 +1273,8 @@ import_one_zip() {
     return 1
   fi
 
+  update_scope="$(project_update_scope "$source_dir")"
+  log "Escopo de runtime detectado: $update_scope"
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
   log "Apagando ZIP original somente após todas as confirmações..."
   if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
@@ -1140,6 +1285,7 @@ import_one_zip() {
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
   log "ZIP apagado: $zip_file"
+  notify_running_project_update "$project_dir" "$update_scope"
   soft_beep
   line
 }
@@ -2376,6 +2522,11 @@ if [ "${1:-}" = "--test-backup-sound" ]; then
   exit $?
 fi
 
+if [ "${1:-}" = "--error-sound" ] || [ "${1:-}" = "--test-error-sound" ]; then
+  error_beep
+  exit $?
+fi
+
 if [ "${1:-}" = "--list-backup-targets" ]; then
   backup_targets
   exit 0
@@ -2438,6 +2589,7 @@ if [ "${1:-}" = "--import-one" ]; then
     exit 0
   fi
   taskbar_status error "Falha na importação"
+  error_beep
   exit 1
 fi
 
@@ -2484,6 +2636,11 @@ if ! validate_backup_ignore_zip; then
   exit 1
 fi
 
+if ! acquire_monitor_lock; then
+  taskbar_status error "Monitor já ativo"
+  exit 3
+fi
+
 line
 echo "Auto Code Manager - $SCRIPT_VERSION"
 line
@@ -2515,6 +2672,7 @@ if LOG_CONTEXT=backup backup_all; then
 else
   taskbar_status error "Baseline falhou"
   LOG_CONTEXT=error log "ERRO: baseline inicial falhou; monitor encerrado para não operar com backup inconsistente."
+  error_beep
   stop_backup_watcher
   exit 1
 fi
