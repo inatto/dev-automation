@@ -5,21 +5,24 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SCRIPT="$PROJECT_ROOT/scripts/auto-code-manager.sh"
 
-grep -Fq 'stage cycle start "CICLO #$cycle — INÍCIO"' "$SCRIPT"
-grep -Fq 'run_stage downloads "DOWNLOADS / IMPORTAÇÃO"' "$SCRIPT"
-grep -Fq 'run_stage sql "SQL → ZIP"' "$SCRIPT"
+grep -Fq 'run_stage downloads "DOWNLOADS INICIAIS"' "$SCRIPT"
+grep -Fq 'run_stage sql "SQLs INICIAIS"' "$SCRIPT"
 grep -Fq 'run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL"' "$SCRIPT"
 grep -Fq 'stage backup start "BACKUP INTELIGENTE — INÍCIO"' "$SCRIPT"
-grep -Fq 'stage cycle end "CICLO #$cycle — CONCLUÍDO"' "$SCRIPT"
+grep -Fq 'run_stage downloads "DOWNLOAD / IMPORTAÇÃO"' "$SCRIPT"
+grep -Fq 'run_stage sql "SQL → ZIP"' "$SCRIPT"
 grep -Fq '[ "${NO_COLOR:-}" = "" ]' "$SCRIPT"
 
-printf 'OK: contextos dos ciclos possuem cores e marcos de início/fim\n'
+# O ciclo de polling antigo deve ter desaparecido.
+! grep -Fq 'CICLO #$cycle' "$SCRIPT"
+! grep -Fq 'sleep_with_pause' "$SCRIPT"
+! grep -Fq 'INTERVAL=' "$SCRIPT"
+! grep -Fq 'ZONE_EVERY=' "$SCRIPT"
 
-grep -Fq 'Importa ZIPs/SQLs e processa somente alterações reais detectadas via inotify' "$SCRIPT"
-grep -Fq 'Procura ZIPs em Downloads, identifica o projeto correspondente' "$SCRIPT"
-grep -Fq 'Procura arquivos .sql nas pastas configuradas' "$SCRIPT"
-grep -Fq 'novos sidecars são tratados por evento' "$SCRIPT"
-grep -Fq 'Compacta somente os projetos alterados e os agregadores que dependem deles' "$SCRIPT"
-grep -Fq 'Backup pendente:' "$SCRIPT"
+grep -Fq 'ZIP detectado pelo filesystem; importa somente este arquivo, sem varrer Downloads.' "$SCRIPT"
+grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "$SCRIPT"
+grep -Fq 'IDLE event-driven: aguardando inotify' "$SCRIPT"
+grep -Fq 'Estado ocioso real: este read não tem timeout e não consome CPU enquanto' "$SCRIPT"
+grep -Fq 'Compacta somente projetos alterados e agregadores dependentes.' "$SCRIPT"
 
-printf 'OK: ciclos descrevem o fluxo inteligente por eventos e o debounce do backup\n'
+printf 'OK: estados coloridos permanecem e o polling antigo foi substituído por espera event-driven\n'

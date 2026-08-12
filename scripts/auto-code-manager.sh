@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-11-inotify-smart-backup-v21"
+SCRIPT_VERSION="2026-08-11-event-driven-v23-wsl-downloads-1s"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -19,10 +19,9 @@ PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
-INTERVAL=2
-ZONE_EVERY=4
-BACKUP_EVERY=20
-STABLE_WAIT=2
+# O monitor principal é 100% dirigido por eventos; não existe intervalo de polling.
+BACKUP_EVERY=1
+STABLE_WAIT=1
 BEEP_REPEATS=2
 BEEP_GAP_MS=220
 BEEP_MODE="wave"
@@ -44,6 +43,7 @@ WATCH_LOG=""
 WATCH_LIST=""
 INOTIFY_DIR_EXCLUDE_REGEX=""
 WATCH_RELOAD_REQUESTED=false
+FORCE_FULL_BACKUP_AFTER_RELOAD=false
 LAST_SOURCE_CHANGE=0
 declare -A DIRTY_BACKUP_TARGETS=()
 
@@ -67,8 +67,6 @@ validate_positive_integer() {
 }
 
 validate_timers() {
-  validate_positive_integer INTERVAL
-  validate_positive_integer ZONE_EVERY
   validate_positive_integer BACKUP_EVERY
   validate_positive_integer STABLE_WAIT
   validate_positive_integer BEEP_REPEATS
@@ -217,16 +215,6 @@ wait_if_paused() {
     LOG_CONTEXT=wait log "DESPAUSADO — monitor retomado."
     taskbar_status idle "Monitorando"
   fi
-}
-
-sleep_with_pause() {
-  local tick
-  local ticks=$((INTERVAL * 4))
-
-  for ((tick = 0; tick < ticks; tick++)); do
-    wait_if_paused
-    sleep 0.25
-  done
 }
 
 run_stage() {
@@ -443,38 +431,33 @@ backup_beep() {
 
 downloads_dir() {
   local configured_downloads="${DOWNLOADS_DIR:-}"
-  local win_profile=""
-  local wsl_profile=""
+  local canonical_downloads="${HOME}/Downloads"
 
-  if [ -n "$configured_downloads" ] && [ -d "$configured_downloads" ]; then
+  # Override existe apenas para testes/execuções explicitamente isoladas.
+  # No uso normal, Downloads é sempre o filesystem Linux do WSL:
+  #   /home/<usuario>/Downloads
+  # Nunca fazemos fallback para /mnt/c nem consultamos %USERPROFILE%.
+  if [ -n "$configured_downloads" ]; then
     printf '%s\n' "$configured_downloads"
     return
   fi
 
-  if command -v cmd.exe >/dev/null 2>&1 &&
-     command -v wslpath >/dev/null 2>&1; then
+  printf '%s\n' "$canonical_downloads"
+}
 
-    win_profile="$(
-      cmd.exe /c "echo %USERPROFILE%" 2>/dev/null |
-      tr -d '\r'
-    )"
+ensure_downloads_dir() {
+  local downloads
+  downloads="$(downloads_dir)"
 
-    if [ -n "$win_profile" ]; then
-      wsl_profile="$(wslpath "$win_profile" 2>/dev/null || true)"
-
-      if [ -d "$wsl_profile/Downloads" ]; then
-        echo "$wsl_profile/Downloads"
-        return
-      fi
-    fi
+  if [ -z "$downloads" ]; then
+    echo "ERRO: caminho de Downloads WSL não pôde ser determinado." >&2
+    exit 1
   fi
 
-  if [ -d "/mnt/c/Users/${USER}/Downloads" ]; then
-    echo "/mnt/c/Users/${USER}/Downloads"
-    return
+  if ! mkdir -p -- "$downloads"; then
+    echo "ERRO: não foi possível preparar Downloads WSL: $downloads" >&2
+    exit 1
   fi
-
-  echo ""
 }
 
 stable_file() {
@@ -2103,8 +2086,42 @@ stop_backup_watcher() {
   WATCH_LIST=""
 }
 
+path_is_within_absolute() {
+  local path="$1"
+  local root="$2"
+  [ "$path" = "$root" ] || [[ "$path" == "$root/"* ]]
+}
+
+path_is_covered_by_roots() {
+  local path="$1"
+  shift
+  local root
+  for root in "$@"; do
+    if path_is_within_absolute "$path" "$root"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+append_nonrecursive_watch_root() {
+  local root="$1"
+  local child
+
+  [ -d "$root" ] || return 0
+  printf '%s\n' "$root" >> "$WATCH_LIST"
+
+  # O watcher principal usa -r. Para Downloads e pastas SQL que não pertencem
+  # a um projeto, excluímos os subdiretórios para manter o watch efetivamente
+  # não recursivo e barato.
+  while IFS= read -r -d '' child; do
+    printf '@%s\n' "$child" >> "$WATCH_LIST"
+  done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+}
+
 start_backup_watcher() {
-  local exclude_regex root excluded
+  local exclude_regex root excluded downloads sql_folder bootstrap_fd read_fd
+  local watched_aux=0
   local -a roots=()
   local -a command=()
 
@@ -2128,8 +2145,7 @@ start_backup_watcher() {
   mkfifo "$WATCH_FIFO"
   : > "$WATCH_LIST"
 
-  # Lista única para o inotifywait: inclui apenas as raízes reais e usa @path
-  # para não criar watches dentro de diretórios globalmente ignorados.
+  # Projetos Linux: watch recursivo, mas sem .git/.venv/node_modules/etc.
   for root in "${roots[@]}"; do
     printf '%s\n' "$root" >> "$WATCH_LIST"
     while IFS= read -r excluded || [ -n "$excluded" ]; do
@@ -2138,19 +2154,49 @@ start_backup_watcher() {
     done < <(watch_excluded_directories "$root")
   done
 
-  # Abre o FIFO em leitura/escrita no processo principal para evitar bloqueio
-  # na inicialização do produtor antes do primeiro read.
-  exec {WATCH_FD}<>"$WATCH_FIFO"
+  # Downloads: entra no MESMO fluxo de eventos. Se estiver fora dos projetos,
+  # é observado somente no primeiro nível (onde o navegador grava os ZIPs).
+  downloads="$(downloads_dir)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ] && ! path_is_covered_by_roots "$downloads" "${roots[@]}"; then
+    append_nonrecursive_watch_root "$downloads"
+    roots+=("$downloads")
+    watched_aux=$((watched_aux + 1))
+  fi
+
+  # Pastas SQL: normalmente já estão dentro de projetos. Só adiciona um root
+  # auxiliar quando a pasta configurada estiver fora de todos eles.
+  while IFS= read -r sql_folder || [ -n "$sql_folder" ]; do
+    [ -n "$sql_folder" ] || continue
+    [ -d "$sql_folder" ] || continue
+    if ! path_is_covered_by_roots "$sql_folder" "${roots[@]}"; then
+      append_nonrecursive_watch_root "$sql_folder"
+      roots+=("$sql_folder")
+      watched_aux=$((watched_aux + 1))
+    fi
+  done < <(configured_sql_zip_folders)
+
+  # Bootstrap do FIFO: abre R/W só durante a partida para evitar deadlock.
+  # Depois trocamos por um FD somente-leitura; assim, se o inotify morrer, o
+  # read recebe EOF imediatamente e o manager consegue reiniciar o watcher sem
+  # qualquer timer de health-check.
+  exec {bootstrap_fd}<>"$WATCH_FIFO"
 
   exclude_regex="$(build_inotify_exclude_regex)"
   INOTIFY_DIR_EXCLUDE_REGEX="$(build_inotify_directory_regex)"
-  command=(inotifywait -m -q -r -e close_write -e create -e delete -e move -e attrib --format '%w%f')
+  command=(inotifywait -m -q -r \
+    -e close_write -e create -e delete -e move -e attrib \
+    --format $'%e\t%w%f')
   [ -z "$exclude_regex" ] || command+=(--exclude "$exclude_regex")
   command+=(--fromfile "$WATCH_LIST")
 
   : > "$WATCH_LOG"
   "${command[@]}" >"$WATCH_FIFO" 2>>"$WATCH_LOG" &
   WATCH_PID=$!
+
+  # O produtor já foi aberto; agora o consumidor pode ficar somente em leitura.
+  exec {read_fd}<"$WATCH_FIFO"
+  eval "exec ${bootstrap_fd}>&-" 2>/dev/null || true
+  WATCH_FD="$read_fd"
 
   sleep 0.15
   if ! kill -0 "$WATCH_PID" 2>/dev/null; then
@@ -2159,43 +2205,114 @@ start_backup_watcher() {
     return 1
   fi
 
-  log "Backup inteligente ativo via inotify: ${#roots[@]} raiz(es), diretórios ignorados fora da árvore de watches."
+  log "Monitor event-driven ativo via inotify: ${#roots[@]} raiz(es), $watched_aux raiz(es) auxiliar(es); sem polling de pastas."
   return 0
 }
 
-process_backup_watch_events() {
-  local event_path owner
-  local processed=0
+event_has() {
+  local events="$1"
+  local wanted="$2"
+  [[ ",$events," == *",$wanted,"* ]]
+}
 
-  [ -n "${WATCH_FD:-}" ] || return 0
+event_finished_write() {
+  local events="$1"
+  event_has "$events" CLOSE_WRITE || event_has "$events" MOVED_TO
+}
 
-  # Drena todos os eventos já disponíveis sem bloquear o ciclo principal.
-  while IFS= read -r -t 0.01 -u "$WATCH_FD" event_path; do
-    [ -n "$event_path" ] || continue
-    processed=$((processed + 1))
+path_is_download_zip() {
+  local event_path="$1"
+  local downloads
+  downloads="$(downloads_dir)"
+  [ -n "$downloads" ] || return 1
+  path_is_within_absolute "$event_path" "$downloads" || return 1
+  [ "$(dirname -- "$event_path")" = "$downloads" ] || return 1
+  [[ "${event_path,,}" == *.zip ]]
+}
 
-    if [[ "$event_path" == *":Zone.Identifier" ]]; then
+sql_folder_for_event() {
+  local event_path="$1"
+  local folder
+  while IFS= read -r folder || [ -n "$folder" ]; do
+    [ -n "$folder" ] || continue
+    [ "$(dirname -- "$event_path")" = "$folder" ] || continue
+    printf '%s\n' "$folder"
+    return 0
+  done < <(configured_sql_zip_folders)
+  return 1
+}
+
+mark_all_projects_dirty() {
+  local project
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    DIRTY_BACKUP_TARGETS["$project"]=1
+  done < <(backup_targets)
+  LAST_SOURCE_CHANGE="$(date +%s)"
+  LOG_CONTEXT=backup log "Configuração estrutural alterada; projetos registrados marcados para reconciliação após ${BACKUP_EVERY}s de silêncio."
+}
+
+handle_watch_event() {
+  local events="$1"
+  local event_path="$2"
+  local owner sql_folder=""
+
+  [ -n "$event_path" ] || return 0
+
+  # Zone.Identifier: limpeza por evento, sem find periódico.
+  if [[ "$event_path" == *":Zone.Identifier" ]]; then
+    if event_finished_write "$events" || event_has "$events" ATTRIB || event_has "$events" CREATE; then
       rm -f -- "$event_path" 2>/dev/null || true
-      continue
     fi
+    return 0
+  fi
 
-    if [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
+  # Configuração que muda a árvore monitorada. Só reage ao fim da gravação para
+  # não validar um arquivo ainda parcial.
+  if event_finished_write "$events"; then
+    if [ "$event_path" = "$ENV_FILE" ]; then
+      load_env
+      validate_timers
+      WATCH_RELOAD_REQUESTED=true
+    elif [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
+      WATCH_RELOAD_REQUESTED=true
+      FORCE_FULL_BACKUP_AFTER_RELOAD=true
+    elif [ "$event_path" = "$FOLDER_SQL_ZIP_FILE" ]; then
       WATCH_RELOAD_REQUESTED=true
     fi
+  fi
 
-    if [ -n "${INOTIFY_DIR_EXCLUDE_REGEX:-}" ] && [[ "$event_path" =~ $INOTIFY_DIR_EXCLUDE_REGEX ]]; then
-      # Diretório ignorado criado depois da inicialização: não suja backup e
-      # reinicia o watcher para podar essa nova subárvore dos watches.
-      WATCH_RELOAD_REQUESTED=true
-      continue
+  # ZIP novo em Downloads: importa diretamente pelo evento de gravação/rename.
+  # CLOSE_WRITE/MOVED_TO já garantem que o produtor fechou o arquivo; a própria
+  # importação ainda valida o ZIP antes de tocar no projeto.
+  if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
+    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP detectado pelo filesystem; importa somente este arquivo, sem varrer Downloads." \
+      import_one_zip "$event_path" true || true
+    return 0
+  fi
+
+  # SQL novo: compacta somente a pasta que recebeu o arquivo.
+  if event_finished_write "$events" && [[ "${event_path,,}" == *.sql ]] && [ -f "$event_path" ]; then
+    sql_folder="$(sql_folder_for_event "$event_path" || true)"
+    if [ -n "$sql_folder" ]; then
+      run_stage sql "SQL → ZIP" "SQL detectado pelo filesystem; compacta somente a pasta afetada." \
+        zip_sql_folder "$sql_folder" || true
     fi
+  fi
 
-    owner="$(event_owner_project "$event_path")"
-    [ -n "$owner" ] || continue
-    mark_backup_dirty "$owner" "$event_path"
-  done
+  if [ -n "${INOTIFY_DIR_EXCLUDE_REGEX:-}" ] && [[ "$event_path" =~ $INOTIFY_DIR_EXCLUDE_REGEX ]]; then
+    # Diretório ignorado criado depois da inicialização: não suja backup e
+    # reinicia o watcher para podar essa nova subárvore dos watches.
+    if event_has "$events" CREATE || event_has "$events" MOVED_TO; then
+      WATCH_RELOAD_REQUESTED=true
+    fi
+    return 0
+  fi
 
-  return 0
+  owner="$(event_owner_project "$event_path")"
+  [ -n "$owner" ] || return 0
+  mark_backup_dirty "$owner" "$event_path"
 }
 
 reload_backup_watcher_if_needed() {
@@ -2212,7 +2329,18 @@ reload_backup_watcher_if_needed() {
   fi
 
   clean_unmanaged_backup_zips || true
-  start_backup_watcher
+  start_backup_watcher || return 1
+
+  # Se mudou .projects/ignore, a composição de qualquer ZIP pode ter mudado.
+  # Isso é raro e deliberado; reconcilia uma vez, ainda respeitando o debounce.
+  if [ "$FORCE_FULL_BACKUP_AFTER_RELOAD" = true ]; then
+    FORCE_FULL_BACKUP_AFTER_RELOAD=false
+    mark_all_projects_dirty
+  fi
+
+  # Uma nova pasta SQL configurada pode já conter SQLs anteriores à inclusão.
+  zip_configured_sql_folders || true
+  return 0
 }
 
 backup_watcher_alive() {
@@ -2235,6 +2363,7 @@ trap stop INT TERM
 
 ensure_files
 load_env
+ensure_downloads_dir
 validate_timers
 
 if [ "${1:-}" = "--test-sound" ]; then
@@ -2362,28 +2491,24 @@ echo "CODE_ROOT:     $CODE_ROOT"
 echo "Downloads:     $(downloads_dir)"
 echo "ENV:           $ENV_FILE"
 echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
-echo "Intervalo:     ${INTERVAL}s"
-echo "Backup:        inotify + ${BACKUP_EVERY}s sem novas alterações"
-echo "Zone fallback: ${ZONE_EVERY}s"
-echo "Estável por:   ${STABLE_WAIT}s"
+echo "Modo:          event-driven (inotify; sem polling de diretórios)"
+echo "Backup:        ${BACKUP_EVERY}s de silêncio após a última alteração"
+echo "Estável por:   ${STABLE_WAIT}s apenas em processamento manual/baseline"
 line
 
-cycle=1
-last_zone=0
 initialize_pause_control
 
 if ! start_backup_watcher; then
   taskbar_status error "Inotify indisponível"
-  echo "ERRO: backup inteligente não pôde ser iniciado." >&2
+  echo "ERRO: monitor event-driven não pôde ser iniciado." >&2
   echo "Instale uma vez: sudo apt-get install -y inotify-tools" >&2
   exit 1
 fi
 
-# Baseline única por inicialização: garante que mudanças feitas enquanto o
-# manager estava parado também entrem no backup. Depois disso não há mais
-# backup completo por relógio; somente eventos inotify disparam compactação.
+# Reconciliação única por inicialização. Nada abaixo vira polling: serve apenas
+# para capturar trabalho que apareceu enquanto o manager estava desligado.
 taskbar_status backup "Baseline inicial"
-stage backup start "BACKUP BASELINE — INÍCIO" "Sincroniza os ZIPs uma única vez ao iniciar; depois o backup passa a ser dirigido exclusivamente por alterações detectadas via inotify."
+stage backup start "BACKUP BASELINE — INÍCIO" "Sincroniza os ZIPs uma única vez ao iniciar; depois somente eventos do filesystem disparam trabalho."
 LOG_CONTEXT=backup clean_unmanaged_backup_zips
 if LOG_CONTEXT=backup backup_all; then
   stage backup end "BACKUP BASELINE — CONCLUÍDO"
@@ -2394,78 +2519,73 @@ else
   exit 1
 fi
 
-# Remove sidecars antigos uma vez. Novos Zone.Identifier dentro dos projetos
-# monitorados são removidos imediatamente pelo próprio fluxo inotify.
-run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Remove resíduos antigos uma vez; novos sidecars são tratados por evento." clean_zone || true
-last_zone="$(date +%s)"
+run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
+run_stage downloads "DOWNLOADS INICIAIS" "Importa somente ZIPs que já estavam em Downloads antes do watcher iniciar; depois cada ZIP chega por evento." import_downloads || true
+run_stage sql "SQLs INICIAIS" "Compacta somente SQLs que já existiam antes do watcher iniciar; depois cada pasta é acionada por evento." zip_configured_sql_folders || true
 
-# Se houve edição durante a baseline, os eventos ficaram na fila e não são
-# descartados: haverá um backup incremental após o período de silêncio.
-process_backup_watch_events
-
-taskbar_status idle "Monitorando alterações"
+taskbar_status idle "Aguardando eventos"
+LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads, SQL ou Zone.Identifier."
 
 while true; do
+  local_timeout=""
+  events=""
+  event_path=""
+
   wait_if_paused
-  now="$(date +%s)"
 
-  stage cycle start "CICLO #$cycle — INÍCIO" "Importa ZIPs/SQLs e processa somente alterações reais detectadas via inotify para backup."
-
-  if ! backup_watcher_alive; then
-    LOG_CONTEXT=error log "ERRO: watcher inotify encerrou inesperadamente; tentando reiniciar."
-    if ! start_backup_watcher; then
-      taskbar_status error "Watcher inotify falhou"
-      exit 1
-    fi
-  fi
-
-  process_backup_watch_events
-  if ! reload_backup_watcher_if_needed; then
-    taskbar_status error "Configuração inválida"
-    stop_backup_watcher
-    exit 1
-  fi
-
-  run_stage downloads "DOWNLOADS / IMPORTAÇÃO" "Procura ZIPs em Downloads, identifica o projeto correspondente e importa cada pacote com segurança." import_downloads || true
-  run_stage sql "SQL → ZIP" "Procura arquivos .sql nas pastas configuradas, cria o ZIP YYYYMMDD-HHMM.zip, valida e só então apaga os SQLs incluídos." zip_configured_sql_folders || true
-
-  # Captura imediatamente alterações causadas por importações ou geração de
-  # SQL ZIP durante este mesmo ciclo.
-  process_backup_watch_events
-  if ! reload_backup_watcher_if_needed; then
-    taskbar_status error "Configuração inválida"
-    stop_backup_watcher
-    exit 1
-  fi
-
-  if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
-    run_stage zone "LIMPEZA ZONE.IDENTIFIER — FALLBACK" "Varredura rara de segurança fora do fluxo normal por evento." clean_zone || true
-    last_zone="$now"
-  fi
-
-  if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ]; then
+  # Se existe backup pendente, read -t funciona como debounce bloqueante. Sem
+  # backup pendente, o read fica bloqueado indefinidamente até chegar um evento.
+  if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
     now="$(date +%s)"
-    if [ "$LAST_SOURCE_CHANGE" -gt 0 ] && [ $((now - LAST_SOURCE_CHANGE)) -ge "$BACKUP_EVERY" ]; then
-      wait_if_paused
+    remaining=$((BACKUP_EVERY - (now - LAST_SOURCE_CHANGE)))
+    if [ "$remaining" -le 0 ]; then
       taskbar_status backup "Backup inteligente"
-      stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente os projetos alterados e os agregadores que dependem deles."
+      stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente projetos alterados e agregadores dependentes."
       if LOG_CONTEXT=backup backup_dirty_targets; then
         stage backup end "BACKUP INTELIGENTE — CONCLUÍDO"
+        taskbar_status idle "Aguardando eventos"
       else
         taskbar_status error "Backup inteligente falhou"
         LOG_CONTEXT=error log "ERRO: backup inteligente falhou; alvos permanecem pendentes para nova tentativa."
         LAST_SOURCE_CHANGE="$(date +%s)"
       fi
-    else
-      remaining=$((BACKUP_EVERY - (now - LAST_SOURCE_CHANGE)))
-      [ "$remaining" -ge 0 ] || remaining=0
-      LOG_CONTEXT=wait log "Backup pendente: ${#DIRTY_BACKUP_TARGETS[@]} projeto(s); aguardando ${remaining}s sem novas alterações."
+      continue
     fi
+    local_timeout="$remaining"
   fi
 
-  stage cycle end "CICLO #$cycle — CONCLUÍDO"
-  taskbar_status idle "Monitorando alterações"
+  if [ -n "$local_timeout" ]; then
+    if IFS=$'\t' read -r -t "$local_timeout" -u "$WATCH_FD" events event_path; then
+      handle_watch_event "$events" "$event_path"
+    else
+      # Timeout = debounce venceu. Se o produtor morreu, o FD somente-leitura
+      # também retorna e a checagem abaixo reinicia o watcher.
+      if ! backup_watcher_alive; then
+        LOG_CONTEXT=error log "ERRO: watcher inotify encerrou inesperadamente; reiniciando."
+        if ! start_backup_watcher; then
+          taskbar_status error "Watcher inotify falhou"
+          exit 1
+        fi
+      fi
+    fi
+  else
+    # Estado ocioso real: este read não tem timeout e não consome CPU enquanto
+    # nenhum arquivo muda.
+    if ! IFS=$'\t' read -r -u "$WATCH_FD" events event_path; then
+      LOG_CONTEXT=error log "ERRO: watcher inotify encerrou inesperadamente; reiniciando."
+      if ! start_backup_watcher; then
+        taskbar_status error "Watcher inotify falhou"
+        exit 1
+      fi
+      continue
+    fi
+    handle_watch_event "$events" "$event_path"
+  fi
 
-  cycle=$((cycle + 1))
-  sleep_with_pause
+  if ! reload_backup_watcher_if_needed; then
+    taskbar_status error "Configuração inválida"
+    stop_backup_watcher
+    exit 1
+  fi
+
 done

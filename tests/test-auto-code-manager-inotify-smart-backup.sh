@@ -174,7 +174,7 @@ child_idle="$(sha256sum "$CODE_ROOT/dev-automation--exec-agent.zip" | awk '{prin
   exit 1
 }
 
-grep -Fq 'Backup inteligente ativo via inotify' "$LOG"
+grep -Fq 'Monitor event-driven ativo via inotify' "$LOG"
 grep -Fq 'backup pendente: bots/dev-automation/apps/exec-agent' "$LOG" || grep -Fq 'Alteração detectada; backup pendente: bots/dev-automation/apps/exec-agent' "$LOG"
 grep -Fq 'Backup inteligente concluído: 1 projeto(s) alterado(s)' "$LOG"
 
