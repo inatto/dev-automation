@@ -1,5 +1,6 @@
 #bots/importer
 #bots/int-app
+#orgs/orbital/orbital-ai
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
@@ -14,7 +15,6 @@ infra/oracle-infra
 orgs/asaclub-app
 orgs/inst-app
 orgs/orbital.zip
-orgs/orbital/orbital-ai
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
 orgs/orbital/orbital-content
