@@ -95,7 +95,12 @@ orgs/orbital/orbital-reports
 orgs/inst-app
 PROJECTS
 
-: > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
+cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'SAFE_IGNORE'
+.git/
+.venv/
+venv/
+node_modules/
+SAFE_IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 : > "$SOUND_LOG"
 

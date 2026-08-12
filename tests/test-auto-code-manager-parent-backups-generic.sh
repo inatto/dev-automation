@@ -41,7 +41,12 @@ orgs/acme/platform/web
 orgs/acme/worker
 PROJECTS
 
-: > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
+cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'SAFE_IGNORE'
+.git/
+.venv/
+venv/
+node_modules/
+SAFE_IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$MANAGER" --backup-once >/dev/null

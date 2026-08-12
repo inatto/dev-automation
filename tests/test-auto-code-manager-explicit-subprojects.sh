@@ -27,19 +27,28 @@ cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 PROJECTS
-: > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
+cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'SAFE_IGNORE'
+.git/
+.venv/
+venv/
+node_modules/
+SAFE_IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 
 [ -s "$CODE_ROOT/dev-automation.zip" ]
-[ -s "$CODE_ROOT/exec-agent.zip" ]
+[ -s "$CODE_ROOT/dev-automation--exec-agent.zip" ]
 [ ! -e "$CODE_ROOT/apps.zip" ]
 [ ! -e "$CODE_ROOT/Code.zip" ]
 ! unzip -Z1 "$CODE_ROOT/dev-automation.zip" | grep -q '^apps/exec-agent/'
 unzip -Z1 "$CODE_ROOT/dev-automation.zip" | grep -Fxq 'apps/dev-status/status.txt'
 unzip -Z1 "$CODE_ROOT/dev-automation.zip" | grep -Fxq 'apps/oracle-monitor/oracle.txt'
-unzip -p "$CODE_ROOT/exec-agent.zip" exec.txt | grep -Fxq 'exec'
+unzip -p "$CODE_ROOT/dev-automation--exec-agent.zip" exec.txt | grep -Fxq 'exec'
+
+[ "$(CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --identify-zip exec-agent.zip)" = 'bots/dev-automation/apps/exec-agent' ]
+[ "$(CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --identify-zip exec-agent-incremental.zip)" = 'bots/dev-automation/apps/exec-agent' ]
+[ "$(CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --identify-zip dev-automation--exec-agent.zip)" = 'bots/dev-automation/apps/exec-agent' ]
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
 bots/dev-automation
@@ -49,7 +58,7 @@ Code.zip
 PROJECTS
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 
-[ "$(unzip -Z1 "$CODE_ROOT/apps.zip")" = 'exec-agent.zip' ]
+[ "$(unzip -Z1 "$CODE_ROOT/apps.zip")" = 'dev-automation--exec-agent.zip' ]
 code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
 [ "$code_entries" = $'apps.zip\ndev-automation.zip' ] || {
   printf 'FALHOU: Code.zip inesperado:\n%s\n' "$code_entries" >&2

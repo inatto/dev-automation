@@ -1,18 +1,14 @@
-# Um caminho normal gera o ZIP do projeto.
-# Um caminho terminado em .zip habilita explicitamente um agregador da pasta.
-# Exemplos opcionais: bots/dev-automation/apps.zip, orgs/orbital.zip, Code.zip
-# Nenhum agregador é criado se a linha correspondente não estiver ativa.
 #bots/importer
 #bots/int-app
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
-#orgs/station-app
 #social/murm-app
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 bots/general-crawler
 infra/amazon-infra
+infra/amazon-infra/apps/monitor-app
 infra/oracle-infra
 orgs/asaclub-app
 orgs/inst-app
@@ -27,3 +23,4 @@ orgs/orbital/orbital-mail
 orgs/orbital/orbital-reports
 orgs/orbital/orbital-ui
 orgs/sind-vault
+orgs/station-app

@@ -107,3 +107,10 @@ NO_COLOR=1 dev-manager
 ## Som pela bandeja
 
 No ícone do Dev Automation, use o botão direito e escolha `Desativar som` ou `Ativar som`. A preferência fica persistida entre execuções.
+
+
+## Chave lógica global de projeto
+
+O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de importar ou gerar backups quando encontra duplicidade.
+
+Subprojetos cadastrados usam nome qualificado apenas no backup automático. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`. Na importação, tanto `exec-agent.zip`/`exec-agent-incremental.zip` quanto `dev-automation--exec-agent.zip` resolvem para o mesmo projeto `exec-agent`.

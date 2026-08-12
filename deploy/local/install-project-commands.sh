@@ -8,6 +8,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 COMMAND_RUNNER="${COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-command.sh}"
 ALL_COMMAND_RUNNER="${ALL_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-all-command.sh}"
+PROJECT_NAMES_LIB="${PROJECT_NAMES_LIB:-$PROJECT_ROOT/scripts/project-names.sh}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 MANIFEST_FILE="$TARGET_DIR/.dev-automation-project-commands"
@@ -18,6 +19,11 @@ fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$PROJECTS_FILE" ]] || fail "arquivo de projetos não encontrado: $PROJECTS_FILE"
 [[ -f "$COMMAND_RUNNER" ]] || fail "executor não encontrado: $COMMAND_RUNNER"
 [[ -f "$ALL_COMMAND_RUNNER" ]] || fail "executor geral não encontrado: $ALL_COMMAND_RUNNER"
+[[ -f "$PROJECT_NAMES_LIB" ]] || fail "biblioteca de nomes não encontrada: $PROJECT_NAMES_LIB"
+
+# shellcheck source=../../scripts/project-names.sh
+source "$PROJECT_NAMES_LIB"
+validate_project_global_names "$PROJECTS_FILE" || fail "corrija nomes duplicados/ambíguos em $PROJECTS_FILE antes de instalar comandos"
 
 chmod +x "$COMMAND_RUNNER" "$ALL_COMMAND_RUNNER"
 mkdir -p "$TARGET_DIR"
@@ -75,9 +81,10 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
   line="$(printf '%s' "$line" | xargs)"
   [[ -n "$line" ]] || continue
+  [[ "${line,,}" == *.zip ]] && continue
 
   project_dir="$CODE_ROOT/$line"
-  project_name="$(basename "$line")"
+  project_name="$(project_global_command_base "$line" "$PROJECTS_FILE")"
 
   if [[ ! -d "$project_dir" ]]; then
     log "ignorado; pasta não existe: $project_dir"

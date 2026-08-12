@@ -6,6 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 CLEAR_TERMINAL="$SCRIPT_DIR/clear-terminal.sh"
 LOCAL_WORKER="$SCRIPT_DIR/local-all-worker.sh"
+PROJECT_NAMES_LIB="${PROJECT_NAMES_LIB:-$SCRIPT_DIR/project-names.sh}"
 
 COMMAND_NAME="${1:-}"
 DEPLOY_MODE="${2:-}"
@@ -25,6 +26,11 @@ fail() {
 [[ -d "$CODE_ROOT" ]] || fail "raiz de código não encontrada: $CODE_ROOT"
 [[ -d "$COMMAND_DIR" ]] || fail "diretório de comandos não encontrado: $COMMAND_DIR"
 
+[[ -f "$PROJECT_NAMES_LIB" ]] || fail "biblioteca de nomes não encontrada: $PROJECT_NAMES_LIB"
+# shellcheck source=project-names.sh
+source "$PROJECT_NAMES_LIB"
+validate_project_global_names "$PROJECTS_FILE" || fail "corrija nomes duplicados/ambíguos em $PROJECTS_FILE"
+
 [[ -f "$CLEAR_TERMINAL" ]] && bash "$CLEAR_TERMINAL"
 
 project_commands=()
@@ -37,7 +43,8 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   [[ -n "$line" ]] || continue
 
   project_dir="$CODE_ROOT/$line"
-  project_name="$(basename "$line")"
+  [[ "${line,,}" == *.zip ]] && continue
+  project_name="$(project_global_command_base "$line" "$PROJECTS_FILE")"
 
   if [[ ! -d "$project_dir" ]]; then
     printf '[%s] ignorado; pasta não existe: %s\n' "$COMMAND_NAME" "$project_dir"

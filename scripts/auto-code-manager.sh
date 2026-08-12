@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-11-explicit-aggregators-v18"
+SCRIPT_VERSION="2026-08-11-parent-command-names-v20"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -502,12 +502,46 @@ clean_file() {
 
 ensure_files() {
   [ -f "$FOLDER_SQL_ZIP_FILE" ] || touch "$FOLDER_SQL_ZIP_FILE"
-  [ -f "$IGNORE_ZIP_FILE" ] || touch "$IGNORE_ZIP_FILE"
   [ -f "$IGNORE_UNZIP_FILE" ] || touch "$IGNORE_UNZIP_FILE"
 
   if [ ! -f "$PROJECTS_FILE" ]; then
     echo "site-inst" > "$PROJECTS_FILE"
   fi
+}
+
+validate_backup_ignore_zip() {
+  local required
+  local -a active_rules=()
+  local -a required_rules=(
+    ".git/"
+    ".venv/"
+    "venv/"
+    "node_modules/"
+  )
+
+  if [ ! -f "$IGNORE_ZIP_FILE" ]; then
+    log "ERRO DE SEGURANÇA: ignore global de ZIP não existe: $IGNORE_ZIP_FILE"
+    log "Backup bloqueado para evitar compactar dependências, ambientes virtuais e caches gigantes."
+    return 1
+  fi
+
+  mapfile -t active_rules < <(clean_file "$IGNORE_ZIP_FILE")
+  if [ "${#active_rules[@]}" -eq 0 ]; then
+    log "ERRO DE SEGURANÇA: ignore global de ZIP está vazio: $IGNORE_ZIP_FILE"
+    log "Backup bloqueado para evitar ZIPs gigantes."
+    return 1
+  fi
+
+  for required in "${required_rules[@]}"; do
+    if ! printf '%s\n' "${active_rules[@]}" | grep -Fxq -- "$required"; then
+      log "ERRO DE SEGURANÇA: regra obrigatória ausente no ignore global de ZIP: $required"
+      log "Arquivo: $IGNORE_ZIP_FILE"
+      log "Backup bloqueado para evitar ZIPs gigantes."
+      return 1
+    fi
+  done
+
+  return 0
 }
 
 normalize_target() {
@@ -554,16 +588,74 @@ project_path() {
   fi
 }
 
+project_logical_name() {
+  local project="$1"
+  local source_rel
+
+  source_rel="$(target_source_rel "$project")"
+  [ -n "$source_rel" ] || return 1
+  basename -- "$source_rel"
+}
+
+registered_parent_project() {
+  local project="$1"
+  local project_rel candidate candidate_rel
+  local best=""
+  local best_len=-1
+
+  target_is_aggregate "$project" && return 0
+  project_rel="$(target_source_rel "$project")"
+
+  while IFS= read -r candidate || [ -n "$candidate" ]; do
+    [ -n "$candidate" ] || continue
+    [ "$candidate" != "$project" ] || continue
+    target_is_aggregate "$candidate" && continue
+    candidate_rel="$(target_source_rel "$candidate")"
+    path_is_descendant "$project_rel" "$candidate_rel" || continue
+
+    if [ "${#candidate_rel}" -gt "$best_len" ]; then
+      best="$candidate"
+      best_len="${#candidate_rel}"
+    fi
+  done < <(backup_targets)
+
+  printf '%s\n' "$best"
+}
+
 project_archive_name() {
   local project="$1"
-  local normalized
+  local normalized logical_name parent parent_name
 
   normalized="$(normalize_target "$project")"
   if target_is_aggregate "$normalized"; then
     normalized="${normalized:0:${#normalized}-4}"
+    basename -- "$normalized"
+    return 0
   fi
 
-  basename -- "$normalized"
+  logical_name="$(project_logical_name "$normalized")"
+  parent="$(registered_parent_project "$normalized")"
+  if [ -n "$parent" ]; then
+    parent_name="$(project_logical_name "$parent")"
+    printf '%s--%s\n' "$parent_name" "$logical_name"
+  else
+    printf '%s\n' "$logical_name"
+  fi
+}
+
+project_import_names() {
+  local project="$1"
+  local canonical logical
+
+  canonical="$(project_archive_name "$project")"
+  printf '%s\n' "$canonical"
+
+  if ! target_is_aggregate "$project"; then
+    logical="$(project_logical_name "$project")"
+    if [ "${logical,,}" != "${canonical,,}" ]; then
+      printf '%s\n' "$logical"
+    fi
+  fi
 }
 
 project_archive_path() {
@@ -711,12 +803,11 @@ backup_order_targets() {
 }
 
 validate_projects() {
-  local project project_dir archive_name source_rel
-  local seen_file
+  local project project_dir archive_name source_rel logical_name alias alias_key owner
   local failed=0
   local -a aggregate_children=()
-
-  seen_file="$(mktemp /tmp/auto-code-project-names-XXXXXX)"
+  declare -A logical_owner=()
+  declare -A alias_owner=()
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
@@ -744,27 +835,46 @@ validate_projects() {
           failed=1
         fi
       fi
-    elif [ ! -d "$project_dir" ]; then
-      log "ERRO: projeto configurado não existe: $project_dir"
-      failed=1
+    else
+      if [ ! -d "$project_dir" ]; then
+        log "ERRO: projeto configurado não existe: $project_dir"
+        failed=1
+      fi
+
+      logical_name="$(project_logical_name "$project")"
+      alias_key="${logical_name,,}"
+      owner="${logical_owner[$alias_key]:-}"
+      if [ -n "$owner" ] && [ "$owner" != "$project" ]; then
+        log "ERRO: nome lógico de projeto duplicado '$logical_name'."
+        log "  Já cadastrado: $owner"
+        log "  Duplicado:     $project"
+        log "Nomes lógicos de projeto são chave única global, independentemente do projeto pai."
+        failed=1
+      else
+        logical_owner["$alias_key"]="$project"
+      fi
     fi
 
-    if grep -Fxiq -- "$archive_name" "$seen_file"; then
-      log "ERRO: dois alvos gerariam o mesmo ZIP '$archive_name.zip'. Use apenas um deles."
-      failed=1
-    else
-      printf '%s\n' "$archive_name" >> "$seen_file"
-    fi
+    while IFS= read -r alias || [ -n "$alias" ]; do
+      [ -n "$alias" ] || continue
+      alias_key="${alias,,}"
+      owner="${alias_owner[$alias_key]:-}"
+      if [ -n "$owner" ] && [ "$owner" != "$project" ]; then
+        log "ERRO: alias de ZIP ambíguo '$alias.zip' entre '$owner' e '$project'."
+        failed=1
+      else
+        alias_owner["$alias_key"]="$project"
+      fi
+    done < <(project_import_names "$project")
   done < <(backup_targets)
 
-  rm -f -- "$seen_file"
   [ "$failed" -eq 0 ]
 }
 
 project_for_zip() {
   local zip_name="$1"
   local zip_name_lower zip_stem zip_stem_lower
-  local project archive_name archive_name_lower suffix first_suffix_char
+  local project alias alias_lower suffix first_suffix_char
   local best=""
   local best_name=""
 
@@ -774,37 +884,40 @@ project_for_zip() {
     return 0
   }
 
-  # Retira apenas a extensão final. A comparação é case-insensitive para aceitar
-  # nomes alterados pelo navegador, mas o projeto retornado preserva o config.
+  # Retira apenas a extensão final. Para projetos aninhados, aceita tanto o
+  # nome lógico curto (exec-agent.zip) quanto o backup qualificado gerado pelo
+  # manager (dev-automation--exec-agent.zip). O nome lógico é globalmente único.
   zip_stem="${zip_name:0:${#zip_name}-4}"
   zip_stem_lower="${zip_stem,,}"
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    archive_name="$(project_archive_name "$project")"
-    archive_name_lower="${archive_name,,}"
 
-    # Aceita o nome exato ou qualquer sufixo iniciado por separador não
-    # alfanumérico. Exemplos válidos:
-    #   dev-automation.zip
-    #   dev-automation(15).zip
-    #   dev-automation%23232-3434.zip
-    #   dev-automation#revisado.zip
-    # Evita falsos positivos como dev-automation2.zip.
-    if [[ "$zip_stem_lower" == "$archive_name_lower" ]]; then
-      suffix=""
-    elif [[ "$zip_stem_lower" == "$archive_name_lower"* ]]; then
-      suffix="${zip_stem:${#archive_name}}"
-      first_suffix_char="${suffix:0:1}"
-      [[ -n "$first_suffix_char" && ! "$first_suffix_char" =~ [[:alnum:]] ]] || continue
-    else
-      continue
-    fi
+    while IFS= read -r alias || [ -n "$alias" ]; do
+      [ -n "$alias" ] || continue
+      alias_lower="${alias,,}"
 
-    if [ "${#archive_name}" -gt "${#best_name}" ]; then
-      best="$project"
-      best_name="$archive_name"
-    fi
+      # Aceita o nome exato ou sufixo iniciado por separador não alfanumérico,
+      # preservando nomes de arquivos gerados pelo navegador/chat, por exemplo:
+      #   exec-agent.zip
+      #   exec-agent-incremental.zip
+      #   dev-automation--exec-agent.zip
+      #   dev-automation--exec-agent(2).zip
+      if [[ "$zip_stem_lower" == "$alias_lower" ]]; then
+        suffix=""
+      elif [[ "$zip_stem_lower" == "$alias_lower"* ]]; then
+        suffix="${zip_stem:${#alias}}"
+        first_suffix_char="${suffix:0:1}"
+        [[ -n "$first_suffix_char" && ! "$first_suffix_char" =~ [[:alnum:]] ]] || continue
+      else
+        continue
+      fi
+
+      if [ "${#alias}" -gt "${#best_name}" ]; then
+        best="$project"
+        best_name="$alias"
+      fi
+    done < <(project_import_names "$project")
   done < <(backup_targets)
 
   echo "$best"
@@ -813,11 +926,11 @@ project_for_zip() {
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
-  local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
+  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
   local total_files checked_files rel destination
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
-  local -A nested_seen=() expected_by_name=()
+  local -A nested_seen=() expected_targets=()
 
   zip_name="$(basename "$zip_file")"
   project="$(project_for_zip "$zip_name")"
@@ -834,6 +947,10 @@ import_one_zip() {
 
   taskbar_status unzip "$zip_name"
   archive_name="$(project_archive_name "$project")"
+  logical_name=""
+  if ! target_is_aggregate "$project"; then
+    logical_name="$(project_logical_name "$project")"
+  fi
   project_dir="$(project_path "$project")"
   temp_dir="$(mktemp -d "/tmp/auto-code-import-${archive_name}-XXXXXX")"
 
@@ -860,6 +977,9 @@ import_one_zip() {
   if [ -d "$temp_dir/$archive_name" ]; then
     source_dir="$temp_dir/$archive_name"
     log "Raiz do ZIP identificada: $archive_name/"
+  elif [ -n "$logical_name" ] && [ -d "$temp_dir/$logical_name" ]; then
+    source_dir="$temp_dir/$logical_name"
+    log "Raiz lógica do projeto identificada: $logical_name/"
   else
     source_dir="$temp_dir"
     log "ZIP sem pasta raiz do alvo; usando a raiz do ZIP."
@@ -868,16 +988,14 @@ import_one_zip() {
   if target_is_aggregate "$project"; then
     mapfile -t expected_children < <(aggregate_child_targets "$project")
     for expected in "${expected_children[@]}"; do
-      child_name="$(project_archive_name "$expected")"
-      expected_by_name["${child_name,,}"]="$expected"
+      expected_targets["$expected"]=1
     done
 
     while IFS= read -r -d '' nested_zip; do
       child_name="$(basename -- "$nested_zip")"
-      child_name="${child_name:0:${#child_name}-4}"
-      nested_project="${expected_by_name[${child_name,,}]:-}"
+      nested_project="$(project_for_zip "$child_name")"
 
-      if [ -z "$nested_project" ]; then
+      if [ -z "$nested_project" ] || [ -z "${expected_targets[$nested_project]+x}" ]; then
         log "ERRO: ZIP agregador contém filho não esperado: $(basename -- "$nested_zip")"
         log "ZIP agregador mantido: $zip_file"
         rm -rf -- "$temp_dir"
@@ -1663,6 +1781,11 @@ backup_all() {
   local failed=0
   local -a projects=()
 
+  if ! validate_backup_ignore_zip; then
+    log "ERRO: rodada de backup cancelada antes de qualquer compactação."
+    return 1
+  fi
+
   mapfile -t projects < <(backup_order_targets)
   for project in "${projects[@]}"; do
     [ -n "$project" ] || continue
@@ -1796,12 +1919,21 @@ if ! validate_projects; then
 fi
 
 if [ "${1:-}" = "--backup-once" ]; then
+  if ! validate_backup_ignore_zip; then
+    echo "ERRO: backup bloqueado; restaure $IGNORE_ZIP_FILE." >&2
+    exit 1
+  fi
   taskbar_status backup "Backup manual"
   if zip_configured_sql_folders && clean_unmanaged_backup_zips && backup_all; then
     taskbar_status done "Backup concluído"
     exit 0
   fi
   taskbar_status error "Falha no backup"
+  exit 1
+fi
+
+if ! validate_backup_ignore_zip; then
+  echo "ERRO: monitor não iniciado; restaure $IGNORE_ZIP_FILE." >&2
   exit 1
 fi
 
