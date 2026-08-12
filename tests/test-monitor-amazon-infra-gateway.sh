@@ -8,36 +8,45 @@ NGINX="$ROOT/scripts/local-nginx.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 
-expected_service='amazon-infra-monitor;base;4005;8005;monitor.amazon.infra;/'
+expected_host='monitor.amazon-infra.localhost'
+expected_service="amazon-infra-monitor;base;4005;8005;${expected_host};/"
 expected_project='infra/amazon-infra/apps/monitor-app'
 
 grep -Fxq "$expected_service" "$CONFIG"
 grep -Fxq "$expected_project" "$PROJECTS"
 
+# local-nginx must not manage Windows/Linux hosts files. TLS hosts.txt is only
+# the mkcert SAN inventory and is intentionally unrelated to /etc/hosts.
+for forbidden in WINDOWS_HOSTS_FILE ensure_windows_host_resolution HOSTS_BLOCK_BEGIN 'drivers/etc/hosts' 'System32\drivers\etc\hosts'; do
+  ! grep -Fq "$forbidden" "$NGINX"
+done
+
 "$NGINX" --validate >/dev/null
 "$NGINX" --render > "$TMP/nginx.conf"
 
 block="$TMP/monitor.conf"
-awk '
-  /server_name monitor\.amazon\.infra;/ {count++; if (count == 2) on=1}
+awk -v target="$expected_host" '
+  $0 ~ "server_name " target ";" {count++; if (count == 2) on=1}
   on {print}
   on && /^}$/ {exit}
 ' "$TMP/nginx.conf" > "$block"
 
-grep -Fq 'server_name monitor.amazon.infra;' "$block"
+grep -Fq "server_name $expected_host;" "$block"
 grep -Fq 'ssl_certificate ' "$block"
 grep -Fq 'ssl_certificate_key ' "$block"
+grep -Fq 'location = /api {' "$block"
+grep -Fq 'return 308 /api/;' "$block"
 grep -Fq 'location /api/ {' "$block"
 grep -Fq 'proxy_pass http://127.0.0.1:8005/;' "$block"
 grep -Fq 'location / {' "$block"
 grep -Fq 'proxy_pass http://127.0.0.1:4005;' "$block"
 
-# O namespace global do subprojeto deve respeitar o projeto pai cadastrado.
+# Namespace global do subprojeto respeita o pai.
 # shellcheck source=../scripts/project-names.sh
 source "$ROOT/scripts/project-names.sh"
 [[ "$(project_global_command_base "$expected_project" "$PROJECTS")" == 'amazon-infra--monitor-app' ]]
 
-# Instalação simulada: confirma que o host entra no certificado e que repetir é idempotente.
+# Instalação simulada: certificado inclui o novo .localhost e é idempotente.
 fake_bin="$TMP/bin"
 available="$TMP/sites-available"
 enabled="$TMP/sites-enabled"
@@ -80,11 +89,11 @@ TMP_FAKE_CAROOT="$TMP/caroot" PATH="$fake_bin:$PATH" NGINX_BIN=nginx \
   NGINX_AVAILABLE_DIR="$available" NGINX_ENABLED_DIR="$enabled" TLS_DIR="$tls" \
   "$NGINX" --install >/dev/null
 cp "$available/dev-automation-local.conf" "$TMP/installed-one.conf"
-grep -Fxq 'monitor.amazon.infra' "$tls/hosts.txt"
+grep -Fxq "$expected_host" "$tls/hosts.txt"
 
 TMP_FAKE_CAROOT="$TMP/caroot" PATH="$fake_bin:$PATH" NGINX_BIN=nginx \
   NGINX_AVAILABLE_DIR="$available" NGINX_ENABLED_DIR="$enabled" TLS_DIR="$tls" \
   "$NGINX" --install >/dev/null
 cmp -s "$TMP/installed-one.conf" "$available/dev-automation-local.conf"
 
-printf 'OK: monitor.amazon.infra usa HTTPS local, Web 4005, API 8005, certificado e comando amazon-infra--monitor-app\n'
+printf 'OK: %s HTTPS local sem hosts, Web 4005, API 8005, certificado e amazon-infra--monitor-app\n' "$expected_host"
