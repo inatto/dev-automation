@@ -42,7 +42,7 @@ grep -Fq 'server_name anpprev.localhost;' "$config_one" || fail 'anpprev.localho
 grep -Fq 'server_name sinproprev.localhost;' "$config_one" || fail 'sinproprev.localhost ausente'
 ! grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'alias tecnico site-inst.localhost permaneceu publico'
 grep -Fq 'server_name conv-app.localhost;' "$config_one" || fail 'conv-app.localhost ausente'
-grep -Fq 'server_name amazon-infra-monitor.localhost;' "$config_one" || fail 'amazon-infra-monitor.localhost ausente'
+grep -Fq 'server_name monitor.amazon.infra;' "$config_one" || fail 'monitor.amazon.infra ausente'
 [[ "$(grep -c '^    listen 80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
 [[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
 [[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
@@ -100,7 +100,7 @@ grep -Fxq 'site-inst;/tenants/;/home/daniel/storage/tenants/' "$STATIC_LOCATIONS
 grep -Fxq 'site-inst;/static/inst-app/;/home/daniel/storage/static/inst-app/' "$STATIC_LOCATIONS"
 
 # O gerador não conhece módulos ou apps individualmente.
-if grep -Eq 'orbital-(assets|content|crm|events|fin|mail|marketing|reports|ui|vouchers|legal)|station-app|site-inst|conv-app|amazon-infra-monitor|painel\.localhost' "$SCRIPT"; then
+if grep -Eq 'orbital-(assets|content|crm|events|fin|mail|marketing|reports|ui|vouchers|legal)|station-app|site-inst|conv-app|amazon-infra-monitor|monitor\.amazon\.infra|painel\.localhost' "$SCRIPT"; then
   fail 'há serviço ou módulo hardcoded no gerador'
 fi
 
