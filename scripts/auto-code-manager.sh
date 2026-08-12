@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-12-event-driven-v24-runtime-restart"
+SCRIPT_VERSION="2026-08-12-light-monitor-v27-clipper"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -20,8 +20,12 @@ SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
 RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
-# O monitor principal é 100% dirigido por eventos; não existe intervalo de polling.
+# Monitor leve por metadados: não consome nenhuma instância inotify.
+# A cada poucos segundos verifica somente metadados dos projetos configurados,
+# podando .gitignore/ignore-zip e sem abrir conteúdo de arquivo.
 BACKUP_EVERY=1
+LIGHT_SCAN_INTERVAL=2
+AUTO_CODE_MONITOR_MODE="${AUTO_CODE_MONITOR_MODE:-light}"
 STABLE_WAIT=1
 BEEP_REPEATS=2
 BEEP_GAP_MS=220
@@ -47,9 +51,37 @@ INOTIFY_DIR_EXCLUDE_REGEX=""
 WATCH_RELOAD_REQUESTED=false
 FORCE_FULL_BACKUP_AFTER_RELOAD=false
 LAST_SOURCE_CHANGE=0
+ACTIVE_MONITOR_MODE=""
+LIGHT_WATCH_PLAN=""
+LIGHT_CONFIG_SIGNATURE=""
+declare -A LIGHT_SIGNATURES=()
+declare -A LIGHT_TREE_SIGNATURES=()
+declare -A LIGHT_IGNORE_SIGNATURES=()
 MONITOR_LOCK_FILE="$STATE_DIR/auto-code-manager.monitor.lock"
 MONITOR_LOCK_FD=""
 declare -A DIRTY_BACKUP_TARGETS=()
+
+# TUI retrô estilo Clipper. Só entra em tela cheia quando stdout é um terminal.
+# AUTO_CODE_TUI=off desativa e mantém a saída tradicional.
+AUTO_CODE_TUI="${AUTO_CODE_TUI:-clipper}"
+TUI_ACTIVE=false
+TUI_ROWS=0
+TUI_COLS=0
+TUI_LOG_TOP=9
+TUI_STATUS_STATE="INICIANDO"
+TUI_STATUS_DETAIL="Preparando monitor"
+TUI_LAST_ACTION="Inicialização"
+TUI_METRIC_TS=0
+TUI_INOTIFY_INSTANCES=0
+TUI_INOTIFY_WATCHES=0
+TUI_INOTIFY_MAX_INSTANCES=0
+TUI_INOTIFY_MAX_WATCHES=0
+TUI_MANAGER_FDS=0
+TUI_MANAGER_FD_LIMIT=0
+TUI_PROJECT_COUNT=0
+TUI_DOWNLOAD_ZIPS=0
+TUI_LOG_FILE="$STATE_DIR/dev-manager.log"
+
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -73,6 +105,7 @@ validate_positive_integer() {
 validate_timers() {
   validate_positive_integer BACKUP_EVERY
   validate_positive_integer STABLE_WAIT
+  validate_positive_integer LIGHT_SCAN_INTERVAL
   validate_positive_integer BEEP_REPEATS
   validate_positive_integer BEEP_GAP_MS
 
@@ -93,6 +126,245 @@ validate_timers() {
       exit 1
       ;;
   esac
+}
+
+tui_supported() {
+  [ "${AUTO_CODE_TUI:-clipper}" != "off" ] || return 1
+  [ -t 1 ] || return 1
+  [ "${TERM:-dumb}" != "dumb" ] || return 1
+  return 0
+}
+
+tui_terminal_size() {
+  local rows cols
+  rows="$(tput lines 2>/dev/null || printf '24')"
+  cols="$(tput cols 2>/dev/null || printf '80')"
+  [[ "$rows" =~ ^[0-9]+$ ]] || rows=24
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+  printf '%s %s\n' "$rows" "$cols"
+}
+
+tui_repeat() {
+  local char="$1" count="$2" out=""
+  local i
+  for ((i=0; i<count; i++)); do out+="$char"; done
+  printf '%s' "$out"
+}
+
+tui_fit() {
+  local text="$1" width="$2"
+  text="${text//$'\n'/ }"
+  text="${text//$'\r'/ }"
+  if [ "${#text}" -gt "$width" ]; then
+    if [ "$width" -gt 1 ]; then
+      text="${text:0:$((width-1))}…"
+    else
+      text="${text:0:$width}"
+    fi
+  fi
+  printf '%-*s' "$width" "$text"
+}
+
+tui_border_text() {
+  local left="$1" right="$2" label="${3:-}"
+  local inner=$((TUI_COLS - 2)) body=""
+  [ "$inner" -gt 0 ] || return 0
+  if [ -n "$label" ]; then
+    label=" $label "
+    if [ "${#label}" -gt "$inner" ]; then
+      label="${label:0:$inner}"
+    fi
+    body="$label$(tui_repeat '═' $((inner-${#label})))"
+  else
+    body="$(tui_repeat '═' "$inner")"
+  fi
+  printf '%s%s%s' "$left" "$body" "$right"
+}
+
+tui_write_row() {
+  local row="$1" color="$2" text="$3"
+  local fitted
+  fitted="$(tui_fit "$text" "$TUI_COLS")"
+  printf '\033[%s;1H\033[%sm%s\033[0m' "$row" "$color" "$fitted"
+}
+
+tui_write_box_row() {
+  local row="$1" text="$2" color="${3:-44;97}"
+  local inner=$((TUI_COLS - 4))
+  [ "$inner" -gt 0 ] || return 0
+  tui_write_row "$row" "$color" "║ $(tui_fit "$text" "$inner") ║"
+}
+
+tui_write_split_row() {
+  local row="$1" left="$2" right="$3" color="${4:-44;97}"
+  local usable=$((TUI_COLS - 7)) left_width right_width
+  [ "$usable" -gt 4 ] || return 0
+  left_width=$((usable / 2))
+  right_width=$((usable - left_width))
+  tui_write_row "$row" "$color" "║ $(tui_fit "$left" "$left_width") │ $(tui_fit "$right" "$right_width") ║"
+}
+
+tui_state_label() {
+  case "$1" in
+    sync|cycle) printf 'SINCRONIZANDO' ;;
+    unzip) printf 'IMPORTANDO' ;;
+    zip) printf 'SQL → ZIP' ;;
+    clean) printf 'LIMPANDO' ;;
+    backup) printf 'BACKUP' ;;
+    idle) printf 'ATIVO' ;;
+    error) printf 'ERRO' ;;
+    paused) printf 'PAUSADO' ;;
+    done) printf 'OK' ;;
+    exit) printf 'SAINDO' ;;
+    *) printf '%s' "${1^^}" ;;
+  esac
+}
+
+tui_collect_metrics() {
+  local now downloads info watches
+  local -a inotify_fds=()
+  local -a fdinfo_files=()
+
+  now="$(date +%s)"
+  if [ "$TUI_METRIC_TS" -gt 0 ] && [ $((now - TUI_METRIC_TS)) -lt 10 ]; then
+    return 0
+  fi
+  TUI_METRIC_TS="$now"
+
+  TUI_INOTIFY_MAX_INSTANCES="$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || printf '0')"
+  TUI_INOTIFY_MAX_WATCHES="$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || printf '0')"
+  TUI_MANAGER_FD_LIMIT="$(ulimit -n 2>/dev/null || printf '0')"
+  TUI_MANAGER_FDS="$(find "/proc/$$/fd" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' ')"
+
+  # Uso real do usuário, sem criar watcher e sem varrer conteúdo dos projetos.
+  # find resolve os symlinks /proc em C; mesmo com muitas instâncias é barato.
+  mapfile -t inotify_fds < <(
+    find /proc/[0-9]*/fd -mindepth 1 -maxdepth 1 -type l -uid "$(id -u)" \
+      -lname 'anon_inode:*inotify*' -print 2>/dev/null || true
+  )
+  TUI_INOTIFY_INSTANCES="${#inotify_fds[@]}"
+  TUI_INOTIFY_WATCHES=0
+  if [ "${#inotify_fds[@]}" -gt 0 ]; then
+    for info in "${inotify_fds[@]}"; do
+      info="${info/\/fd\//\/fdinfo\/}"
+      [ -r "$info" ] && fdinfo_files+=("$info")
+    done
+    if [ "${#fdinfo_files[@]}" -gt 0 ]; then
+      watches="$(grep -h '^inotify ' "${fdinfo_files[@]}" 2>/dev/null | wc -l | tr -d ' ')"
+      [[ "$watches" =~ ^[0-9]+$ ]] && TUI_INOTIFY_WATCHES="$watches"
+    fi
+  fi
+
+  TUI_PROJECT_COUNT="$(backup_targets 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
+  downloads="$(downloads_dir 2>/dev/null || true)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ]; then
+    TUI_DOWNLOAD_ZIPS="$(find "$downloads" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+  else
+    TUI_DOWNLOAD_ZIPS=0
+  fi
+}
+
+tui_draw_static() {
+  local dirty mode manager_inotify now top bottom
+  [ "$TUI_ACTIVE" = true ] || return 0
+  tui_collect_metrics
+
+  dirty="${#DIRTY_BACKUP_TARGETS[@]}"
+  mode="${ACTIVE_MONITOR_MODE:-${AUTO_CODE_MONITOR_MODE:-light}}"
+  now="$(date '+%H:%M:%S')"
+  manager_inotify=0
+  [ "$mode" = "inotify" ] && manager_inotify=1
+
+  printf '\0337'
+  tui_write_row 1 '44;96;1' "$(tui_border_text '╔' '╗' 'DEV AUTOMATION :: CLIPPER')"
+  tui_write_split_row 2 "STATUS: $TUI_STATUS_STATE  $TUI_STATUS_DETAIL" "HORA: $now" '44;93;1'
+  tui_write_split_row 3 "MODO: ${mode^^} · scan ${LIGHT_SCAN_INTERVAL}s · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty" '44;97'
+  tui_write_split_row 4 "INOTIFY INST: $TUI_INOTIFY_INSTANCES/$TUI_INOTIFY_MAX_INSTANCES" "WATCHES: $TUI_INOTIFY_WATCHES/$TUI_INOTIFY_MAX_WATCHES" '44;96;1'
+  tui_write_split_row 5 "FD MANAGER: $TUI_MANAGER_FDS/$TUI_MANAGER_FD_LIMIT" "ZIPs DOWNLOADS: $TUI_DOWNLOAD_ZIPS" '44;97'
+  tui_write_row 6 '44;96;1' "$(tui_border_text '╠' '╣' 'ÚLTIMA AÇÃO')"
+  tui_write_box_row 7 "$TUI_LAST_ACTION" '44;93;1'
+  tui_write_row 8 '44;96;1' "$(tui_border_text '╠' '╣' 'LOG · área rolável')"
+  tui_write_row "$TUI_ROWS" '44;96;1' "$(tui_border_text '╚' '╝' 'CTRL+C sair')"
+  printf '\0338'
+}
+
+tui_relayout() {
+  local size rows cols
+  [ "$TUI_ACTIVE" = true ] || return 0
+  size="$(tui_terminal_size)"
+  read -r rows cols <<<"$size"
+  if [ "$rows" -lt 16 ] || [ "$cols" -lt 80 ]; then
+    return 1
+  fi
+  TUI_ROWS="$rows"
+  TUI_COLS="$cols"
+  TUI_LOG_TOP=9
+
+  printf '\033[r\033[2J\033[H\033[44m'
+  printf '\033[%s;%sr' "$TUI_LOG_TOP" "$((TUI_ROWS-1))"
+  tui_draw_static
+  printf '\033[%s;1H\033[44;97m' "$TUI_LOG_TOP"
+}
+
+tui_refresh() {
+  local size rows cols
+  [ "$TUI_ACTIVE" = true ] || return 0
+  size="$(tui_terminal_size)"
+  read -r rows cols <<<"$size"
+  if [ "$rows" != "$TUI_ROWS" ] || [ "$cols" != "$TUI_COLS" ]; then
+    tui_relayout || return 0
+  else
+    tui_draw_static
+  fi
+}
+
+tui_init() {
+  local size rows cols
+  tui_supported || return 0
+  size="$(tui_terminal_size)"
+  read -r rows cols <<<"$size"
+  if [ "$rows" -lt 16 ] || [ "$cols" -lt 80 ]; then
+    return 0
+  fi
+
+  mkdir -p -- "$STATE_DIR"
+  : > "$TUI_LOG_FILE"
+  TUI_ACTIVE=true
+  printf '\033[?1049h\033[?25l'
+  tui_relayout || {
+    tui_cleanup
+    return 0
+  }
+}
+
+tui_log_line() {
+  local context="$1" message="$2" color='44;97'
+  local stamp
+  [ "$TUI_ACTIVE" = true ] || return 1
+  stamp="$(date '+%H:%M:%S')"
+  case "$context" in
+    error) color='44;91;1' ;;
+    backup) color='44;92;1' ;;
+    downloads|cycle) color='44;96;1' ;;
+    sql) color='44;95;1' ;;
+    zone) color='44;93;1' ;;
+    wait) color='44;37' ;;
+  esac
+  printf '[%s] %s\n' "$stamp" "$message" >> "$TUI_LOG_FILE" 2>/dev/null || true
+  tui_refresh
+  printf '\033[%sm[%s] %s\033[0m\033[44;97m\n' "$color" "$stamp" "$message"
+  return 0
+}
+
+tui_cleanup() {
+  [ "$TUI_ACTIVE" = true ] || return 0
+  TUI_ACTIVE=false
+  printf '\033[r\033[0m\033[?25h\033[?1049l'
+}
+
+tui_on_resize() {
+  [ "$TUI_ACTIVE" = true ] || return 0
+  tui_relayout || true
 }
 
 color_enabled() {
@@ -130,6 +402,11 @@ log() {
     context="error"
   fi
 
+  if [ "$TUI_ACTIVE" = true ]; then
+    tui_log_line "$context" "$message"
+    return 0
+  fi
+
   printf '[%s] ' "$(date '+%Y-%m-%d %H:%M:%S')"
   if [ -n "$context" ]; then
     paint "$context" "$message"
@@ -164,6 +441,13 @@ stage() {
 
   taskbar_status "$(tray_state_for_context "$context")" "$title"
 
+  if [ "$TUI_ACTIVE" = true ]; then
+    TUI_LAST_ACTION="$title"
+    tui_refresh
+    LOG_CONTEXT="$context" log "$marker $title${description:+ — $description}"
+    return 0
+  fi
+
   printf '\n'
   paint "$context" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   printf '\n'
@@ -182,6 +466,14 @@ taskbar_status() {
   local detail="${2:-}"
   local invoke_windows
   local pause_file_windows
+
+  TUI_STATUS_STATE="$(tui_state_label "$state")"
+  TUI_STATUS_DETAIL="$detail"
+  case "$state" in
+    idle|paused) ;;
+    *) [ -z "$detail" ] || TUI_LAST_ACTION="$detail" ;;
+  esac
+  [ "$TUI_ACTIVE" = true ] && tui_refresh
 
   [ "${TASKBAR_STATUS_ENABLED:-true}" = true ] || return 0
   [ -f "$DEV_STATUS_EXE" ] || return 0
@@ -261,6 +553,7 @@ run_stage() {
 }
 
 line() {
+  [ "$TUI_ACTIVE" = true ] && return 0
   echo "────────────────────────────────────────────────────────────"
 }
 
@@ -1960,6 +2253,282 @@ watch_root_projects() {
   done < <(backup_targets)
 }
 
+
+light_config_signature() {
+  local path
+  for path in "$ENV_FILE" "$PROJECTS_FILE" "$IGNORE_ZIP_FILE" "$FOLDER_SQL_ZIP_FILE"; do
+    if [ -e "$path" ]; then
+      stat -c '%n\t%Y\t%s' -- "$path" 2>/dev/null || true
+    else
+      printf '%s\tmissing\n' "$path"
+    fi
+  done
+}
+
+build_light_watch_plan() {
+  local project root child child_root excluded
+  local -a projects=()
+
+  mkdir -p "$STATE_DIR"
+  LIGHT_WATCH_PLAN="$STATE_DIR/light-watch-plan.tsv"
+  : > "$LIGHT_WATCH_PLAN"
+
+  mapfile -t projects < <(backup_targets)
+  for project in "${projects[@]}"; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    root="$(project_path "$project")"
+    [ -d "$root" ] || continue
+
+    printf 'P\t%s\t%s\n' "$project" "$root" >> "$LIGHT_WATCH_PLAN"
+
+    # Mesmas subárvores pesadas já ignoradas pelo backup/.gitignore.
+    while IFS= read -r excluded || [ -n "$excluded" ]; do
+      [ -n "$excluded" ] || continue
+      printf 'X\t%s\t%s\n' "$project" "$excluded" >> "$LIGHT_WATCH_PLAN"
+    done < <(watch_excluded_directories "$root")
+
+    # Se um alvo configurado está dentro de outro, o pai não percorre o filho:
+    # cada subprojeto é medido uma vez e recebe o próprio backup.
+    for child in "${projects[@]}"; do
+      [ "$child" = "$project" ] && continue
+      [ -n "$child" ] || continue
+      target_is_aggregate "$child" && continue
+      child_root="$(project_path "$child")"
+      if [ "$child_root" != "$root" ] && path_is_within_absolute "$child_root" "$root"; then
+        printf 'X\t%s\t%s\n' "$project" "$child_root" >> "$LIGHT_WATCH_PLAN"
+      fi
+    done
+  done
+}
+
+light_scan_states() {
+  [ -n "$LIGHT_WATCH_PLAN" ] && [ -f "$LIGHT_WATCH_PLAN" ] || build_light_watch_plan
+
+  python3 - "$LIGHT_WATCH_PLAN" "$IGNORE_ZIP_FILE" <<'PY_LIGHT_SCAN'
+import fnmatch
+import os
+import sys
+
+plan_file, ignore_file = sys.argv[1:3]
+projects = []
+excluded = {}
+
+with open(plan_file, 'r', encoding='utf-8', errors='replace') as fh:
+    for raw in fh:
+        parts = raw.rstrip('\n').split('\t', 2)
+        if len(parts) != 3:
+            continue
+        kind, project, path = parts
+        path = os.path.abspath(path)
+        if kind == 'P':
+            projects.append((project, path))
+            excluded.setdefault(project, set())
+        elif kind == 'X':
+            excluded.setdefault(project, set()).add(path)
+
+file_rules = []
+try:
+    with open(ignore_file, 'r', encoding='utf-8', errors='replace') as fh:
+        for raw in fh:
+            line = raw.rstrip('\r\n')
+            line = line.split('#', 1)[0].strip()
+            if not line or line.endswith('/'):
+                continue
+            negated = line.startswith('!')
+            if negated:
+                line = line[1:]
+            line = line.lstrip('/')
+            if line:
+                file_rules.append((negated, line))
+except OSError:
+    pass
+
+def ignored_file(rel, name):
+    ignored = False
+    for negated, pattern in file_rules:
+        if '/' in pattern:
+            match = fnmatch.fnmatchcase(rel, pattern)
+        else:
+            match = fnmatch.fnmatchcase(name, pattern)
+        if match:
+            ignored = not negated
+    return ignored
+
+for project, root in projects:
+    max_mtime = 0
+    entries = 0
+    total_size = 0
+    max_dir_mtime = 0
+    dir_count = 0
+    max_gitignore_mtime = 0
+    gitignore_count = 0
+    gitignore_size = 0
+    excluded_roots = excluded.get(project, set())
+
+    try:
+        st = os.stat(root, follow_symlinks=False)
+        max_mtime = max(max_mtime, st.st_mtime_ns)
+        max_dir_mtime = max(max_dir_mtime, st.st_mtime_ns)
+        dir_count += 1
+    except OSError:
+        print(f'{project}\tmissing\tmissing\tmissing')
+        continue
+
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        kept = []
+        for name in dirs:
+            full = os.path.abspath(os.path.join(current, name))
+            if full in excluded_roots:
+                continue
+            kept.append(name)
+            try:
+                st = os.stat(full, follow_symlinks=False)
+                max_mtime = max(max_mtime, st.st_mtime_ns)
+                max_dir_mtime = max(max_dir_mtime, st.st_mtime_ns)
+                entries += 1
+                dir_count += 1
+            except OSError:
+                pass
+        dirs[:] = kept
+
+        for name in files:
+            full = os.path.join(current, name)
+            rel = os.path.relpath(full, root).replace(os.sep, '/')
+            if ignored_file(rel, name):
+                continue
+            try:
+                st = os.stat(full, follow_symlinks=False)
+            except OSError:
+                continue
+            max_mtime = max(max_mtime, st.st_mtime_ns)
+            entries += 1
+            total_size += st.st_size
+            if name == '.gitignore':
+                max_gitignore_mtime = max(max_gitignore_mtime, st.st_mtime_ns)
+                gitignore_count += 1
+                gitignore_size += st.st_size
+
+    state_sig = f'{max_mtime}:{entries}:{total_size}'
+    tree_sig = f'{max_dir_mtime}:{dir_count}'
+    ignore_sig = f'{max_gitignore_mtime}:{gitignore_count}:{gitignore_size}'
+    print(f'{project}\t{state_sig}\t{tree_sig}\t{ignore_sig}')
+PY_LIGHT_SCAN
+}
+
+initialize_light_monitor() {
+  local project signature tree_signature ignore_signature
+
+  build_light_watch_plan
+  LIGHT_SIGNATURES=()
+  LIGHT_TREE_SIGNATURES=()
+  LIGHT_IGNORE_SIGNATURES=()
+  while IFS=$'\t' read -r project signature tree_signature ignore_signature || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    LIGHT_SIGNATURES["$project"]="$signature"
+    LIGHT_TREE_SIGNATURES["$project"]="$tree_signature"
+    LIGHT_IGNORE_SIGNATURES["$project"]="$ignore_signature"
+  done < <(light_scan_states)
+
+  LIGHT_CONFIG_SIGNATURE="$(light_config_signature)"
+  ACTIVE_MONITOR_MODE="light"
+  log "Monitor leve ativo: sem inotify; verifica somente metadados dos projetos a cada ${LIGHT_SCAN_INTERVAL}s e poda .gitignore/ignore-zip."
+}
+
+light_refresh_if_config_changed() {
+  local signature
+  signature="$(light_config_signature)"
+  [ "$signature" = "$LIGHT_CONFIG_SIGNATURE" ] && return 0
+
+  load_env
+  validate_timers
+  validate_projects || return 1
+  validate_backup_ignore_zip || return 1
+  clean_unmanaged_backup_zips || true
+  initialize_light_monitor
+  mark_all_projects_dirty
+  zip_configured_sql_folders || true
+  return 0
+}
+
+light_process_downloads_and_sql() {
+  local downloads folder
+
+  downloads="$(downloads_dir)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ] && \
+     find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print -quit 2>/dev/null | grep -q .; then
+    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP detectado no monitor leve; processa somente o lote presente em Downloads." \
+      import_downloads || true
+  fi
+
+  while IFS= read -r folder || [ -n "$folder" ]; do
+    [ -n "$folder" ] || continue
+    [ -d "$folder" ] || continue
+    if find "$folder" -maxdepth 1 -type f -iname '*.sql' ! -name '*:Zone.Identifier' -print -quit 2>/dev/null | grep -q .; then
+      run_stage sql "SQL → ZIP" "SQL detectado no monitor leve; compacta somente a pasta afetada." \
+        zip_sql_folder "$folder" || true
+    fi
+  done < <(configured_sql_zip_folders)
+}
+
+light_scan_cycle() {
+  local project signature tree_signature ignore_signature old old_tree old_ignore
+  local plan_changed=false
+
+  light_refresh_if_config_changed || return 1
+  light_process_downloads_and_sql
+
+  while IFS=$'\t' read -r project signature tree_signature ignore_signature || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    old="${LIGHT_SIGNATURES[$project]-}"
+    old_tree="${LIGHT_TREE_SIGNATURES[$project]-}"
+    old_ignore="${LIGHT_IGNORE_SIGNATURES[$project]-}"
+
+    if [ -n "$old" ] && [ "$old" != "$signature" ]; then
+      mark_backup_dirty "$project"
+    fi
+    if { [ -n "$old_tree" ] && [ "$old_tree" != "$tree_signature" ]; } || \
+       { [ -n "$old_ignore" ] && [ "$old_ignore" != "$ignore_signature" ]; }; then
+      plan_changed=true
+    fi
+
+    LIGHT_SIGNATURES["$project"]="$signature"
+    LIGHT_TREE_SIGNATURES["$project"]="$tree_signature"
+    LIGHT_IGNORE_SIGNATURES["$project"]="$ignore_signature"
+  done < <(light_scan_states)
+
+  # Só refaz a poda quando a estrutura de diretórios ou algum .gitignore mudou.
+  # Edição comum de código não custa uma reconstrução do plano.
+  if [ "$plan_changed" = true ]; then
+    build_light_watch_plan
+  fi
+  return 0
+}
+
+start_change_monitor() {
+  case "${AUTO_CODE_MONITOR_MODE:-light}" in
+    light)
+      initialize_light_monitor
+      ;;
+    inotify)
+      start_backup_watcher || return 1
+      ACTIVE_MONITOR_MODE="inotify"
+      ;;
+    auto)
+      if start_backup_watcher; then
+        ACTIVE_MONITOR_MODE="inotify"
+      else
+        LOG_CONTEXT=wait log "Inotify indisponível; usando monitor leve sem aumentar fs.inotify.max_user_instances."
+        initialize_light_monitor
+      fi
+      ;;
+    *)
+      log "ERRO: AUTO_CODE_MONITOR_MODE deve ser light, inotify ou auto. Valor: ${AUTO_CODE_MONITOR_MODE:-}"
+      return 1
+      ;;
+  esac
+}
+
 build_inotify_exclude_regex() {
   # Apenas regras de ARQUIVO são enviadas ao --exclude. Diretórios ignorados
   # são removidos da própria árvore de watches com @path, reduzindo drasticamente
@@ -2046,12 +2615,14 @@ watch_excluded_directories() {
   python3 - "$root" "$IGNORE_ZIP_FILE" <<'PY_WATCH_EXCLUDES'
 import fnmatch
 import os
+import subprocess
 import sys
 
 root = os.path.abspath(sys.argv[1])
 ignore_file = sys.argv[2]
 basename_rules = []
 path_rules = []
+git_ignored_dirs = set()
 
 with open(ignore_file, 'r', encoding='utf-8', errors='replace') as fh:
     for raw in fh:
@@ -2067,12 +2638,42 @@ with open(ignore_file, 'r', encoding='utf-8', errors='replace') as fh:
         else:
             basename_rules.append(line)
 
+# O Git resolve .gitignore aninhado, excludes globais e regras com !. Com
+# --directory ele devolve a raiz das subárvores ignoradas, permitindo podá-las
+# antes do os.walk entrar nelas.
+try:
+    inside = subprocess.run(
+        ['git', '-C', root, 'rev-parse', '--is-inside-work-tree'],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if inside.returncode == 0:
+        ignored = subprocess.run(
+            ['git', '-C', root, 'ls-files', '-z', '--others', '--ignored',
+             '--exclude-standard', '--directory', '--', '.'],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if ignored.returncode == 0:
+            for raw in ignored.stdout.split(b'\0'):
+                if not raw.endswith(b'/'):
+                    continue
+                rel = raw[:-1].decode('utf-8', errors='surrogateescape')
+                if rel:
+                    git_ignored_dirs.add(rel)
+except OSError:
+    pass
+
 for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
     kept = []
     for name in dirs:
         full = os.path.join(current, name)
         rel = os.path.relpath(full, root).replace(os.sep, '/')
-        ignored = any(fnmatch.fnmatchcase(name, pat) for pat in basename_rules)
+        ignored = rel in git_ignored_dirs
+        if not ignored:
+            ignored = any(fnmatch.fnmatchcase(name, pat) for pat in basename_rules)
         if not ignored:
             ignored = any(fnmatch.fnmatchcase(rel, pat) for pat in path_rules)
         if ignored:
@@ -2081,6 +2682,14 @@ for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
             kept.append(name)
     dirs[:] = kept
 PY_WATCH_EXCLUDES
+}
+
+path_is_git_ignored() {
+  local project_dir="$1" event_path="$2"
+
+  command -v git >/dev/null 2>&1 || return 1
+  git -C "$project_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  git -C "$project_dir" check-ignore -q -- "$event_path" 2>/dev/null
 }
 
 event_owner_project() {
@@ -2458,6 +3067,19 @@ handle_watch_event() {
 
   owner="$(event_owner_project "$event_path")"
   [ -n "$owner" ] || return 0
+
+  # Mudança de .gitignore altera a própria árvore de watches do projeto.
+  if [ "$(basename -- "$event_path")" = ".gitignore" ]; then
+    WATCH_RELOAD_REQUESTED=true
+  elif path_is_git_ignored "$(project_path "$owner")" "$event_path"; then
+    # Ignorados pelo Git nunca disparam backup. Se uma nova pasta ignorada
+    # apareceu em runtime, recarrega o inotify para remover toda a subárvore.
+    if { event_has "$events" CREATE || event_has "$events" MOVED_TO; } && [ -d "$event_path" ]; then
+      WATCH_RELOAD_REQUESTED=true
+    fi
+    return 0
+  fi
+
   mark_backup_dirty "$owner" "$event_path"
 }
 
@@ -2499,13 +3121,19 @@ stop() {
     rm -f -- "$PAUSE_FILE"
   fi
   taskbar_status exit "Auto Code Manager encerrado"
+  if [ "$TUI_ACTIVE" = true ]; then
+    LOG_CONTEXT=wait log "Encerrando interface Clipper..."
+    tui_cleanup
+  fi
   echo
   line
-  echo "Encerrado."
+  echo "Encerrado. Log da sessão: $TUI_LOG_FILE"
   exit 0
 }
 
 trap stop INT TERM
+trap tui_cleanup EXIT
+trap tui_on_resize WINCH
 
 ensure_files
 load_env
@@ -2641,24 +3269,33 @@ if ! acquire_monitor_lock; then
   exit 3
 fi
 
-line
-echo "Auto Code Manager - $SCRIPT_VERSION"
-line
-echo "CODE_ROOT:     $CODE_ROOT"
-echo "Downloads:     $(downloads_dir)"
-echo "ENV:           $ENV_FILE"
-echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
-echo "Modo:          event-driven (inotify; sem polling de diretórios)"
-echo "Backup:        ${BACKUP_EVERY}s de silêncio após a última alteração"
-echo "Estável por:   ${STABLE_WAIT}s apenas em processamento manual/baseline"
-line
+tui_init
+if [ "$TUI_ACTIVE" = true ]; then
+  TUI_STATUS_STATE="INICIANDO"
+  TUI_STATUS_DETAIL="Preparando monitor"
+  TUI_LAST_ACTION="Auto Code Manager $SCRIPT_VERSION"
+  tui_refresh
+  LOG_CONTEXT=wait log "Auto Code Manager $SCRIPT_VERSION iniciado."
+  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(downloads_dir) · modo=${AUTO_CODE_MONITOR_MODE:-light}."
+else
+  line
+  echo "Auto Code Manager - $SCRIPT_VERSION"
+  line
+  echo "CODE_ROOT:     $CODE_ROOT"
+  echo "Downloads:     $(downloads_dir)"
+  echo "ENV:           $ENV_FILE"
+  echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
+  echo "Modo:          ${AUTO_CODE_MONITOR_MODE:-light} (leve por metadados; sem inotify no modo light)"
+  echo "Backup:        ${BACKUP_EVERY}s de silêncio após a última alteração"
+  echo "Estável por:   ${STABLE_WAIT}s apenas em processamento manual/baseline"
+  line
+fi
 
 initialize_pause_control
 
-if ! start_backup_watcher; then
-  taskbar_status error "Inotify indisponível"
-  echo "ERRO: monitor event-driven não pôde ser iniciado." >&2
-  echo "Instale uma vez: sudo apt-get install -y inotify-tools" >&2
+if ! start_change_monitor; then
+  taskbar_status error "Monitor indisponível"
+  echo "ERRO: monitor de alterações não pôde ser iniciado." >&2
   exit 1
 fi
 
@@ -2682,7 +3319,11 @@ run_stage downloads "DOWNLOADS INICIAIS" "Importa somente ZIPs que já estavam e
 run_stage sql "SQLs INICIAIS" "Compacta somente SQLs que já existiam antes do watcher iniciar; depois cada pasta é acionada por evento." zip_configured_sql_folders || true
 
 taskbar_status idle "Aguardando eventos"
-LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads, SQL ou Zone.Identifier."
+if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
+  LOG_CONTEXT=wait log "IDLE leve: sem inotify; somente metadados dos projetos configurados a cada ${LIGHT_SCAN_INTERVAL}s."
+else
+  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads, SQL ou Zone.Identifier."
+fi
 
 while true; do
   local_timeout=""
@@ -2690,6 +3331,33 @@ while true; do
   event_path=""
 
   wait_if_paused
+
+  if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
+    if ! light_scan_cycle; then
+      taskbar_status error "Monitor leve falhou"
+      LOG_CONTEXT=error log "ERRO: monitor leve falhou."
+      exit 1
+    fi
+
+    if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
+      now="$(date +%s)"
+      if [ $((now - LAST_SOURCE_CHANGE)) -ge "$BACKUP_EVERY" ]; then
+        taskbar_status backup "Backup inteligente"
+        stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente projetos alterados e agregadores dependentes."
+        if LOG_CONTEXT=backup backup_dirty_targets; then
+          stage backup end "BACKUP INTELIGENTE — CONCLUÍDO"
+          taskbar_status idle "Aguardando alterações"
+        else
+          taskbar_status error "Backup inteligente falhou"
+          LOG_CONTEXT=error log "ERRO: backup inteligente falhou; alvos permanecem pendentes para nova tentativa."
+          LAST_SOURCE_CHANGE="$(date +%s)"
+        fi
+      fi
+    fi
+
+    sleep "$LIGHT_SCAN_INTERVAL"
+    continue
+  fi
 
   # Se existe backup pendente, read -t funciona como debounce bloqueante. Sem
   # backup pendente, o read fica bloqueado indefinidamente até chegar um evento.
