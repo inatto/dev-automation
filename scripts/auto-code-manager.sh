@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-07-28-codezip-v17-described-cycles"
+SCRIPT_VERSION="2026-08-11-explicit-aggregators-v18"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -21,7 +21,7 @@ SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 INTERVAL=2
 ZONE_EVERY=4
-BACKUP_EVERY=10
+BACKUP_EVERY=20
 STABLE_WAIT=2
 BEEP_REPEATS=2
 BEEP_GAP_MS=220
@@ -510,34 +510,66 @@ ensure_files() {
   fi
 }
 
+normalize_target() {
+  local target="$1"
+  target="${target#./}"
+  target="${target%/}"
+  printf '%s\n' "$target"
+}
+
+target_is_aggregate() {
+  local target
+  target="$(normalize_target "$1")"
+  [[ "${target,,}" == *.zip ]]
+}
+
+target_is_code_aggregate() {
+  local target
+  target="$(normalize_target "$1")"
+  [[ "$target" != */* && "${target,,}" == "code.zip" ]]
+}
+
+target_source_rel() {
+  local target
+  target="$(normalize_target "$1")"
+
+  if target_is_code_aggregate "$target"; then
+    printf '\n'
+  elif target_is_aggregate "$target"; then
+    printf '%s\n' "${target:0:${#target}-4}"
+  else
+    printf '%s\n' "$target"
+  fi
+}
+
 project_path() {
   local project="$1"
+  local source_rel
+  source_rel="$(target_source_rel "$project")"
 
-  # As entradas são sempre relativas a CODE_ROOT. Barras finais são removidas.
-  project="${project#./}"
-  project="${project%/}"
-
-  printf '%s/%s\n' "$CODE_ROOT" "$project"
+  if [ -z "$source_rel" ]; then
+    printf '%s\n' "$CODE_ROOT"
+  else
+    printf '%s/%s\n' "$CODE_ROOT" "$source_rel"
+  fi
 }
 
 project_archive_name() {
   local project="$1"
+  local normalized
 
-  project="${project#./}"
-  project="${project%/}"
+  normalized="$(normalize_target "$project")"
+  if target_is_aggregate "$normalized"; then
+    normalized="${normalized:0:${#normalized}-4}"
+  fi
 
-  # O nome do ZIP é o nome da pasta selecionada. Ex.:
-  #   infra                   -> infra.zip
-  #   orgs/station-app  -> station-app.zip
-  basename -- "$project"
+  basename -- "$normalized"
 }
 
 project_archive_path() {
   local project="$1"
   local archive_name
 
-  # Independentemente da categoria do projeto (bots, orgs, infra, etc.),
-  # todos os ZIPs de backup ficam diretamente na raiz de CODE_ROOT.
   archive_name="$(project_archive_name "$project")"
   printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
 }
@@ -546,93 +578,149 @@ configured_projects() {
   clean_file "$PROJECTS_FILE"
 }
 
-inferred_parent_projects() {
-  local project parent
-  local -a parents=()
-  declare -A seen=()
-
-  # O primeiro segmento é a categoria de CODE_ROOT (orgs, infra, bots, ...).
-  # Qualquer nível intermediário abaixo dela vira um agrupador de backup.
-  # Ex.:
-  #   orgs/orbital/orbital-app -> orgs/orbital
-  #   orgs/acme/platform/api   -> orgs/acme/platform e orgs/acme
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
-    project="${project#./}"
-    project="${project%/}"
-    parent="${project%/*}"
-
-    while [[ "$parent" == */* ]]; do
-      if [ -z "${seen[$parent]+x}" ]; then
-        parents+=("$parent")
-        seen["$parent"]=1
-      fi
-      parent="${parent%/*}"
-    done
-  done < <(configured_projects)
-
-  # Grupos mais profundos precisam ser gerados antes dos seus pais para que o
-  # ZIP do filho já exista quando o pacote do nível acima for montado.
-  if [ "${#parents[@]}" -gt 0 ]; then
-    printf '%s\n' "${parents[@]}" \
-      | awk -F/ '{ print NF "\t" $0 }' \
-      | sort -t $'\t' -k1,1nr -k2,2 \
-      | cut -f2-
-  fi
-}
-
-direct_child_projects() {
-  local parent="$1"
-  local project
-
-  # Filhos imediatos podem ser projetos configurados ou agrupadores inferidos.
-  # Assim a mesma regra funciona em qualquer profundidade sem nomes especiais.
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
-    [ "$project" != "$parent" ] || continue
-
-    if [ "${project%/*}" = "$parent" ]; then
-      printf '%s\n' "$project"
-    fi
-  done < <(backup_targets)
-}
-
 backup_targets() {
   local project
   declare -A seen=()
 
-  # Primeiro preserva todos os projetos individuais configurados.
+  # A lista .projects é a única fonte da verdade. Nenhum agrupador é inferido.
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    project="${project#./}"
-    project="${project%/}"
+    project="$(normalize_target "$project")"
 
     if [ -z "${seen[$project]+x}" ]; then
       printf '%s\n' "$project"
       seen["$project"]=1
     fi
   done < <(configured_projects)
+}
 
-  # Depois acrescenta uma única vez cada pasta pai inferida.
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
+path_is_descendant() {
+  local child="$1"
+  local parent="$2"
 
-    if [ -z "${seen[$project]+x}" ]; then
-      printf '%s\n' "$project"
-      seen["$project"]=1
+  [ -n "$child" ] || return 1
+  if [ -z "$parent" ]; then
+    return 0
+  fi
+
+  [[ "$child" == "$parent/"* ]]
+}
+
+aggregate_child_targets() {
+  local aggregate="$1"
+  local aggregate_rel target target_rel other other_rel covered
+  local -a targets=()
+  local -a aggregates=()
+
+  aggregate_rel="$(target_source_rel "$aggregate")"
+  mapfile -t targets < <(backup_targets)
+
+  # Descendentes agregadores explícitos podem representar um ramo inteiro.
+  for target in "${targets[@]}"; do
+    [ "$target" != "$aggregate" ] || continue
+    target_is_aggregate "$target" || continue
+    target_is_code_aggregate "$target" && continue
+    target_rel="$(target_source_rel "$target")"
+    path_is_descendant "$target_rel" "$aggregate_rel" || continue
+    aggregates+=("$target")
+  done
+
+  # Em ordem do .projects, seleciona apenas a representação mais alta de cada
+  # ramo: agregador explícito cobre seus descendentes; projeto normal nunca
+  # cobre subprojetos cadastrados, porque o ZIP dele os exclui fisicamente.
+  for target in "${targets[@]}"; do
+    [ "$target" != "$aggregate" ] || continue
+    target_is_code_aggregate "$target" && continue
+    target_rel="$(target_source_rel "$target")"
+    path_is_descendant "$target_rel" "$aggregate_rel" || continue
+
+    covered=false
+    for other in "${aggregates[@]}"; do
+      [ "$other" != "$target" ] || continue
+      other_rel="$(target_source_rel "$other")"
+      if path_is_descendant "$target_rel" "$other_rel"; then
+        covered=true
+        break
+      fi
+    done
+
+    [ "$covered" = false ] || continue
+    printf '%s\n' "$target"
+  done
+}
+
+registered_subprojects() {
+  local parent="$1"
+  local parent_rel target target_rel
+
+  parent_rel="$(target_source_rel "$parent")"
+  while IFS= read -r target || [ -n "$target" ]; do
+    [ -n "$target" ] || continue
+    [ "$target" != "$parent" ] || continue
+    target_is_aggregate "$target" && continue
+    target_rel="$(target_source_rel "$target")"
+    path_is_descendant "$target_rel" "$parent_rel" || continue
+    printf '%s\n' "$target"
+  done < <(backup_targets)
+}
+
+append_registered_subproject_excludes() {
+  local parent="$1"
+  local filter_file="$2"
+  local parent_rel child child_rel relative
+  local count=0
+
+  parent_rel="$(target_source_rel "$parent")"
+  while IFS= read -r child || [ -n "$child" ]; do
+    [ -n "$child" ] || continue
+    child_rel="$(target_source_rel "$child")"
+    relative="${child_rel#"$parent_rel/"}"
+    [ -n "$relative" ] || continue
+    printf -- '- /%s/***\n' "$relative" >> "$filter_file"
+    count=$((count + 1))
+    log "Excluindo subprojeto cadastrado do ZIP pai: $relative/"
+  done < <(registered_subprojects "$parent")
+
+  [ "$count" -eq 0 ] || log "$count subprojeto(s) cadastrado(s) excluído(s) do backup pai."
+}
+
+backup_order_targets() {
+  local target rel depth
+  local -a normal=()
+  local -a aggregate_lines=()
+  local -a code=()
+
+  while IFS= read -r target || [ -n "$target" ]; do
+    [ -n "$target" ] || continue
+    if ! target_is_aggregate "$target"; then
+      normal+=("$target")
+    elif target_is_code_aggregate "$target"; then
+      code+=("$target")
+    else
+      rel="$(target_source_rel "$target")"
+      depth="$(awk -F/ '{print NF}' <<<"$rel")"
+      aggregate_lines+=("$depth"$'\t'"$target")
     fi
-  done < <(inferred_parent_projects)
+  done < <(backup_targets)
+
+  [ "${#normal[@]}" -eq 0 ] || printf '%s\n' "${normal[@]}"
+  if [ "${#aggregate_lines[@]}" -gt 0 ]; then
+    printf '%s\n' "${aggregate_lines[@]}" | sort -t $'\t' -k1,1nr -k2,2 | cut -f2-
+  fi
+  [ "${#code[@]}" -eq 0 ] || printf '%s\n' "${code[@]}"
 }
 
 validate_projects() {
-  local project project_dir archive_name
+  local project project_dir archive_name source_rel
   local seen_file
   local failed=0
+  local -a aggregate_children=()
 
   seen_file="$(mktemp /tmp/auto-code-project-names-XXXXXX)"
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
+    project="$(normalize_target "$project")"
 
     if [[ "$project" = /* || "$project" = *".."* ]]; then
       log "ERRO: entrada inválida em $PROJECTS_FILE: $project"
@@ -642,13 +730,26 @@ validate_projects() {
 
     project_dir="$(project_path "$project")"
     archive_name="$(project_archive_name "$project")"
+    source_rel="$(target_source_rel "$project")"
 
-    if [ ! -d "$project_dir" ]; then
-      log "ERRO: projeto/pasta configurado não existe: $project_dir"
+    if target_is_aggregate "$project"; then
+      if ! target_is_code_aggregate "$project" && [ ! -d "$project_dir" ]; then
+        log "ERRO: pasta do agregador configurado não existe: $project_dir"
+        failed=1
+      fi
+      if [ -n "$source_rel" ]; then
+        mapfile -t aggregate_children < <(aggregate_child_targets "$project")
+        if [ "${#aggregate_children[@]}" -eq 0 ]; then
+          log "ERRO: agregador sem projetos/agrupadores descendentes configurados: $project"
+          failed=1
+        fi
+      fi
+    elif [ ! -d "$project_dir" ]; then
+      log "ERRO: projeto configurado não existe: $project_dir"
       failed=1
     fi
 
-    if grep -Fxq -- "$archive_name" "$seen_file"; then
+    if grep -Fxiq -- "$archive_name" "$seen_file"; then
       log "ERRO: dois alvos gerariam o mesmo ZIP '$archive_name.zip'. Use apenas um deles."
       failed=1
     else
@@ -714,15 +815,15 @@ import_one_zip() {
   local skip_stable="${2:-false}"
   local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
   local total_files checked_files rel destination
-  local nested_zip nested_project nested_count=0 nested_index
-  local -a nested_zips=() nested_projects=()
-  local -A nested_seen=()
+  local nested_zip nested_project nested_count=0 nested_index expected child_name
+  local -a nested_zips=() nested_projects=() expected_children=()
+  local -A nested_seen=() expected_by_name=()
 
   zip_name="$(basename "$zip_file")"
   project="$(project_for_zip "$zip_name")"
 
   if [ -z "$project" ]; then
-    log "Ignorando ZIP sem projeto: $zip_name"
+    log "Ignorando ZIP sem projeto/agregador configurado: $zip_name"
     return 0
   fi
 
@@ -739,7 +840,7 @@ import_one_zip() {
   line
   log "IMPORTAÇÃO INICIADA"
   log "ZIP:        $zip_file"
-  log "Projeto:    $project"
+  log "Alvo:       $project"
   log "Destino:    $project_dir"
   log "Temporário: $temp_dir"
 
@@ -761,56 +862,90 @@ import_one_zip() {
     log "Raiz do ZIP identificada: $archive_name/"
   else
     source_dir="$temp_dir"
-    log "ZIP sem pasta raiz do projeto; usando a raiz do ZIP."
+    log "ZIP sem pasta raiz do alvo; usando a raiz do ZIP."
   fi
 
-  # ZIP de pasta-pai, como orbital.zip, pode conter os ZIPs dos módulos.
-  # Primeiro valida todos os ZIPs filhos, sem alterar nenhum projeto. Só depois
-  # inicia a importação recursiva. O ZIP pai original permanece em Downloads se
-  # qualquer validação ou importação falhar.
-  while IFS= read -r -d '' nested_zip; do
-    nested_project="$(project_for_zip "$(basename -- "$nested_zip")")"
+  if target_is_aggregate "$project"; then
+    mapfile -t expected_children < <(aggregate_child_targets "$project")
+    for expected in "${expected_children[@]}"; do
+      child_name="$(project_archive_name "$expected")"
+      expected_by_name["${child_name,,}"]="$expected"
+    done
 
-    [ -n "$nested_project" ] || continue
-    [ "$nested_project" != "$project" ] || continue
-    [ "${nested_project%/*}" = "$project" ] || continue
+    while IFS= read -r -d '' nested_zip; do
+      child_name="$(basename -- "$nested_zip")"
+      child_name="${child_name:0:${#child_name}-4}"
+      nested_project="${expected_by_name[${child_name,,}]:-}"
 
-    if [ -n "${nested_seen[$nested_project]+x}" ]; then
-      log "ERRO: ZIP pai contém mais de um ZIP para o mesmo módulo: $nested_project"
-      log "ZIP pai mantido: $zip_file"
-      rm -rf -- "$temp_dir"
-      return 1
-    fi
+      if [ -z "$nested_project" ]; then
+        log "ERRO: ZIP agregador contém filho não esperado: $(basename -- "$nested_zip")"
+        log "ZIP agregador mantido: $zip_file"
+        rm -rf -- "$temp_dir"
+        return 1
+      fi
+      if [ -n "${nested_seen[$nested_project]+x}" ]; then
+        log "ERRO: ZIP agregador contém mais de um ZIP para o mesmo alvo: $nested_project"
+        log "ZIP agregador mantido: $zip_file"
+        rm -rf -- "$temp_dir"
+        return 1
+      fi
+      if ! unzip -tq "$nested_zip" >/dev/null 2>&1; then
+        log "ERRO: ZIP filho inválido: $(basename -- "$nested_zip")"
+        log "Nenhum ZIP filho foi importado; ZIP agregador mantido: $zip_file"
+        rm -rf -- "$temp_dir"
+        return 1
+      fi
 
-    if ! unzip -tq "$nested_zip" >/dev/null 2>&1; then
-      log "ERRO: ZIP filho inválido: $(basename -- "$nested_zip")"
-      log "Nenhum ZIP filho foi importado; ZIP pai mantido: $zip_file"
-      rm -rf -- "$temp_dir"
-      return 1
-    fi
+      nested_seen["$nested_project"]=1
+      nested_zips+=("$nested_zip")
+      nested_projects+=("$nested_project")
+    done < <(find "$source_dir" -maxdepth 1 -type f -iname "*.zip" -print0 2>/dev/null)
 
-    nested_seen["$nested_project"]=1
-    nested_zips+=("$nested_zip")
-    nested_projects+=("$nested_project")
-  done < <(find "$source_dir" -maxdepth 1 -type f -iname "*.zip" -print0 2>/dev/null)
-
-  nested_count="${#nested_zips[@]}"
-  if [ "$nested_count" -gt 0 ]; then
-    log "Todos os $nested_count ZIP(s) filho(s) foram validados antes da importação."
-
-    for ((nested_index = 0; nested_index < nested_count; nested_index++)); do
-      nested_zip="${nested_zips[$nested_index]}"
-      nested_project="${nested_projects[$nested_index]}"
-      log "ZIP filho [$((nested_index + 1))/$nested_count]: $(basename -- "$nested_zip") -> $nested_project"
-
-      if ! import_one_zip "$nested_zip" true; then
-        log "ERRO: falha ao importar ZIP filho. O ZIP pai foi mantido: $zip_file"
+    for expected in "${expected_children[@]}"; do
+      if [ -z "${nested_seen[$expected]+x}" ]; then
+        log "ERRO: ZIP agregador não contém o filho esperado: $(project_archive_name "$expected").zip"
+        log "ZIP agregador mantido: $zip_file"
         rm -rf -- "$temp_dir"
         return 1
       fi
     done
 
+    if find "$source_dir" -maxdepth 1 -type f ! -iname '*.zip' -print -quit | grep -q .; then
+      log "ERRO: ZIP agregador deve conter somente ZIPs filhos configurados."
+      log "ZIP agregador mantido: $zip_file"
+      rm -rf -- "$temp_dir"
+      return 1
+    fi
+
+    nested_count="${#nested_zips[@]}"
+    [ "$nested_count" -gt 0 ] || {
+      log "ERRO: ZIP agregador vazio. O ZIP foi mantido."
+      rm -rf -- "$temp_dir"
+      return 1
+    }
+
+    log "Todos os $nested_count ZIP(s) filho(s) foram validados antes da importação."
+    for ((nested_index = 0; nested_index < nested_count; nested_index++)); do
+      nested_zip="${nested_zips[$nested_index]}"
+      nested_project="${nested_projects[$nested_index]}"
+      log "ZIP filho [$((nested_index + 1))/$nested_count]: $(basename -- "$nested_zip") -> $nested_project"
+      if ! import_one_zip "$nested_zip" true; then
+        log "ERRO: falha ao importar ZIP filho. O ZIP agregador foi mantido: $zip_file"
+        rm -rf -- "$temp_dir"
+        return 1
+      fi
+    done
+
+    rm -rf -- "$temp_dir"
+    if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
+      log "ERRO: filhos importados, mas o ZIP agregador não foi apagado: $zip_file"
+      return 1
+    fi
     log "$nested_count ZIP(s) filho(s) importado(s) e confirmado(s)."
+    log "IMPORTAÇÃO DE AGREGADOR CONCLUÍDA: $project"
+    soft_beep
+    line
+    return 0
   fi
 
   filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${archive_name}-XXXXXX")"
@@ -821,9 +956,6 @@ import_one_zip() {
     "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
 
-  # Configurações protegidas nunca sobrescrevem o arquivo real. Elas são retiradas
-  # do rsync normal e comparadas com a referência sanitizada enviada no backup.
-  # Somente arquivos novos ou alterados reaparecem no projeto, com sufixo .external.
   {
     echo "- **/config/local/***"
     echo "- **/config/remote/***"
@@ -846,63 +978,50 @@ import_one_zip() {
 
   source_dir="$filtered_dir"
   total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
-
-  if [ "$total_files" -eq 0 ] && [ "$nested_count" -eq 0 ]; then
+  if [ "$total_files" -eq 0 ]; then
     log "ERRO: nenhum arquivo foi extraído. O ZIP foi mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
     return 1
   fi
 
-  if [ "$total_files" -gt 0 ]; then
-    log "Arquivos diretos extraídos: $total_files"
-    find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
+  log "Arquivos diretos extraídos: $total_files"
+  find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
 
-    log "Copiando arquivos diretos para o destino..."
-    if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
-      log "ERRO: falha ao copiar. O ZIP foi mantido."
+  log "Copiando arquivos diretos para o destino..."
+  if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
+    log "ERRO: falha ao copiar. O ZIP foi mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    return 1
+  fi
+
+  log "Conferindo arquivo por arquivo no destino..."
+  checked_files=0
+  while IFS= read -r -d '' rel; do
+    destination="$project_dir/$rel"
+    if [ ! -f "$destination" ]; then
+      log "ERRO: arquivo não apareceu no destino: $destination"
+      log "ZIP mantido: $zip_file"
       rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
-
-    log "Conferindo arquivo por arquivo no destino..."
-    checked_files=0
-
-    while IFS= read -r -d '' rel; do
-      destination="$project_dir/$rel"
-
-      if [ ! -f "$destination" ]; then
-        log "ERRO: arquivo não apareceu no destino: $destination"
-        log "ZIP mantido: $zip_file"
-        rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
-        return 1
-      fi
-
-      if ! cmp -s -- "$source_dir/$rel" "$destination"; then
-        log "ERRO: arquivo no destino está diferente: $destination"
-        log "ZIP mantido: $zip_file"
-        rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
-        return 1
-      fi
-
-      checked_files=$((checked_files + 1))
-      log "CONFIRMADO [$checked_files/$total_files]: $destination"
-    done < <(find "$source_dir" -type f -printf '%P\0')
-
-    if [ "$checked_files" -ne "$total_files" ]; then
-      log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
+    if ! cmp -s -- "$source_dir/$rel" "$destination"; then
+      log "ERRO: arquivo no destino está diferente: $destination"
+      log "ZIP mantido: $zip_file"
       rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
       return 1
     fi
+    checked_files=$((checked_files + 1))
+    log "CONFIRMADO [$checked_files/$total_files]: $destination"
+  done < <(find "$source_dir" -type f -printf '%P\0')
 
-    log "Todos os $checked_files arquivos diretos foram conferidos no destino."
-  else
-    log "ZIP pai contém apenas ZIPs filhos; não há arquivos diretos para copiar."
+  if [ "$checked_files" -ne "$total_files" ]; then
+    log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    return 1
   fi
 
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
-
   log "Apagando ZIP original somente após todas as confirmações..."
-
   if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
     log "ERRO: arquivos importados, mas o ZIP não foi apagado: $zip_file"
     return 1
@@ -1419,12 +1538,7 @@ materialize_changed_protected_configs() {
 
 backup_project() {
   local project="$1"
-  local project_dir
-  local archive_name
-  local temp_dir
-  local temp_zip
-  local final_zip
-  local filter_file=""
+  local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
   local child child_name child_zip child_count
   local sanitize_result sanitized_files sanitized_values
   local -a children=()
@@ -1433,7 +1547,7 @@ backup_project() {
   archive_name="$(project_archive_name "$project")"
 
   if [ ! -d "$project_dir" ]; then
-    log "ERRO: projeto não existe: $project_dir"
+    log "ERRO: alvo não existe: $project_dir"
     rm -f -- "$(project_archive_path "$project")"
     return 1
   fi
@@ -1442,46 +1556,43 @@ backup_project() {
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
   final_zip="$(project_archive_path "$project")"
-  mapfile -t children < <(direct_child_projects "$project")
-  child_count="${#children[@]}"
 
   log "Gerando backup: $project -> $final_zip"
 
-  if [ "$child_count" -gt 0 ]; then
-    # Um agrupador contém exclusivamente os ZIPs dos filhos ativos imediatos.
-    # Nenhum arquivo solto ou pasta do agrupador entra no pacote.
+  if target_is_aggregate "$project"; then
+    mapfile -t children < <(aggregate_child_targets "$project")
+    child_count="${#children[@]}"
+    if [ "$child_count" -eq 0 ]; then
+      log "ERRO: agregador sem filhos configurados: $project"
+      rm -rf -- "$temp_dir" "$temp_zip"
+      return 1
+    fi
+
     for child in "${children[@]}"; do
       child_name="$(project_archive_name "$child")"
       child_zip="$(project_archive_path "$child")"
-
       if [ ! -s "$child_zip" ] || ! unzip -tq "$child_zip" >/dev/null 2>&1; then
-        log "ERRO: ZIP filho ausente ou inválido para o pacote pai: $child_zip"
+        log "ERRO: ZIP filho ausente ou inválido para o agregador: $child_zip"
         rm -rf -- "$temp_dir" "$temp_zip"
         return 1
       fi
-
       cp -f -- "$child_zip" "$temp_dir/$child_name.zip" || {
-        log "ERRO ao incluir ZIP filho no pacote pai: $child_zip"
+        log "ERRO ao incluir ZIP filho no agregador: $child_zip"
         rm -rf -- "$temp_dir" "$temp_zip"
         return 1
       }
     done
-
-    log "Pacote pai preparado somente com $child_count ZIP(s) filho(s)."
+    log "Agregador explícito preparado com $child_count ZIP(s), sem duplicar ramos cobertos."
   else
     filter_file="$(mktemp "/tmp/auto-code-filter-${archive_name}-XXXXXX")"
-
     make_project_rsync_filter \
       "$IGNORE_ZIP_FILE" \
       "$project_dir" \
       "auto-code-manager.ignore-zip" \
       "$filter_file"
+    append_registered_subproject_excludes "$project" "$filter_file"
 
-    if ! rsync -a \
-      --filter="merge $filter_file" \
-      "$project_dir/" \
-      "$temp_dir/"; then
-
+    if ! rsync -a --filter="merge $filter_file" "$project_dir/" "$temp_dir/"; then
       log "ERRO no rsync do projeto: $project"
       rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
       return 1
@@ -1492,7 +1603,6 @@ backup_project() {
       rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
       return 1
     fi
-
     sanitized_files="${sanitize_result%%:*}"
     sanitized_values="${sanitize_result##*:}"
     if [ "${sanitized_values:-0}" -gt 0 ]; then
@@ -1507,15 +1617,11 @@ backup_project() {
     log "Referência sanitizada dos configs protegidos atualizada."
   fi
 
-  if ! (
-    cd "$temp_dir" &&
-    zip -qry "$temp_zip" .
-  ); then
-    log "ERRO ao compactar projeto: $project"
+  if ! (cd "$temp_dir" && zip -qry "$temp_zip" .); then
+    log "ERRO ao compactar alvo: $project"
     rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
-
   if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
     log "ERRO: validação do backup falhou: $project"
     rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
@@ -1525,7 +1631,6 @@ backup_project() {
   mv -f -- "$temp_zip" "$final_zip"
   rm -rf -- "$temp_dir"
   [ -z "$filter_file" ] || rm -f -- "$filter_file"
-
   log "OK backup: $final_zip"
   return 0
 }
@@ -1533,14 +1638,9 @@ backup_project() {
 clean_unmanaged_backup_zips() {
   local zip_file expected project managed
 
-  log "Limpando ZIPs de backup fora dos projetos e grupos gerenciados em $CODE_ROOT"
-
+  log "Limpando ZIPs de backup fora dos alvos explicitamente configurados em $CODE_ROOT"
   while IFS= read -r -d '' zip_file; do
     wait_if_paused
-    case "$zip_file" in
-      "$CODE_ROOT/Code.zip"|"$CODE_ROOT/code.zip") continue ;;
-    esac
-
     managed=false
     while IFS= read -r project || [ -n "$project" ]; do
       [ -n "$project" ] || continue
@@ -1552,91 +1652,10 @@ clean_unmanaged_backup_zips() {
     done < <(backup_targets)
 
     if [ "$managed" = false ]; then
-      log "Removendo ZIP fora do .projects: $zip_file"
-      rm -f -- "$zip_file" || log "ERRO ao remover ZIP fora do .projects: $zip_file"
+      log "Removendo ZIP não configurado no .projects: $zip_file"
+      rm -f -- "$zip_file" || log "ERRO ao remover ZIP não configurado: $zip_file"
     fi
-  done < <(
-    find "$CODE_ROOT" -mindepth 1 -maxdepth 3 -type f -iname "*.zip" -print0 2>/dev/null
-  )
-}
-
-create_code_zip() {
-  local final_zip="$CODE_ROOT/Code.zip"
-  local staging_dir
-  local temp_zip
-  local project
-  local archive_name
-  local project_zip
-  local count=0
-
-  staging_dir="$(mktemp -d /tmp/auto-code-package-XXXXXX)"
-  temp_zip="$(mktemp /tmp/Code.zip.tmp-XXXXXX)"
-  rm -f -- "$temp_zip"
-
-  log "Iniciando criação obrigatória do pacote geral Code.zip..."
-
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
-    wait_if_paused
-    archive_name="$(project_archive_name "$project")"
-    project_zip="$(project_archive_path "$project")"
-
-    if [ ! -s "$project_zip" ]; then
-      log "ERRO: ZIP ausente ou vazio: $project_zip"
-      rm -rf -- "$staging_dir"
-      rm -f -- "$temp_zip"
-      return 1
-    fi
-
-    cp -f -- "$project_zip" "$staging_dir/$archive_name.zip" || {
-      log "ERRO ao preparar $archive_name.zip para Code.zip"
-      rm -rf -- "$staging_dir"
-      rm -f -- "$temp_zip"
-      return 1
-    }
-    count=$((count + 1))
-  done < <(backup_targets)
-
-  if [ "$count" -eq 0 ]; then
-    log "ERRO: nenhum projeto configurado para criar Code.zip"
-    rm -rf -- "$staging_dir"
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  log "Gerando pacote geral: $count ZIPs -> $final_zip"
-
-  if ! (
-    cd "$staging_dir" &&
-    zip -q -0 "$temp_zip" -- ./*.zip
-  ); then
-    log "ERRO ao criar pacote geral Code.zip"
-    rm -rf -- "$staging_dir"
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
-    log "ERRO: validação do Code.zip falhou"
-    rm -rf -- "$staging_dir"
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  # Substituição atômica: o Code.zip anterior só muda depois do novo estar válido.
-  if ! mv -f -- "$temp_zip" "$final_zip"; then
-    log "ERRO ao instalar o novo Code.zip em $final_zip"
-    rm -rf -- "$staging_dir"
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  rm -f -- "$CODE_ROOT/code.zip"
-  rm -rf -- "$staging_dir"
-
-  log "OK Code.zip criado e preservado: $final_zip ($count ZIPs)"
-  ls -lh -- "$final_zip" 2>/dev/null || true
-  return 0
+  done < <(find "$CODE_ROOT" -mindepth 1 -maxdepth 3 -type f -iname "*.zip" -print0 2>/dev/null)
 }
 
 backup_all() {
@@ -1644,11 +1663,7 @@ backup_all() {
   local failed=0
   local -a projects=()
 
-  # Materializa a lista antes de iniciar os backups. Assim nenhum subprocesso
-  # executado por backup_project pode consumir o stdin e interromper a rodada.
-  mapfile -t projects < <(backup_targets)
-
-  # Nunca apaga o Code.zip válido antes de o novo estar pronto.
+  mapfile -t projects < <(backup_order_targets)
   for project in "${projects[@]}"; do
     [ -n "$project" ] || continue
     wait_if_paused
@@ -1656,17 +1671,11 @@ backup_all() {
   done
 
   if [ "$failed" -ne 0 ]; then
-    log "ERRO: um ou mais projetos falharam; Code.zip anterior foi mantido; o novo não foi criado neste ciclo."
+    log "ERRO: um ou mais alvos configurados falharam nesta rodada."
     return 1
   fi
 
-  log "Todos os projetos e grupos pais foram compactados; chamando create_code_zip agora."
-  wait_if_paused
-  if ! create_code_zip; then
-    return 1
-  fi
-
-  log "Rodada completa de backup concluída."
+  log "Rodada completa: somente projetos/agregadores explicitamente presentes no .projects foram gerados."
   return 0
 }
 
@@ -1834,14 +1843,14 @@ while true; do
   if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
     wait_if_paused
     taskbar_status backup "Gerando backups"
-    stage backup start "BACKUP — INÍCIO" "Gera os ZIPs dos projetos autorizados e, ao final, atualiza o Code.zip geral."
+    stage backup start "BACKUP — INÍCIO" "Gera somente os ZIPs explicitamente configurados em auto-code-manager.projects."
     LOG_CONTEXT=backup clean_unmanaged_backup_zips
     if LOG_CONTEXT=backup backup_all; then
-      LOG_CONTEXT=backup log "Ciclo de backup concluído com Code.zip."
+      LOG_CONTEXT=backup log "Ciclo de backup concluído com os alvos configurados."
       stage backup end "BACKUP — CONCLUÍDO"
     else
       taskbar_status error "Backup falhou"
-      LOG_CONTEXT=error log "ERRO: ciclo de backup terminou sem Code.zip."
+      LOG_CONTEXT=error log "ERRO: ciclo de backup terminou com falha em um ou mais alvos configurados."
     fi
     last_backup="$now"
   else

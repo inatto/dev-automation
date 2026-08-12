@@ -37,6 +37,7 @@ printf 'isto não é zip\n' > "$PACKAGE_DIR/orbital-assets.zip"
 )
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+orgs/orbital.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
 PROJECTS
@@ -67,6 +68,6 @@ fi
 
 grep -Fxq 'original app' "$CODE_ROOT/orgs/orbital/orbital-app/app.txt"
 [ ! -e "$CODE_ROOT/orgs/orbital/orbital-app/app-new.txt" ]
-grep -Fq 'Nenhum ZIP filho foi importado; ZIP pai mantido' "$LOG_FILE"
+grep -Fq 'Nenhum ZIP filho foi importado; ZIP agregador mantido' "$LOG_FILE"
 
 printf 'OK: ZIP filho inválido mantém o ZIP pai e não altera módulos\n'

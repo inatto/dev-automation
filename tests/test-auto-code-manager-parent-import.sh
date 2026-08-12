@@ -31,14 +31,13 @@ for module in "${MODULES[@]}"; do
 done
 
 printf 'arquivo antigo preservado\n' > "$CODE_ROOT/orgs/orbital/orbital-app/old.txt"
-printf 'configuração compartilhada\n' > "$PACKAGE_DIR/orbital.shared.env"
 (
   cd "$PACKAGE_DIR"
   zip -q -0 "$PARENT_ZIP" ./*.zip
-  zip -q "$PARENT_ZIP" orbital.shared.env
 )
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+orgs/orbital.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
 orgs/orbital/orbital-fin
@@ -72,7 +71,6 @@ for module in "${MODULES[@]}"; do
 done
 
 grep -Fxq 'arquivo antigo preservado' "$CODE_ROOT/orgs/orbital/orbital-app/old.txt"
-grep -Fxq 'configuração compartilhada' "$CODE_ROOT/orgs/orbital/orbital.shared.env"
 
 if find "$CODE_ROOT/orgs/orbital" -maxdepth 1 -type f -iname '*.zip' | grep -q .; then
   echo 'FALHOU: ZIPs filhos ficaram soltos dentro de orgs/orbital' >&2
@@ -83,4 +81,4 @@ fi
 grep -Fq 'Todos os 5 ZIP(s) filho(s) foram validados antes da importação.' "$LOG_FILE"
 grep -Fq '5 ZIP(s) filho(s) importado(s) e confirmado(s).' "$LOG_FILE"
 
-printf 'OK: orbital.zip extraiu os cinco ZIPs filhos nos módulos e preservou arquivos existentes\n'
+printf 'OK: orbital.zip extraiu os cinco ZIPs filhos nos módulos e preservou arquivos existentes do módulo\n'

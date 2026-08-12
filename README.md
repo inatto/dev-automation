@@ -48,35 +48,43 @@ Resultado esperado:
 bots/dev-automation
 ```
 
-#### Backups hierárquicos de grupos
+#### Projetos e agregadores explícitos
 
-Quando projetos ativos configurados estão abaixo de uma pasta agrupadora, o monitor
-mantém os ZIPs individuais e também gera ZIPs para os níveis intermediários abaixo
-da categoria raiz (`orgs`, `infra`, `bots`, etc.). A regra é estrutural e não depende
-do nome da pasta. Exemplo:
+`config/auto-code-manager.projects` é a única fonte da verdade para os backups.
+Nenhum `apps.zip`, `orbital.zip`, `Code.zip` ou outro ZIP de pasta é inferido
+automaticamente.
+
+Uma entrada normal representa um projeto real:
 
 ```text
-orgs/orbital/orbital-app     -> orbital-app.zip
-orgs/orbital/orbital-assets  -> orbital-assets.zip
-orgs/orbital/orbital-fin     -> orbital-fin.zip
-orgs/orbital/orbital-mail    -> orbital-mail.zip
-orgs/orbital/orbital-reports -> orbital-reports.zip
-orgs/orbital                  -> orbital.zip
+bots/dev-automation
+bots/dev-automation/apps/exec-agent
+orgs/orbital/orbital-app
 ```
 
-O `orbital.zip` contém exclusivamente os ZIPs dos filhos ativos imediatos:
-`orbital-app.zip`, `orbital-assets.zip`, `orbital-fin.zip`, `orbital-mail.zip` e
-`orbital-reports.zip`. Arquivos soltos e pastas da raiz `orgs/orbital` não entram
-no pacote agrupador.
+Se um projeto cadastrado estiver fisicamente dentro de outro projeto cadastrado,
+o diretório do filho é excluído do ZIP do pai. Assim `dev-automation.zip` não
+duplica `apps/exec-agent/`, enquanto `exec-agent.zip` é gerado separadamente.
+Pastas irmãs não cadastradas, como outros utilitários em `apps/`, continuam no ZIP
+do pai.
 
-Em hierarquias mais profundas, cada agrupador contém somente os ZIPs dos filhos
-ativos do nível imediatamente abaixo. Ao receber
-`orbital.zip`, o importador valida primeiro todos os ZIPs filhos e depois extrai
-cada um diretamente em seu módulo correspondente. Os ZIPs filhos não ficam
-soltos em `orgs/orbital` e o ZIP pai só é apagado após todas as conferências.
-Todos os ZIPs individuais e o ZIP pai também são incluídos no `Code.zip`.
+Uma entrada terminada em `.zip` habilita explicitamente um agregador da pasta
+correspondente:
 
-Para conferir os alvos inferidos:
+```text
+bots/dev-automation/apps.zip  -> apps.zip
+orgs/orbital.zip               -> orbital.zip
+Code.zip                       -> Code.zip
+```
+
+O agregador contém somente os ZIPs configurados abaixo daquela pasta. Se houver
+um agregador mais específico, ele representa o ramo inteiro e evita duplicação.
+Por exemplo, com `orgs/orbital.zip` ativo, um `Code.zip` também ativo inclui
+`orbital.zip`, e não repete todos os `orbital-*.zip` dentro dele. Se a linha
+`orgs/orbital.zip` não existir, `orbital.zip` não é criado nem reconhecido na
+importação. O mesmo vale para `Code.zip` e `apps.zip`.
+
+Para conferir exatamente os alvos ativos:
 
 ```bash
 auto-code-manager --list-backup-targets

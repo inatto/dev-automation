@@ -51,24 +51,27 @@ Enquanto estiver efetivamente pausado, o ícone mostra `P` e o status `Pausado`.
 O controle é cooperativo para nunca interromper no meio uma gravação/importação
 ou substituição de ZIP.
 
-Quando toda a rodada de backups termina com sucesso, incluindo a validação do
-`Code.zip`, o monitor toca `C:\\Windows\\Media\\ding.wav` uma única vez.
-Não toca após cada projeto individual.
+Quando toda a rodada de backups configurados termina com sucesso, o monitor pode
+tocar `C:\\Windows\\Media\\ding.wav` uma única vez. `Code.zip` só participa
+da rodada quando estiver explicitamente listado em `auto-code-manager.projects`.
 
-## Projetos e pastas agrupadoras
+## Projetos e agregadores explícitos
 
 O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
-`/home/daniel/Code`. As entradas continuam sendo usadas pelo backup e pelos
-comandos globais individuais dos projetos.
+`/home/daniel/Code` e é a única fonte da verdade para backup/importação.
 
-Quando houver níveis intermediários abaixo da categoria raiz, eles são inferidos
-automaticamente como agrupadores, sem nomes ou profundidades específicos. Por
-exemplo, `orgs/orbital/orbital-app` gera `orbital-app.zip` e também participa de
-`orbital.zip`; uma árvore mais profunda gera os agrupadores necessários em cada
-nível. Cada ZIP agrupador contém exclusivamente os ZIPs dos filhos ativos
-imediatos, nunca arquivos soltos ou pastas próprias do agrupador. Na importação,
-os ZIPs filhos são validados e extraídos recursivamente antes de o ZIP pai ser
-removido.
+- `bots/dev-automation` é um projeto e gera `dev-automation.zip`;
+- `bots/dev-automation/apps/exec-agent` é outro projeto e gera `exec-agent.zip`;
+- como o segundo está dentro do primeiro, `apps/exec-agent/` é excluído de
+  `dev-automation.zip` para não existir em dois backups;
+- `bots/dev-automation/apps.zip` habilita opcionalmente `apps.zip`;
+- `orgs/orbital.zip` habilita opcionalmente `orbital.zip`;
+- `Code.zip` habilita opcionalmente o agregador geral.
+
+Nenhum agregador é inferido. Ao remover/comentar uma entrada `.zip`, aquele ZIP
+deixa de ser gerenciado e é removido na limpeza de backups. Agregadores contêm
+somente ZIPs de alvos configurados abaixo da pasta e um agregador mais específico
+substitui seus descendentes no agregador acima, evitando duplicação.
 
 ## Lote de Downloads
 
@@ -90,7 +93,7 @@ cor fixa para facilitar a leitura:
 - Downloads/importação: azul;
 - SQL para ZIP: magenta;
 - limpeza de `Zone.Identifier`: amarelo;
-- backups e `Code.zip`: verde;
+- backups configurados: verde;
 - espera até o próximo ciclo: cinza;
 - erros: vermelho.
 

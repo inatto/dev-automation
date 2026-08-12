@@ -85,6 +85,8 @@ printf 'compartilhado\n' > "$CODE_ROOT/orgs/orbital/README-parent.txt"
 printf 'inst\n' > "$CODE_ROOT/orgs/inst-app/inst.txt"
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+orgs/orbital.zip
+Code.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
 orgs/orbital/orbital-fin
@@ -192,16 +194,17 @@ if [ "$(unzip -Z1 "$CODE_ROOT/orbital.zip" | wc -l)" -ne "${#MODULES[@]}" ]; the
   exit 1
 fi
 
-for archive in "${EXPECTED_ARCHIVES[@]}"; do
-  [ "$archive" = 'Code.zip' ] && continue
-  unzip -Z1 "$CODE_ROOT/Code.zip" | grep -Fxq "$archive"
-done
+code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
+[ "$code_entries" = $'inst-app.zip\norbital.zip' ] || {
+  printf 'FALHOU: Code.zip deve representar o ramo orbital uma única vez:\n%s\n' "$code_entries" >&2
+  exit 1
+}
 
 identified="$(CODE_ROOT="$CODE_ROOT" "$MANAGER" --identify-zip orbital.zip)"
-[ "$identified" = 'orgs/orbital' ] || {
+[ "$identified" = 'orgs/orbital.zip' ] || {
   printf 'FALHOU: orbital.zip identificado como %s\n' "$identified" >&2
   exit 1
 }
 
-printf 'OK: orbital.zip contém somente os cinco ZIPs filhos ativos e está dentro de Code.zip\n'
+printf 'OK: orbital.zip é explícito e Code.zip não duplica os módulos cobertos\n'
 printf 'OK: backup concluído sem aviso sonoro\n'

@@ -3,8 +3,8 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SCRIPT="$ROOT/scripts/auto-code-manager.sh"
 
-grep -Fq 'mapfile -t projects < <(backup_targets)' "$SCRIPT" || {
-  echo 'backup_all deve materializar backup_targets antes de iterar.' >&2
+grep -Fq 'mapfile -t projects < <(backup_order_targets)' "$SCRIPT" || {
+  echo 'backup_all deve materializar backup_order_targets antes de iterar.' >&2
   exit 1
 }
 grep -Fq 'for project in "${projects[@]}"; do' "$SCRIPT" || {

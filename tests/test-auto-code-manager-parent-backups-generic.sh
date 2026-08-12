@@ -33,6 +33,9 @@ printf 'nao incluir\n' > "$CODE_ROOT/orgs/acme/platform/README-platform.txt"
 printf 'nao incluir\n' > "$CODE_ROOT/orgs/acme/README-acme.txt"
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+orgs/acme/platform.zip
+orgs/acme.zip
+Code.zip
 orgs/acme/platform/api
 orgs/acme/platform/web
 orgs/acme/worker
@@ -63,4 +66,6 @@ acme_entries="$(unzip -Z1 "$CODE_ROOT/acme.zip" | sort)"
   exit 1
 }
 
-printf 'OK: agrupadores são inferidos por nível, sem nome hardcoded, e contêm somente ZIPs dos filhos ativos imediatos\n'
+code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
+[ "$code_entries" = 'acme.zip' ] || { printf 'FALHOU: Code.zip duplicou ramo acme: %s\n' "$code_entries" >&2; exit 1; }
+printf 'OK: agregadores explícitos funcionam em qualquer profundidade e não duplicam ramos\n'
