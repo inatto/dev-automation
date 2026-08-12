@@ -61,7 +61,7 @@ O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
 `/home/daniel/Code` e é a única fonte da verdade para backup/importação.
 
 - `bots/dev-automation` é um projeto e gera `dev-automation.zip`;
-- `bots/dev-automation/apps/exec-agent` é outro projeto e gera `exec-agent.zip`;
+- `bots/dev-automation/apps/exec-agent` é outro projeto e gera `dev-automation--exec-agent.zip`;
 - como o segundo está dentro do primeiro, `apps/exec-agent/` é excluído de
   `dev-automation.zip` para não existir em dois backups;
 - `bots/dev-automation/apps.zip` habilita opcionalmente `apps.zip`;
@@ -72,6 +72,37 @@ Nenhum agregador é inferido. Ao remover/comentar uma entrada `.zip`, aquele ZIP
 deixa de ser gerenciado e é removido na limpeza de backups. Agregadores contêm
 somente ZIPs de alvos configurados abaixo da pasta e um agregador mais específico
 substitui seus descendentes no agregador acima, evitando duplicação.
+
+## Backup inteligente por inotify
+
+O monitor usa `inotifywait` (`inotify-tools`) para detectar alterações reais nas
+raízes dos projetos. Ao iniciar, faz uma única baseline completa para cobrir
+alterações feitas enquanto o manager estava desligado. Depois da baseline, não
+existe mais backup completo periódico por relógio.
+
+Cada evento é atribuído ao projeto normal mais específico. Assim, uma alteração
+em `bots/dev-automation/apps/exec-agent` marca somente `exec-agent`; o pai
+`dev-automation` não é recompactado porque o subprojeto cadastrado já é excluído
+do ZIP do pai. Após `BACKUP_EVERY` segundos sem novas alterações (20s na
+configuração atual), o manager compacta apenas os projetos marcados e os
+agregadores explícitos que dependem deles.
+
+Diretórios do ignore global, como `.git/`, `.venv/`, `venv/` e
+`node_modules/`, são removidos da própria árvore de watches (`@path`), reduzindo
+uso de memória/watches e impedindo que atividade de dependências dispare backup.
+Novos diretórios ignorados criados durante a execução fazem o watcher se
+reconfigurar e podar a nova subárvore.
+
+`Zone.Identifier` é removido por evento dentro dos projetos monitorados. A
+varredura completa de segurança continua existindo, mas agora é rara
+(`ZONE_EVERY=300`) em vez de percorrer `/home/daniel/Code` a cada poucos
+segundos.
+
+Dependência no Ubuntu/WSL:
+
+```bash
+sudo apt-get install -y inotify-tools
+```
 
 ## Lote de Downloads
 

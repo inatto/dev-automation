@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-11-parent-command-names-v20"
+SCRIPT_VERSION="2026-08-11-inotify-smart-backup-v21"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -37,6 +37,15 @@ TASKBAR_STATUS_ENABLED=true
 DEV_STATUS_INVOKE_PS1="$PROJECT_ROOT/apps/dev-status/invoke.ps1"
 DEV_STATUS_EXE="$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe"
 PAUSE_CONTROL_ACTIVE=false
+WATCH_PID=""
+WATCH_FIFO=""
+WATCH_FD=""
+WATCH_LOG=""
+WATCH_LIST=""
+INOTIFY_DIR_EXCLUDE_REGEX=""
+WATCH_RELOAD_REQUESTED=false
+LAST_SOURCE_CHANGE=0
+declare -A DIRTY_BACKUP_TARGETS=()
 
 load_env() {
   if [ -f "$ENV_FILE" ]; then
@@ -1802,7 +1811,416 @@ backup_all() {
   return 0
 }
 
+
+watch_root_projects() {
+  local project parent project_dir
+  declare -A seen=()
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+
+    parent="$(registered_parent_project "$project")"
+    [ -z "$parent" ] || continue
+
+    project_dir="$(project_path "$project")"
+    if [ -z "${seen[$project_dir]+x}" ]; then
+      printf '%s\n' "$project_dir"
+      seen["$project_dir"]=1
+    fi
+  done < <(backup_targets)
+}
+
+build_inotify_exclude_regex() {
+  # Apenas regras de ARQUIVO são enviadas ao --exclude. Diretórios ignorados
+  # são removidos da própria árvore de watches com @path, reduzindo drasticamente
+  # o número de watches em .venv/node_modules/.git etc.
+  python3 - "$IGNORE_ZIP_FILE" <<'PY_INOTIFY_REGEX'
+import re
+import sys
+
+path = sys.argv[1]
+patterns = []
+
+
+def glob_to_ere(value: str) -> str:
+    out = []
+    for ch in value:
+        if ch == '*':
+            out.append('[^/]*')
+        elif ch == '?':
+            out.append('[^/]')
+        else:
+            out.append(re.escape(ch))
+    return ''.join(out)
+
+with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+    for raw in fh:
+        line = raw.rstrip('\r\n')
+        line = line.split('#', 1)[0].strip()
+        if not line or line.startswith('!'):
+            continue
+        if line.endswith('/'):
+            continue
+        if 'Zone.Identifier' in line:
+            # O evento precisa chegar para que o sidecar seja apagado sem scan.
+            continue
+        if line.startswith('/'):
+            line = line[1:]
+        if not line:
+            continue
+        patterns.append('(^|/)' + glob_to_ere(line) + '$')
+
+print('|'.join(patterns))
+PY_INOTIFY_REGEX
+}
+
+build_inotify_directory_regex() {
+  python3 - "$IGNORE_ZIP_FILE" <<'PY_INOTIFY_DIR_REGEX'
+import re
+import sys
+
+path = sys.argv[1]
+patterns = []
+
+
+def glob_to_ere(value: str) -> str:
+    out = []
+    for ch in value:
+        if ch == '*':
+            out.append('[^/]*')
+        elif ch == '?':
+            out.append('[^/]')
+        else:
+            out.append(re.escape(ch))
+    return ''.join(out)
+
+with open(path, 'r', encoding='utf-8', errors='replace') as fh:
+    for raw in fh:
+        line = raw.rstrip('\r\n')
+        line = line.split('#', 1)[0].strip()
+        if not line or line.startswith('!') or not line.endswith('/'):
+            continue
+        line = line[:-1]
+        if line.startswith('/'):
+            line = line[1:]
+        if not line:
+            continue
+        patterns.append('(^|/)' + glob_to_ere(line) + '(/|$)')
+
+print('|'.join(patterns))
+PY_INOTIFY_DIR_REGEX
+}
+
+watch_excluded_directories() {
+  local root="$1"
+  python3 - "$root" "$IGNORE_ZIP_FILE" <<'PY_WATCH_EXCLUDES'
+import fnmatch
+import os
+import sys
+
+root = os.path.abspath(sys.argv[1])
+ignore_file = sys.argv[2]
+basename_rules = []
+path_rules = []
+
+with open(ignore_file, 'r', encoding='utf-8', errors='replace') as fh:
+    for raw in fh:
+        line = raw.rstrip('\r\n')
+        line = line.split('#', 1)[0].strip()
+        if not line or line.startswith('!') or not line.endswith('/'):
+            continue
+        line = line[:-1].lstrip('/')
+        if not line:
+            continue
+        if '/' in line:
+            path_rules.append(line)
+        else:
+            basename_rules.append(line)
+
+for current, dirs, _files in os.walk(root, topdown=True, followlinks=False):
+    kept = []
+    for name in dirs:
+        full = os.path.join(current, name)
+        rel = os.path.relpath(full, root).replace(os.sep, '/')
+        ignored = any(fnmatch.fnmatchcase(name, pat) for pat in basename_rules)
+        if not ignored:
+            ignored = any(fnmatch.fnmatchcase(rel, pat) for pat in path_rules)
+        if ignored:
+            print(full)
+        else:
+            kept.append(name)
+    dirs[:] = kept
+PY_WATCH_EXCLUDES
+}
+
+event_owner_project() {
+  local event_path="$1"
+  local project project_dir
+  local best=""
+  local best_len=-1
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    project_dir="$(project_path "$project")"
+
+    if [ "$event_path" = "$project_dir" ] || [[ "$event_path" == "$project_dir/"* ]]; then
+      if [ "${#project_dir}" -gt "$best_len" ]; then
+        best="$project"
+        best_len="${#project_dir}"
+      fi
+    fi
+  done < <(backup_targets)
+
+  printf '%s\n' "$best"
+}
+
+mark_backup_dirty() {
+  local project="$1"
+  local event_path="${2:-}"
+
+  [ -n "$project" ] || return 0
+  if [ -z "${DIRTY_BACKUP_TARGETS[$project]+x}" ]; then
+    LOG_CONTEXT=backup log "Alteração detectada; backup pendente: $project"
+  fi
+  DIRTY_BACKUP_TARGETS["$project"]=1
+  LAST_SOURCE_CHANGE="$(date +%s)"
+
+  if [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
+    WATCH_RELOAD_REQUESTED=true
+  fi
+}
+
+dirty_backup_count() {
+  printf '%s\n' "${#DIRTY_BACKUP_TARGETS[@]}"
+}
+
+aggregate_depends_on_project() {
+  local aggregate="$1"
+  local project="$2"
+  local aggregate_rel project_rel
+
+  target_is_aggregate "$aggregate" || return 1
+  target_is_code_aggregate "$aggregate" && return 0
+
+  aggregate_rel="$(target_source_rel "$aggregate")"
+  project_rel="$(target_source_rel "$project")"
+  path_is_descendant "$project_rel" "$aggregate_rel"
+}
+
+backup_dirty_targets() {
+  local project aggregate target
+  local failed=0
+  local -a dirty_projects=()
+  local -a ordered=()
+  declare -A selected_aggregates=()
+
+  [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] || return 0
+
+  if ! validate_backup_ignore_zip; then
+    log "ERRO: backup inteligente cancelado antes de qualquer compactação."
+    return 1
+  fi
+
+  # Preserva a ordem declarada no .projects para os projetos normais.
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    [ -n "${DIRTY_BACKUP_TARGETS[$project]+x}" ] || continue
+    dirty_projects+=("$project")
+  done < <(backup_targets)
+
+  [ "${#dirty_projects[@]}" -gt 0 ] || {
+    DIRTY_BACKUP_TARGETS=()
+    return 0
+  }
+
+  for project in "${dirty_projects[@]}"; do
+    wait_if_paused
+    if ! backup_project "$project"; then
+      failed=1
+    fi
+  done
+
+  # Nunca reconstrói agregadores a partir de um filho cujo backup falhou.
+  if [ "$failed" -ne 0 ]; then
+    log "ERRO: projeto alterado falhou; agregadores dependentes não foram atualizados."
+    return 1
+  fi
+
+  while IFS= read -r aggregate || [ -n "$aggregate" ]; do
+    [ -n "$aggregate" ] || continue
+    target_is_aggregate "$aggregate" || continue
+    for project in "${dirty_projects[@]}"; do
+      if aggregate_depends_on_project "$aggregate" "$project"; then
+        selected_aggregates["$aggregate"]=1
+        break
+      fi
+    done
+  done < <(backup_targets)
+
+  mapfile -t ordered < <(backup_order_targets)
+  for target in "${ordered[@]}"; do
+    target_is_aggregate "$target" || continue
+    [ -n "${selected_aggregates[$target]+x}" ] || continue
+    wait_if_paused
+    if ! backup_project "$target"; then
+      failed=1
+      break
+    fi
+  done
+
+  if [ "$failed" -ne 0 ]; then
+    log "ERRO: agregador dependente falhou; projeto permanece marcado para nova tentativa."
+    return 1
+  fi
+
+  for project in "${dirty_projects[@]}"; do
+    unset 'DIRTY_BACKUP_TARGETS[$project]'
+  done
+
+  LAST_SOURCE_CHANGE=0
+  log "Backup inteligente concluído: ${#dirty_projects[@]} projeto(s) alterado(s) e somente agregadores dependentes."
+  return 0
+}
+
+stop_backup_watcher() {
+  if [ -n "${WATCH_PID:-}" ] && kill -0 "$WATCH_PID" 2>/dev/null; then
+    kill "$WATCH_PID" 2>/dev/null || true
+    wait "$WATCH_PID" 2>/dev/null || true
+  fi
+  WATCH_PID=""
+
+  if [ -n "${WATCH_FD:-}" ]; then
+    eval "exec ${WATCH_FD}>&-" 2>/dev/null || true
+    WATCH_FD=""
+  fi
+
+  [ -z "${WATCH_FIFO:-}" ] || rm -f -- "$WATCH_FIFO"
+  [ -z "${WATCH_LIST:-}" ] || rm -f -- "$WATCH_LIST"
+  WATCH_FIFO=""
+  WATCH_LIST=""
+}
+
+start_backup_watcher() {
+  local exclude_regex root excluded
+  local -a roots=()
+  local -a command=()
+
+  command -v inotifywait >/dev/null 2>&1 || {
+    log "ERRO: inotifywait não encontrado. Instale uma vez: sudo apt-get install -y inotify-tools"
+    return 1
+  }
+
+  mapfile -t roots < <(watch_root_projects)
+  if [ "${#roots[@]}" -eq 0 ]; then
+    log "ERRO: nenhum projeto normal configurado para monitorar."
+    return 1
+  fi
+
+  stop_backup_watcher
+  mkdir -p "$STATE_DIR"
+  WATCH_FIFO="$STATE_DIR/backup-events.fifo"
+  WATCH_LIST="$STATE_DIR/inotify-paths.txt"
+  WATCH_LOG="$STATE_DIR/inotifywait.log"
+  rm -f -- "$WATCH_FIFO" "$WATCH_LIST"
+  mkfifo "$WATCH_FIFO"
+  : > "$WATCH_LIST"
+
+  # Lista única para o inotifywait: inclui apenas as raízes reais e usa @path
+  # para não criar watches dentro de diretórios globalmente ignorados.
+  for root in "${roots[@]}"; do
+    printf '%s\n' "$root" >> "$WATCH_LIST"
+    while IFS= read -r excluded || [ -n "$excluded" ]; do
+      [ -n "$excluded" ] || continue
+      printf '@%s\n' "$excluded" >> "$WATCH_LIST"
+    done < <(watch_excluded_directories "$root")
+  done
+
+  # Abre o FIFO em leitura/escrita no processo principal para evitar bloqueio
+  # na inicialização do produtor antes do primeiro read.
+  exec {WATCH_FD}<>"$WATCH_FIFO"
+
+  exclude_regex="$(build_inotify_exclude_regex)"
+  INOTIFY_DIR_EXCLUDE_REGEX="$(build_inotify_directory_regex)"
+  command=(inotifywait -m -q -r -e close_write -e create -e delete -e move -e attrib --format '%w%f')
+  [ -z "$exclude_regex" ] || command+=(--exclude "$exclude_regex")
+  command+=(--fromfile "$WATCH_LIST")
+
+  : > "$WATCH_LOG"
+  "${command[@]}" >"$WATCH_FIFO" 2>>"$WATCH_LOG" &
+  WATCH_PID=$!
+
+  sleep 0.15
+  if ! kill -0 "$WATCH_PID" 2>/dev/null; then
+    log "ERRO: watcher inotify não iniciou. Log: $WATCH_LOG"
+    stop_backup_watcher
+    return 1
+  fi
+
+  log "Backup inteligente ativo via inotify: ${#roots[@]} raiz(es), diretórios ignorados fora da árvore de watches."
+  return 0
+}
+
+process_backup_watch_events() {
+  local event_path owner
+  local processed=0
+
+  [ -n "${WATCH_FD:-}" ] || return 0
+
+  # Drena todos os eventos já disponíveis sem bloquear o ciclo principal.
+  while IFS= read -r -t 0.01 -u "$WATCH_FD" event_path; do
+    [ -n "$event_path" ] || continue
+    processed=$((processed + 1))
+
+    if [[ "$event_path" == *":Zone.Identifier" ]]; then
+      rm -f -- "$event_path" 2>/dev/null || true
+      continue
+    fi
+
+    if [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
+      WATCH_RELOAD_REQUESTED=true
+    fi
+
+    if [ -n "${INOTIFY_DIR_EXCLUDE_REGEX:-}" ] && [[ "$event_path" =~ $INOTIFY_DIR_EXCLUDE_REGEX ]]; then
+      # Diretório ignorado criado depois da inicialização: não suja backup e
+      # reinicia o watcher para podar essa nova subárvore dos watches.
+      WATCH_RELOAD_REQUESTED=true
+      continue
+    fi
+
+    owner="$(event_owner_project "$event_path")"
+    [ -n "$owner" ] || continue
+    mark_backup_dirty "$owner" "$event_path"
+  done
+
+  return 0
+}
+
+reload_backup_watcher_if_needed() {
+  [ "$WATCH_RELOAD_REQUESTED" = true ] || return 0
+  WATCH_RELOAD_REQUESTED=false
+
+  if ! validate_projects; then
+    log "ERRO: configuração de projetos ficou inválida; monitor será encerrado antes de qualquer novo backup."
+    return 1
+  fi
+  if ! validate_backup_ignore_zip; then
+    log "ERRO: ignore global ficou inválido; monitor será encerrado antes de qualquer novo backup."
+    return 1
+  fi
+
+  clean_unmanaged_backup_zips || true
+  start_backup_watcher
+}
+
+backup_watcher_alive() {
+  [ -n "${WATCH_PID:-}" ] && kill -0 "$WATCH_PID" 2>/dev/null
+}
+
 stop() {
+  stop_backup_watcher
   if [ "$PAUSE_CONTROL_ACTIVE" = true ]; then
     rm -f -- "$PAUSE_FILE"
   fi
@@ -1945,53 +2363,108 @@ echo "Downloads:     $(downloads_dir)"
 echo "ENV:           $ENV_FILE"
 echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
 echo "Intervalo:     ${INTERVAL}s"
-echo "Backup cada:   ${BACKUP_EVERY}s"
-echo "Zone cada:     ${ZONE_EVERY}s"
+echo "Backup:        inotify + ${BACKUP_EVERY}s sem novas alterações"
+echo "Zone fallback: ${ZONE_EVERY}s"
 echo "Estável por:   ${STABLE_WAIT}s"
 line
 
 cycle=1
-last_backup=0
 last_zone=0
 initialize_pause_control
-taskbar_status idle "Monitorando"
+
+if ! start_backup_watcher; then
+  taskbar_status error "Inotify indisponível"
+  echo "ERRO: backup inteligente não pôde ser iniciado." >&2
+  echo "Instale uma vez: sudo apt-get install -y inotify-tools" >&2
+  exit 1
+fi
+
+# Baseline única por inicialização: garante que mudanças feitas enquanto o
+# manager estava parado também entrem no backup. Depois disso não há mais
+# backup completo por relógio; somente eventos inotify disparam compactação.
+taskbar_status backup "Baseline inicial"
+stage backup start "BACKUP BASELINE — INÍCIO" "Sincroniza os ZIPs uma única vez ao iniciar; depois o backup passa a ser dirigido exclusivamente por alterações detectadas via inotify."
+LOG_CONTEXT=backup clean_unmanaged_backup_zips
+if LOG_CONTEXT=backup backup_all; then
+  stage backup end "BACKUP BASELINE — CONCLUÍDO"
+else
+  taskbar_status error "Baseline falhou"
+  LOG_CONTEXT=error log "ERRO: baseline inicial falhou; monitor encerrado para não operar com backup inconsistente."
+  stop_backup_watcher
+  exit 1
+fi
+
+# Remove sidecars antigos uma vez. Novos Zone.Identifier dentro dos projetos
+# monitorados são removidos imediatamente pelo próprio fluxo inotify.
+run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Remove resíduos antigos uma vez; novos sidecars são tratados por evento." clean_zone || true
+last_zone="$(date +%s)"
+
+# Se houve edição durante a baseline, os eventos ficaram na fila e não são
+# descartados: haverá um backup incremental após o período de silêncio.
+process_backup_watch_events
+
+taskbar_status idle "Monitorando alterações"
 
 while true; do
   wait_if_paused
   now="$(date +%s)"
 
-  stage cycle start "CICLO #$cycle — INÍCIO" "Executa, nesta ordem: importar ZIPs, compactar SQLs, limpar Zone.Identifier quando devido e gerar backups quando devidos."
+  stage cycle start "CICLO #$cycle — INÍCIO" "Importa ZIPs/SQLs e processa somente alterações reais detectadas via inotify para backup."
+
+  if ! backup_watcher_alive; then
+    LOG_CONTEXT=error log "ERRO: watcher inotify encerrou inesperadamente; tentando reiniciar."
+    if ! start_backup_watcher; then
+      taskbar_status error "Watcher inotify falhou"
+      exit 1
+    fi
+  fi
+
+  process_backup_watch_events
+  if ! reload_backup_watcher_if_needed; then
+    taskbar_status error "Configuração inválida"
+    stop_backup_watcher
+    exit 1
+  fi
 
   run_stage downloads "DOWNLOADS / IMPORTAÇÃO" "Procura ZIPs em Downloads, identifica o projeto correspondente e importa cada pacote com segurança." import_downloads || true
   run_stage sql "SQL → ZIP" "Procura arquivos .sql nas pastas configuradas, cria o ZIP YYYYMMDD-HHMM.zip, valida e só então apaga os SQLs incluídos." zip_configured_sql_folders || true
 
-  if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
-    run_stage zone "LIMPEZA ZONE.IDENTIFIER" "Remove arquivos residuais :Zone.Identifier existentes dentro de $CODE_ROOT." clean_zone || true
-    last_zone="$now"
-  else
-    stage zone skip "ZONE.IDENTIFIER — AINDA NÃO VENCEU" "Nenhuma limpeza agora; será executada quando completar o intervalo de ${ZONE_EVERY}s."
+  # Captura imediatamente alterações causadas por importações ou geração de
+  # SQL ZIP durante este mesmo ciclo.
+  process_backup_watch_events
+  if ! reload_backup_watcher_if_needed; then
+    taskbar_status error "Configuração inválida"
+    stop_backup_watcher
+    exit 1
   fi
 
-  if [ $((now - last_backup)) -ge "$BACKUP_EVERY" ]; then
-    wait_if_paused
-    taskbar_status backup "Gerando backups"
-    stage backup start "BACKUP — INÍCIO" "Gera somente os ZIPs explicitamente configurados em auto-code-manager.projects."
-    LOG_CONTEXT=backup clean_unmanaged_backup_zips
-    if LOG_CONTEXT=backup backup_all; then
-      LOG_CONTEXT=backup log "Ciclo de backup concluído com os alvos configurados."
-      stage backup end "BACKUP — CONCLUÍDO"
+  if [ $((now - last_zone)) -ge "$ZONE_EVERY" ]; then
+    run_stage zone "LIMPEZA ZONE.IDENTIFIER — FALLBACK" "Varredura rara de segurança fora do fluxo normal por evento." clean_zone || true
+    last_zone="$now"
+  fi
+
+  if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ]; then
+    now="$(date +%s)"
+    if [ "$LAST_SOURCE_CHANGE" -gt 0 ] && [ $((now - LAST_SOURCE_CHANGE)) -ge "$BACKUP_EVERY" ]; then
+      wait_if_paused
+      taskbar_status backup "Backup inteligente"
+      stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente os projetos alterados e os agregadores que dependem deles."
+      if LOG_CONTEXT=backup backup_dirty_targets; then
+        stage backup end "BACKUP INTELIGENTE — CONCLUÍDO"
+      else
+        taskbar_status error "Backup inteligente falhou"
+        LOG_CONTEXT=error log "ERRO: backup inteligente falhou; alvos permanecem pendentes para nova tentativa."
+        LAST_SOURCE_CHANGE="$(date +%s)"
+      fi
     else
-      taskbar_status error "Backup falhou"
-      LOG_CONTEXT=error log "ERRO: ciclo de backup terminou com falha em um ou mais alvos configurados."
+      remaining=$((BACKUP_EVERY - (now - LAST_SOURCE_CHANGE)))
+      [ "$remaining" -ge 0 ] || remaining=0
+      LOG_CONTEXT=wait log "Backup pendente: ${#DIRTY_BACKUP_TARGETS[@]} projeto(s); aguardando ${remaining}s sem novas alterações."
     fi
-    last_backup="$now"
-  else
-    stage wait skip "BACKUP — AINDA NÃO VENCEU" "Nenhum backup agora; será executado quando completar o intervalo de ${BACKUP_EVERY}s."
   fi
 
   stage cycle end "CICLO #$cycle — CONCLUÍDO"
-  taskbar_status idle "Monitorando"
-  LOG_CONTEXT=wait log "Próximo ciclo em ${INTERVAL}s."
+  taskbar_status idle "Monitorando alterações"
 
   cycle=$((cycle + 1))
   sleep_with_pause
