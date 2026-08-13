@@ -306,6 +306,13 @@ import_downloads() {
     else
       failed=$((failed + 1))
       log "Falha ao importar: $(basename -- "$zip_file")"
+      # Falha de ZIP reconhecido é terminal para esta entrada da fila. Manter o
+      # arquivo em Downloads faria o inotify reprocessar o mesmo erro em loop.
+      if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
+        log "ZIP com falha apagado para evitar reprocessamento: $zip_file"
+      else
+        log "ERRO: ZIP com falha não pôde ser apagado: $zip_file"
+      fi
     fi
   done
 

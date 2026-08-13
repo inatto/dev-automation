@@ -1,10 +1,13 @@
+#Code.zip
 #bots/importer
 #bots/int-app
+#orgs/orbital.zip
+#orgs/orbital/orbital-ai
 #orgs/orbital/orbital-crm
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
+#orgs/sind-vault
 #social/murm-app
-Code.zip
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 bots/general-crawler
@@ -13,8 +16,6 @@ infra/amazon-infra/apps/monitor-app
 infra/oracle-infra
 orgs/asaclub-app
 orgs/inst-app
-orgs/orbital.zip
-orgs/orbital/orbital-ai
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
 orgs/orbital/orbital-content
@@ -24,6 +25,5 @@ orgs/orbital/orbital-legal
 orgs/orbital/orbital-mail
 orgs/orbital/orbital-reports
 orgs/orbital/orbital-ui
-orgs/sind-vault
 orgs/site-sinproprev-v2
 orgs/station-app

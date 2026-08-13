@@ -36,6 +36,7 @@ commands=(
   desktops
   chromes
   phpstorms
+  pycharms
   phpstorm-dev
   local-nginx
   dev-status

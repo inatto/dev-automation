@@ -75,4 +75,19 @@ grep -Fq 'LOTE [1/2]:' "$LOG_FILE"
 grep -Fq 'LOTE [2/2]:' "$LOG_FILE"
 grep -Fq 'LOTE DE DOWNLOADS CONCLUÍDO: 2 sucesso(s), 0 falha(s), 2 processado(s).' "$LOG_FILE"
 
-printf 'OK: todos os ZIPs de Downloads são processados em sequência na mesma rodada\n'
+
+# Falha de um ZIP reconhecido deve continuar retornando erro, mas o arquivo
+# precisa sair de Downloads para não ser reprocessado indefinidamente.
+printf 'isto nao e um zip\n' > "$DOWNLOADS_DIR/alpha-app-corrompido.zip"
+if PATH="$FAKE_BIN:$PATH" \
+CODE_ROOT="$CODE_ROOT" \
+DOWNLOADS_DIR="$DOWNLOADS_DIR" \
+  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once >> "$LOG_FILE" 2>&1; then
+  echo 'ERRO: lote com ZIP corrompido deveria retornar falha' >&2
+  exit 1
+fi
+[ ! -e "$DOWNLOADS_DIR/alpha-app-corrompido.zip" ]
+grep -Fq 'ERRO: ZIP inválido ou corrompido. O ZIP foi mantido.' "$LOG_FILE"
+grep -Fq 'ZIP com falha apagado para evitar reprocessamento:' "$LOG_FILE"
+
+printf 'OK: todos os ZIPs de Downloads são processados em sequência e falhas saem da fila sem loop\n'
