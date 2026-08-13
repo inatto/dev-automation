@@ -2,16 +2,17 @@
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SCRIPT="$ROOT/scripts/auto-code-manager.sh"
+SOURCES=("$SCRIPT" "$ROOT"/scripts/dev-manager/*.sh)
 
-grep -Fq 'mapfile -t projects < <(backup_order_targets)' "$SCRIPT" || {
+grep -Fq 'mapfile -t projects < <(backup_order_targets)' "${SOURCES[@]}" || {
   echo 'backup_all deve materializar backup_order_targets antes de iterar.' >&2
   exit 1
 }
-grep -Fq 'for project in "${projects[@]}"; do' "$SCRIPT" || {
+grep -Fq 'for project in "${projects[@]}"; do' "${SOURCES[@]}" || {
   echo 'backup_all deve iterar sobre array materializado.' >&2
   exit 1
 }
-grep -Fq -- '-File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true' "$SCRIPT" || {
+grep -Fq -- '-File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true' "${SOURCES[@]}" || {
   echo 'taskbar_status deve isolar stdin do PowerShell.' >&2
   exit 1
 }
