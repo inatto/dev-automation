@@ -132,19 +132,19 @@ DOWNLOADS_DIR="$DOWNLOADS_DIR" \
 AUTO_CODE_STATE_DIR="$STATE_DIR" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
 
-# Os envs reais permanecem intactos, inclusive os que tiveram versão externa alterada.
+# Config alterado com par local é reconciliado de volta no arquivo real:
+# aceita PORT novo, preserva a senha real e remove o .external transitório.
 grep -Fxq 'DB_PASSWORD=senha-local-real' "$DEST/apps/api/config/local/database.env"
-grep -Fxq 'PORT=8100' "$DEST/apps/api/config/remote/database.env"
+grep -Fxq 'PORT=8110' "$DEST/apps/api/config/remote/database.env"
 grep -Fxq 'DB_PASSWORD=senha-remota-real' "$DEST/apps/api/config/remote/database.env"
 grep -Fxq 'DB_PASSWORD=senha-producao-real' "$DEST/apps/api/config/production/database.env"
+[ ! -e "$DEST/apps/api/config/remote/database.env.external" ]
 
 # Env igual ao enviado não gera lixo para revisar.
 [ ! -e "$DEST/apps/api/config/local/database.env.external" ]
 [ ! -e "$DEST/apps/api/config/production/database.env.external" ]
 
-# Somente env alterado/novo vira .external.
-grep -Fxq 'PORT=8110' "$DEST/apps/api/config/remote/database.env.external"
-grep -Fxq 'DB_PASSWORD=********' "$DEST/apps/api/config/remote/database.env.external"
+# Sem par real, o .external continua explícito; nunca inventa segredo.
 grep -Fxq 'NEW_URL=http://127.0.0.1:9999' "$DEST/apps/api/config/local/new.env.external"
 [ ! -e "$DEST/apps/api/config/local/new.env" ]
 grep -Fxq 'PUBLIC_API_URL=/api-nova' "$DEST/apps/api/config/local/app.env.external"
@@ -162,5 +162,6 @@ grep -Fq 'ENV EXTERNAL: apps/api/config/remote/database.env -> apps/api/config/r
 grep -Fq 'ENV EXTERNAL: apps/api/config/local/new.env -> apps/api/config/local/new.env.external' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/local/app.env.external -> apps/api/config/local/app.env.external' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/local/legacy.env.external.external -> apps/api/config/local/legacy.env.external' "$LOG_FILE"
+grep -Fq 'ENV EXTERNAL RECONCILIADO: 1 merge(s) com segredo local preservado; 3 sem par mantido(s) como .external.' "$LOG_FILE"
 
-printf 'OK: env igual é descartado; alterado/novo vira .external; .external é idempotente; env real permanece intacto\n'
+printf 'OK: config protegido faz merge reverso seguro; segredo local é preservado e sem par continua .external\n'

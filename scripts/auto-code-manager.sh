@@ -5,7 +5,23 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-12-light-monitor-v27-clipper"
+SCRIPT_VERSION="2026-08-12-light-monitor-v30-ncurses-safe-reconcile"
+
+# TUI principal: ncurses real (ACS/terminfo), como os TUIs DOS/Clipper clássicos.
+# O Bash continua sendo o motor; a camada ncurses apenas desenha a tela e
+# captura sua saída. One-shots e execuções sem TTY continuam sem wrapper.
+maybe_exec_ncurses_tui() {
+  [ -z "${DEV_MANAGER_TUI_CHILD:-}" ] || return 0
+  [ "${AUTO_CODE_TUI:-clipper}" != "off" ] || return 0
+  [ "$#" -eq 0 ] || return 0
+  [ -t 0 ] && [ -t 1 ] || return 0
+  [ -f "$SCRIPT_DIR/dev-manager-tui.py" ] || return 0
+  command -v python3 >/dev/null 2>&1 || return 0
+  python3 -c 'import curses' >/dev/null 2>&1 || return 0
+  exec python3 "$SCRIPT_DIR/dev-manager-tui.py" "$SCRIPT_PATH"
+}
+
+maybe_exec_ncurses_tui "$@"
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
@@ -1354,8 +1370,8 @@ notify_running_project_update() {
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
-  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file
-  local total_files checked_files rel destination update_scope="none"
+  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest
+  local total_files checked_files rel destination update_scope="none" removal_count=0
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
   local -A nested_seen=() expected_targets=()
@@ -1496,6 +1512,7 @@ import_one_zip() {
 
   filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${archive_name}-XXXXXX")"
   unzip_filter_file="$(mktemp "/tmp/auto-code-unzip-filter-${archive_name}-XXXXXX")"
+  removal_manifest="$(mktemp "/tmp/auto-code-remover-${archive_name}-XXXXXX")"
   make_project_rsync_filter \
     "$IGNORE_UNZIP_FILE" \
     "$project_dir" \
@@ -1512,21 +1529,37 @@ import_one_zip() {
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
     log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
 
   if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
     log "ERRO: falha ao comparar configs protegidos. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
 
+  # Reconstitui configs protegidos no staging antes de tocar no projeto. Onde o
+  # backup trouxe ********, conserva o segredo real que já existe localmente.
+  if ! merge_import_external_configs "$project_dir" "$filtered_dir"; then
+    log "ERRO: merge de .external falhou. O ZIP foi mantido e o destino não recebeu o staging."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+    return 1
+  fi
+
+  removal_count="$(find "$filtered_dir" -type f -name '*.remover' -printf '.' 2>/dev/null | wc -c)"
+  if ! prepare_removal_markers "$filtered_dir" "$project_dir" "$removal_manifest"; then
+    log "ERRO: validação de .remover falhou. O ZIP foi mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+    return 1
+  fi
+  [ "$removal_count" -eq 0 ] || log "Marcadores .remover validados: $removal_count; serão aplicados só após confirmar os arquivos novos."
+
   source_dir="$filtered_dir"
   total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
-  if [ "$total_files" -eq 0 ]; then
-    log "ERRO: nenhum arquivo foi extraído. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+  if [ "$total_files" -eq 0 ] && [ "$removal_count" -eq 0 ]; then
+    log "ERRO: nenhum arquivo nem marcador .remover foi extraído. O ZIP foi mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
 
@@ -1534,9 +1567,9 @@ import_one_zip() {
   find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
 
   log "Copiando arquivos diretos para o destino..."
-  if ! rsync -a --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
+  if ! rsync -a --checksum --delay-updates --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
     log "ERRO: falha ao copiar. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
 
@@ -1547,13 +1580,13 @@ import_one_zip() {
     if [ ! -f "$destination" ]; then
       log "ERRO: arquivo não apareceu no destino: $destination"
       log "ZIP mantido: $zip_file"
-      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
       return 1
     fi
     if ! cmp -s -- "$source_dir/$rel" "$destination"; then
       log "ERRO: arquivo no destino está diferente: $destination"
       log "ZIP mantido: $zip_file"
-      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
       return 1
     fi
     checked_files=$((checked_files + 1))
@@ -1562,13 +1595,24 @@ import_one_zip() {
 
   if [ "$checked_files" -ne "$total_files" ]; then
     log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+    return 1
+  fi
+
+  if ! apply_removal_manifest "$project_dir" "$removal_manifest"; then
+    log "ERRO: falha ao aplicar .remover; ZIP mantido para nova tentativa."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
 
   update_scope="$(project_update_scope "$source_dir")"
+  # Remoção pode atingir API/Web sem haver arquivo correspondente no staging;
+  # por segurança, qualquer .remover concluído sinaliza ambos os runtimes.
+  if [ "$removal_count" -gt 0 ]; then
+    update_scope="both"
+  fi
   log "Escopo de runtime detectado: $update_scope"
-  rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file"
+  rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
   log "Apagando ZIP original somente após todas as confirmações..."
   if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
     log "ERRO: arquivos importados, mas o ZIP não foi apagado: $zip_file"
@@ -2052,6 +2096,352 @@ canonical_external_relpath() {
   printf '%s.external\n' "$rel"
 }
 
+valid_import_relative_path() {
+  local rel="$1"
+  case "$rel" in
+    ""|/*|..|../*|*/../*|*/..) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+prepare_removal_markers() {
+  local source_root="$1"
+  local project_dir="$2"
+  local manifest="$3"
+  local marker rel target_rel parent part
+  local -a parts=()
+
+  : > "$manifest"
+
+  while IFS= read -r -d '' marker; do
+    rel="${marker#"$source_root"/}"
+    target_rel="${rel%.remover}"
+
+    if [ "$target_rel" = "$rel" ] || ! valid_import_relative_path "$target_rel"; then
+      log "ERRO: marcador .remover inválido: $rel"
+      return 1
+    fi
+
+    # Nunca aceite atravessar um symlink de diretório no destino. Assim um
+    # marcador vindo do ZIP não consegue remover algo fora do projeto.
+    IFS='/' read -r -a parts <<< "$target_rel"
+    parent="$project_dir"
+    if [ "${#parts[@]}" -gt 1 ]; then
+      for part in "${parts[@]:0:${#parts[@]}-1}"; do
+        parent="$parent/$part"
+        if [ -L "$parent" ]; then
+          log "ERRO: .remover atravessaria symlink de diretório: $target_rel"
+          return 1
+        fi
+      done
+    fi
+
+    # Um ZIP não pode simultaneamente entregar e mandar apagar o mesmo alvo.
+    if [ -e "$source_root/$target_rel" ] || [ -L "$source_root/$target_rel" ]; then
+      log "ERRO: ZIP contém arquivo e .remover para o mesmo alvo: $target_rel"
+      return 1
+    fi
+
+    printf '%s\0' "$target_rel" >> "$manifest"
+    rm -f -- "$marker" || return 1
+    log "REMOVER AGENDADO: $target_rel"
+  done < <(find "$source_root" -type f -name '*.remover' -print0 2>/dev/null)
+
+  return 0
+}
+
+apply_removal_manifest() {
+  local project_dir="$1"
+  local manifest="$2"
+  local rel target marker quarantine slot
+  local index=0 rollback_failed=0 i
+  local -a moved_rels=() moved_slots=()
+
+  [ -s "$manifest" ] || return 0
+
+  # A remoção é feita por rename para uma quarentena temporária dentro do
+  # próprio projeto (mesmo filesystem). Se qualquer rename falhar, tudo que já
+  # saiu volta para o lugar antes de a importação ser considerada falha.
+  quarantine="$(mktemp -d "$project_dir/.dev-auto-removal-XXXXXX")" || {
+    log "ERRO: não foi possível criar quarentena transacional para .remover."
+    return 1
+  }
+
+  while IFS= read -r -d '' rel; do
+    valid_import_relative_path "$rel" || {
+      log "ERRO: remoção recusada por caminho inválido: $rel"
+      rollback_failed=1
+      break
+    }
+
+    target="$project_dir/$rel"
+    marker="$project_dir/$rel.remover"
+
+    if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+      rm -f -- "$marker" 2>/dev/null || true
+      log "REMOVIDO: $rel (alvo já ausente)"
+      continue
+    fi
+
+    index=$((index + 1))
+    slot="$quarantine/$index"
+    if ! mv -- "$target" "$slot"; then
+      log "ERRO: não foi possível mover alvo obsoleto para quarentena: $rel"
+      rollback_failed=1
+      break
+    fi
+    moved_rels+=("$rel")
+    moved_slots+=("$slot")
+  done < "$manifest"
+
+  if [ "$rollback_failed" -ne 0 ]; then
+    for ((i=${#moved_rels[@]}-1; i>=0; i--)); do
+      rel="${moved_rels[$i]}"
+      slot="${moved_slots[$i]}"
+      target="$project_dir/$rel"
+      mkdir -p -- "$(dirname -- "$target")" || true
+      if [ -e "$target" ] || [ -L "$target" ] || ! mv -- "$slot" "$target"; then
+        log "ERRO: rollback da remoção não conseguiu restaurar: $rel"
+      else
+        log "ROLLBACK REMOVER: $rel restaurado"
+      fi
+    done
+    rm -rf -- "$quarantine" 2>/dev/null || true
+    return 1
+  fi
+
+  # Confirma que todos os alvos saíram do namespace do projeto antes de
+  # destruir a quarentena. Até este ponto ainda seria possível restaurá-los.
+  while IFS= read -r -d '' rel; do
+    target="$project_dir/$rel"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      log "ERRO: alvo .remover ainda existe após quarentena: $rel"
+      for ((i=${#moved_rels[@]}-1; i>=0; i--)); do
+        rel="${moved_rels[$i]}"
+        slot="${moved_slots[$i]}"
+        target="$project_dir/$rel"
+        mkdir -p -- "$(dirname -- "$target")" || true
+        [ -e "$target" ] || [ -L "$target" ] || mv -- "$slot" "$target" 2>/dev/null || true
+      done
+      rm -rf -- "$quarantine" 2>/dev/null || true
+      return 1
+    fi
+  done < "$manifest"
+
+  for rel in "${moved_rels[@]}"; do
+    rm -f -- "$project_dir/$rel.remover" 2>/dev/null || true
+    log "REMOVIDO: $rel"
+  done
+
+  if ! rm -rf -- "$quarantine"; then
+    # O alvo já foi removido atomicamente do projeto. Falha de limpeza da
+    # quarentena não reintroduz arquivo antigo nem invalida a importação.
+    log "ERRO: quarentena de .remover não pôde ser limpa completamente: $quarantine"
+    return 1
+  fi
+  return 0
+}
+
+merge_import_external_configs() {
+  local project_dir="$1"
+  local source_root="$2"
+  local result
+
+  if ! result="$(python3 - "$project_dir" "$source_root" <<'PY_EXTERNAL_MERGE'
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+source_root = Path(sys.argv[2])
+placeholder = "********"
+assignment = re.compile(
+    r"^(?P<prefix>\s*(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_.-]*)\s*=\s*)(?P<value>.*?)(?P<ending>\r?\n?)$"
+)
+url_password = re.compile(
+    r"(?P<prefix>\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)(?P<password>[^\s@]*)(?P<suffix>@)"
+)
+
+
+def protected(rel: str) -> bool:
+    parts = rel.split("/")
+    for i in range(len(parts) - 2):
+        if parts[i] == "config" and parts[i + 1] in {"local", "remote", "production"}:
+            return True
+    return False
+
+
+def target_rel_for_external(rel: str) -> str:
+    while rel.endswith(".external"):
+        rel = rel[: -len(".external")]
+    return rel
+
+
+def decode_text(path: Path) -> str:
+    raw = path.read_bytes()
+    if b"\x00" in raw:
+        raise ValueError(f"arquivo binário não pode ser reconciliado: {path}")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"arquivo não UTF-8 não pode ser reconciliado: {path}") from exc
+
+
+def assignments(text: str):
+    values = {}
+    for line in text.splitlines(keepends=True):
+        m = assignment.match(line)
+        if m:
+            values[m.group("key")] = m.group("value")
+    return values
+
+
+def local_url_password(value: str):
+    m = url_password.search(value)
+    return m.group("password") if m else None
+
+
+def merge_value(incoming: str, local: str, key: str) -> str:
+    if placeholder not in incoming:
+        return incoming
+
+    # Caso normal de segredo inteiro mascarado (com ou sem aspas): mantenha o
+    # valor local completo, inclusive quoting/comentário inline do valor.
+    core = incoming.strip()
+    unquoted = core
+    if len(core) >= 2 and core[0] == core[-1] and core[0] in {"'", '"'}:
+        unquoted = core[1:-1]
+    if unquoted == placeholder:
+        return local
+
+    # URLs podem ter apenas a senha mascarada. Nesse caso preservamos somente
+    # a senha local e aceitamos host/path/query novos vindos no ZIP.
+    if f":{placeholder}@" in incoming:
+        password = local_url_password(local)
+        if password is not None:
+            merged = incoming.replace(f":{placeholder}@", f":{password}@")
+            if placeholder not in merged:
+                return merged
+
+    # Qualquer outra forma mascarada é conservadora: se há valor local para a
+    # mesma chave, preserva-o inteiro para nunca substituir segredo por *****.
+    if local is not None:
+        return local
+
+    raise ValueError(f"segredo mascarado sem valor local para a chave {key}")
+
+
+merged_count = 0
+unpaired_count = 0
+externals = sorted(
+    (p for p in source_root.rglob("*") if p.is_file() and p.name.endswith(".external")),
+    key=lambda p: str(p),
+)
+
+for external in externals:
+    rel = external.relative_to(source_root).as_posix()
+    target_rel = target_rel_for_external(rel)
+
+    # Só reconciliamos os .external que pertencem ao contrato de config
+    # protegido. Outros .external legítimos continuam intocados.
+    if not protected(target_rel):
+        continue
+
+    if not target_rel or target_rel.startswith("/") or ".." in Path(target_rel).parts:
+        raise ValueError(f"caminho .external inválido: {rel}")
+
+    staged_target = source_root / target_rel
+    local_target = project_root / target_rel
+
+    if staged_target.exists() or staged_target.is_symlink():
+        raise ValueError(f"ZIP contém config normal e .external para o mesmo alvo: {target_rel}")
+
+    incoming_text = decode_text(external)
+    mode = stat.S_IMODE(external.stat().st_mode)
+
+    if local_target.exists() and local_target.is_file():
+        local_text = decode_text(local_target)
+        local_values = assignments(local_text)
+        output = []
+
+        for line in incoming_text.splitlines(keepends=True):
+            m = assignment.match(line)
+            if not m:
+                if placeholder in line:
+                    raise ValueError(
+                        f"placeholder fora de KEY=VALUE em {rel}; merge automático recusado"
+                    )
+                output.append(line)
+                continue
+
+            key = m.group("key")
+            incoming_value = m.group("value")
+            if placeholder in incoming_value:
+                if key not in local_values:
+                    raise ValueError(
+                        f"segredo mascarado sem correspondente local: {target_rel}:{key}"
+                    )
+                value = merge_value(incoming_value, local_values[key], key)
+            else:
+                value = incoming_value
+            output.append(f"{m.group('prefix')}{value}{m.group('ending')}")
+
+        # Merge real, não substituição cega: o arquivo local é também a
+        # fonte de chaves que não vieram no .external. Isso evita perder
+        # segredos/configs locais quando o ZIP traz apenas um subconjunto.
+        incoming_keys = set()
+        for line in incoming_text.splitlines(keepends=True):
+            m = assignment.match(line)
+            if m:
+                incoming_keys.add(m.group("key"))
+
+        local_only = []
+        for line in local_text.splitlines(keepends=True):
+            m = assignment.match(line)
+            if m and m.group("key") not in incoming_keys:
+                local_only.append(line)
+
+        if local_only:
+            if output and output[-1] and not output[-1].endswith(("\n", "\r")):
+                output[-1] += "\n"
+            output.extend(local_only)
+
+        merged_text = "".join(output)
+        if placeholder in merged_text:
+            raise ValueError(f"placeholder de segredo permaneceu após merge: {target_rel}")
+        merged_count += 1
+    else:
+        # Sem o par real não existe segredo local para recuperar. Mantém o
+        # .external como pendência explícita em vez de adivinhar ou bloquear
+        # todo o ZIP. Ele será copiado normalmente e poderá ser resolvido depois.
+        unpaired_count += 1
+        continue
+
+    staged_target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = staged_target.with_name(staged_target.name + f".merge-tmp-{os.getpid()}")
+    tmp.write_text(merged_text, encoding="utf-8", newline="")
+    os.chmod(tmp, mode)
+    os.replace(tmp, staged_target)
+    external.unlink()
+
+print(f"{merged_count}:{unpaired_count}")
+PY_EXTERNAL_MERGE
+)"; then
+    log "ERRO: falha ao reconciliar configs .external; importação cancelada antes do rsync."
+    return 1
+  fi
+
+  local merged="${result%%:*}"
+  local unpaired="${result##*:}"
+  if [ "${merged:-0}" -gt 0 ] || [ "${unpaired:-0}" -gt 0 ]; then
+    log "ENV EXTERNAL RECONCILIADO: ${merged:-0} merge(s) com segredo local preservado; ${unpaired:-0} sem par mantido(s) como .external."
+  fi
+
+  return 0
+}
+
 materialize_changed_protected_configs() {
   local project="$1"
   local source_root="$2"
@@ -2140,6 +2530,14 @@ backup_project() {
       "auto-code-manager.ignore-zip" \
       "$filter_file"
     append_registered_subproject_excludes "$project" "$filter_file"
+
+    # .remover é instrução transitória recebida em ZIP. Nunca volta para o
+    # backup/cache do projeto, mesmo que uma regra específica tente incluí-la.
+    {
+      printf '%s\n' '- *.remover' '- **/*.remover' '- .dev-auto-removal-*' '- **/.dev-auto-removal-*'
+      cat "$filter_file"
+    } > "$filter_file.remover-tmp"
+    mv -f -- "$filter_file.remover-tmp" "$filter_file"
 
     if ! rsync -a --filter="merge $filter_file" "$project_dir/" "$temp_dir/"; then
       log "ERRO no rsync do projeto: $project"
@@ -2307,6 +2705,7 @@ light_scan_states() {
 
   python3 - "$LIGHT_WATCH_PLAN" "$IGNORE_ZIP_FILE" <<'PY_LIGHT_SCAN'
 import fnmatch
+import hashlib
 import os
 import sys
 
@@ -2328,37 +2727,47 @@ with open(plan_file, 'r', encoding='utf-8', errors='replace') as fh:
             excluded.setdefault(project, set()).add(path)
 
 file_rules = []
+dir_rules = []
 try:
     with open(ignore_file, 'r', encoding='utf-8', errors='replace') as fh:
         for raw in fh:
             line = raw.rstrip('\r\n')
             line = line.split('#', 1)[0].strip()
-            if not line or line.endswith('/'):
+            if not line:
                 continue
             negated = line.startswith('!')
             if negated:
                 line = line[1:]
             line = line.lstrip('/')
-            if line:
+            if not line:
+                continue
+            if line.endswith('/'):
+                line = line[:-1]
+                if line:
+                    dir_rules.append((negated, line))
+            else:
                 file_rules.append((negated, line))
 except OSError:
     pass
 
-def ignored_file(rel, name):
+
+def match_rule(rel, name, pattern):
+    if '/' in pattern:
+        return fnmatch.fnmatchcase(rel, pattern)
+    return fnmatch.fnmatchcase(name, pattern)
+
+
+def ignored_by_rules(rel, name, rules):
     ignored = False
-    for negated, pattern in file_rules:
-        if '/' in pattern:
-            match = fnmatch.fnmatchcase(rel, pattern)
-        else:
-            match = fnmatch.fnmatchcase(name, pattern)
-        if match:
+    for negated, pattern in rules:
+        if match_rule(rel, name, pattern):
             ignored = not negated
     return ignored
 
+
 for project, root in projects:
-    max_mtime = 0
+    fingerprint = hashlib.blake2b(digest_size=16)
     entries = 0
-    total_size = 0
     max_dir_mtime = 0
     dir_count = 0
     max_gitignore_mtime = 0
@@ -2368,7 +2777,6 @@ for project, root in projects:
 
     try:
         st = os.stat(root, follow_symlinks=False)
-        max_mtime = max(max_mtime, st.st_mtime_ns)
         max_dir_mtime = max(max_dir_mtime, st.st_mtime_ns)
         dir_count += 1
     except OSError:
@@ -2379,37 +2787,49 @@ for project, root in projects:
         kept = []
         for name in dirs:
             full = os.path.abspath(os.path.join(current, name))
-            if full in excluded_roots:
+            rel = os.path.relpath(full, root).replace(os.sep, '/')
+            if full in excluded_roots or ignored_by_rules(rel, name, dir_rules):
                 continue
             kept.append(name)
             try:
                 st = os.stat(full, follow_symlinks=False)
-                max_mtime = max(max_mtime, st.st_mtime_ns)
-                max_dir_mtime = max(max_dir_mtime, st.st_mtime_ns)
-                entries += 1
-                dir_count += 1
             except OSError:
-                pass
+                continue
+            max_dir_mtime = max(max_dir_mtime, st.st_mtime_ns)
+            entries += 1
+            dir_count += 1
+            fingerprint.update(b'D\0')
+            fingerprint.update(rel.encode('utf-8', errors='surrogateescape'))
+            fingerprint.update(b'\0')
+            fingerprint.update(str(st.st_mode).encode())
+            fingerprint.update(b'\n')
         dirs[:] = kept
 
         for name in files:
             full = os.path.join(current, name)
             rel = os.path.relpath(full, root).replace(os.sep, '/')
-            if ignored_file(rel, name):
+            if ignored_by_rules(rel, name, file_rules):
                 continue
             try:
                 st = os.stat(full, follow_symlinks=False)
             except OSError:
                 continue
-            max_mtime = max(max_mtime, st.st_mtime_ns)
             entries += 1
-            total_size += st.st_size
+            fingerprint.update(b'F\0')
+            fingerprint.update(rel.encode('utf-8', errors='surrogateescape'))
+            fingerprint.update(b'\0')
+            fingerprint.update(str(st.st_mtime_ns).encode())
+            fingerprint.update(b'\0')
+            fingerprint.update(str(st.st_size).encode())
+            fingerprint.update(b'\0')
+            fingerprint.update(str(st.st_mode).encode())
+            fingerprint.update(b'\n')
             if name == '.gitignore':
                 max_gitignore_mtime = max(max_gitignore_mtime, st.st_mtime_ns)
                 gitignore_count += 1
                 gitignore_size += st.st_size
 
-    state_sig = f'{max_mtime}:{entries}:{total_size}'
+    state_sig = f'{fingerprint.hexdigest()}:{entries}'
     tree_sig = f'{max_dir_mtime}:{dir_count}'
     ignore_sig = f'{max_gitignore_mtime}:{gitignore_count}:{gitignore_size}'
     print(f'{project}\t{state_sig}\t{tree_sig}\t{ignore_sig}')
@@ -2472,36 +2892,52 @@ light_process_downloads_and_sql() {
 }
 
 light_scan_cycle() {
-  local project signature tree_signature ignore_signature old old_tree old_ignore
+  local project signature tree_signature ignore_signature old old_tree old_ignore scan_file
   local plan_changed=false
 
   light_refresh_if_config_changed || return 1
   light_process_downloads_and_sql
 
+  scan_file="$(mktemp "$STATE_DIR/light-scan-XXXXXX")" || return 1
+  if ! light_scan_states > "$scan_file"; then
+    rm -f -- "$scan_file"
+    return 1
+  fi
+
+  # Mudança estrutural pede nova poda antes de decidir se o projeto realmente
+  # mudou. Assim uma pasta nova já ignorada pelo .gitignore não gera backup
+  # falso só porque o diretório pai teve o mtime alterado.
   while IFS=$'\t' read -r project signature tree_signature ignore_signature || [ -n "$project" ]; do
     [ -n "$project" ] || continue
-    old="${LIGHT_SIGNATURES[$project]-}"
     old_tree="${LIGHT_TREE_SIGNATURES[$project]-}"
     old_ignore="${LIGHT_IGNORE_SIGNATURES[$project]-}"
-
-    if [ -n "$old" ] && [ "$old" != "$signature" ]; then
-      mark_backup_dirty "$project"
-    fi
     if { [ -n "$old_tree" ] && [ "$old_tree" != "$tree_signature" ]; } || \
        { [ -n "$old_ignore" ] && [ "$old_ignore" != "$ignore_signature" ]; }; then
       plan_changed=true
+      break
     fi
+  done < "$scan_file"
 
+  if [ "$plan_changed" = true ]; then
+    build_light_watch_plan
+    if ! light_scan_states > "$scan_file"; then
+      rm -f -- "$scan_file"
+      return 1
+    fi
+  fi
+
+  while IFS=$'\t' read -r project signature tree_signature ignore_signature || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    old="${LIGHT_SIGNATURES[$project]-}"
+    if [ -n "$old" ] && [ "$old" != "$signature" ]; then
+      mark_backup_dirty "$project"
+    fi
     LIGHT_SIGNATURES["$project"]="$signature"
     LIGHT_TREE_SIGNATURES["$project"]="$tree_signature"
     LIGHT_IGNORE_SIGNATURES["$project"]="$ignore_signature"
-  done < <(light_scan_states)
+  done < "$scan_file"
 
-  # Só refaz a poda quando a estrutura de diretórios ou algum .gitignore mudou.
-  # Edição comum de código não custa uma reconstrução do plano.
-  if [ "$plan_changed" = true ]; then
-    build_light_watch_plan
-  fi
+  rm -f -- "$scan_file"
   return 0
 }
 
