@@ -144,6 +144,15 @@ backup_all() {
   mapfile -t projects < <(backup_order_targets)
   for project in "${projects[@]}"; do
     [ -n "$project" ] || continue
+
+    # Um catálogo pode listar projetos que ainda não foram clonados/importados
+    # nesta máquina. Isso é estado normal durante bootstrap: mantém o cadastro
+    # para reconhecer futuros ZIPs, mas não derruba o manager por pasta ausente.
+    if ! target_is_code_aggregate "$project" && [ ! -d "$(project_path "$project")" ]; then
+      log "Ignorando backup; alvo configurado ainda não existe: $(project_path "$project")"
+      continue
+    fi
+
     wait_if_paused
     backup_project "$project" || failed=1
   done

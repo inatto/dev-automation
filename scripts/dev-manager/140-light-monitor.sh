@@ -13,6 +13,9 @@ watch_root_projects() {
     [ -z "$parent" ] || continue
 
     project_dir="$(project_path "$project")"
+    # Catálogo pode conter projetos ainda não instalados nesta máquina.
+    # Não passe caminhos inexistentes ao watcher.
+    [ -d "$project_dir" ] || continue
     if [ -z "${seen[$project_dir]+x}" ]; then
       printf '%s\n' "$project_dir"
       seen["$project_dir"]=1

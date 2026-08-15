@@ -9,9 +9,18 @@ AUTO_MANAGER="${DEV_MANAGER_AUTO_MANAGER:-$PROJECT_ROOT/scripts/auto-code-manage
 COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/install-commands.sh}"
 DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
 DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status.sh}"
-DEV_STATUS_EXE="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
-DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/src/main.cpp}"
-DEV_STATUS_BUILD_PS1="${DEV_MANAGER_DEV_STATUS_BUILD_PS1:-$PROJECT_ROOT/apps/dev-status/build.ps1}"
+if command -v powershell.exe >/dev/null 2>&1; then
+  DEV_STATUS_BINARY="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
+  DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/src/main.cpp}"
+  DEV_STATUS_BUILD_FILE="${DEV_MANAGER_DEV_STATUS_BUILD_PS1:-$PROJECT_ROOT/apps/dev-status/build.ps1}"
+  DEV_STATUS_LABEL="dev-status.exe"
+else
+  DEV_STATUS_BINARY="${DEV_MANAGER_DEV_STATUS_BINARY:-${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/linux/bin/dev-status-linux}}"
+  DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/linux/src/main.cpp}"
+  DEV_STATUS_BUILD_FILE="${DEV_MANAGER_DEV_STATUS_BUILD_FILE:-${DEV_MANAGER_DEV_STATUS_BUILD_PS1:-$PROJECT_ROOT/apps/dev-status/linux/build.sh}}"
+  DEV_STATUS_LABEL="${DEV_MANAGER_DEV_STATUS_EXE:+dev-status.exe}"
+  DEV_STATUS_LABEL="${DEV_STATUS_LABEL:-dev-status-linux}"
+fi
 
 fail() {
   printf '[dev-manager] ERRO: %s\n' "$*" >&2
@@ -33,8 +42,8 @@ Uso:
 
 O monitor não cria sessão em segundo plano. Para encerrar, pressione Ctrl+C
 no mesmo terminal em que ele está executando.
-Para pausar/despausar sem encerrar, clique com o botão direito no ícone do
-Dev Automation na bandeja do Windows.
+Para pausar/despausar sem encerrar, use o menu do ícone Dev Automation
+no Windows ou no painel do Ubuntu/GNOME.
 EOF_HELP
 }
 
@@ -49,9 +58,9 @@ refresh_global_commands() {
 }
 
 dev_status_needs_build() {
-  [[ -f "$DEV_STATUS_EXE" ]] || return 0
-  [[ -f "$DEV_STATUS_SOURCE" && "$DEV_STATUS_SOURCE" -nt "$DEV_STATUS_EXE" ]] && return 0
-  [[ -f "$DEV_STATUS_BUILD_PS1" && "$DEV_STATUS_BUILD_PS1" -nt "$DEV_STATUS_EXE" ]] && return 0
+  [[ -f "$DEV_STATUS_BINARY" ]] || return 0
+  [[ -f "$DEV_STATUS_SOURCE" && "$DEV_STATUS_SOURCE" -nt "$DEV_STATUS_BINARY" ]] && return 0
+  [[ -f "$DEV_STATUS_BUILD_FILE" && "$DEV_STATUS_BUILD_FILE" -nt "$DEV_STATUS_BINARY" ]] && return 0
   return 1
 }
 
@@ -67,14 +76,14 @@ ensure_dev_status() {
 
   [[ -x "$DEV_STATUS_SCRIPT" ]] || chmod +x "$DEV_STATUS_SCRIPT"
 
-  if [[ -f "$DEV_STATUS_EXE" ]]; then
-    printf '[dev-manager] dev-status.exe desatualizado; recompilando...\n'
+  if [[ -f "$DEV_STATUS_BINARY" ]]; then
+    printf '[dev-manager] %s desatualizado; recompilando...\n' "$DEV_STATUS_LABEL"
   else
-    printf '[dev-manager] dev-status.exe ausente; compilando uma vez...\n'
+    printf '[dev-manager] %s ausente; compilando uma vez...\n' "$DEV_STATUS_LABEL"
   fi
 
   if "$DEV_STATUS_SCRIPT" --build; then
-    if [[ -f "$DEV_STATUS_EXE" ]] && ! dev_status_needs_build; then
+    if [[ -f "$DEV_STATUS_BINARY" ]] && ! dev_status_needs_build; then
       printf '[dev-manager] dev-status pronto.\n'
       return 0
     fi

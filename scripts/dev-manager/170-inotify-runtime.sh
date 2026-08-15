@@ -180,6 +180,11 @@ mark_all_projects_dirty() {
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     target_is_aggregate "$project" && continue
+    if [ ! -d "$(project_path "$project")" ]; then
+      LOG_CONTEXT=error log "ERRO: projeto configurado não existe; não será marcado para backup: $(project_path "$project")"
+      unset 'DIRTY_BACKUP_TARGETS[$project]' 2>/dev/null || true
+      continue
+    fi
     DIRTY_BACKUP_TARGETS["$project"]=1
   done < <(backup_targets)
   LAST_SOURCE_CHANGE="$(date +%s)"

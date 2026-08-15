@@ -19,3 +19,5 @@ node_modules/
 temp/
 tmp/
 venv/
+apps/dev-status/linux/bin/
+apps/dev-status/linux/build/

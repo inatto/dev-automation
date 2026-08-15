@@ -98,8 +98,6 @@ stage() {
 taskbar_status() {
   local state="$1"
   local detail="${2:-}"
-  local invoke_windows
-  local pause_file_windows
 
   TUI_STATUS_STATE="$(tui_state_label "$state")"
   TUI_STATUS_DETAIL="$detail"
@@ -110,15 +108,10 @@ taskbar_status() {
   [ "$TUI_ACTIVE" = true ] && tui_refresh
 
   [ "${TASKBAR_STATUS_ENABLED:-true}" = true ] || return 0
-  [ -f "$DEV_STATUS_EXE" ] || return 0
-  [ -f "$DEV_STATUS_INVOKE_PS1" ] || return 0
-  command -v powershell.exe >/dev/null 2>&1 || return 0
-  command -v wslpath >/dev/null 2>&1 || return 0
+  [ -x "$DEV_STATUS_SCRIPT" ] || return 0
 
-  invoke_windows="$(wslpath -w "$DEV_STATUS_INVOKE_PS1" 2>/dev/null)" || return 0
-  pause_file_windows="$(wslpath -w "$PAUSE_FILE" 2>/dev/null)" || return 0
-  powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass \
-    -File "$invoke_windows" -State "$state" -Detail "$detail" -PauseFile "$pause_file_windows" </dev/null >/dev/null 2>&1 || true
+  "$DEV_STATUS_SCRIPT" "$state" --pause-file "$PAUSE_FILE" --detail "$detail" \
+    </dev/null >/dev/null 2>&1 || true
 }
 
 acquire_monitor_lock() {

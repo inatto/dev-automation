@@ -28,6 +28,11 @@ mark_backup_dirty() {
   local event_path="${2:-}"
 
   [ -n "$project" ] || return 0
+  if ! target_is_code_aggregate "$project" && [ ! -d "$(project_path "$project")" ]; then
+    LOG_CONTEXT=error log "ERRO: alteração associada a projeto ausente; ignorando backup: $(project_path "$project")"
+    unset 'DIRTY_BACKUP_TARGETS[$project]' 2>/dev/null || true
+    return 0
+  fi
   if [ -z "${DIRTY_BACKUP_TARGETS[$project]+x}" ]; then
     LOG_CONTEXT=backup log "Alteração detectada; backup pendente: $project"
   fi
@@ -75,6 +80,11 @@ backup_dirty_targets() {
     [ -n "$project" ] || continue
     target_is_aggregate "$project" && continue
     [ -n "${DIRTY_BACKUP_TARGETS[$project]+x}" ] || continue
+    if [ ! -d "$(project_path "$project")" ]; then
+      LOG_CONTEXT=error log "ERRO: projeto pendente não existe; removendo pendência de backup: $(project_path "$project")"
+      unset 'DIRTY_BACKUP_TARGETS[$project]'
+      continue
+    fi
     dirty_projects+=("$project")
   done < <(backup_targets)
 

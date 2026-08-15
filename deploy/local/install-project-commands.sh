@@ -79,6 +79,8 @@ EOF_WRAPPER
 
 while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${raw_line%%#*}"
+  # Arquivo pode ter vindo do Windows. CRLF nunca faz parte do caminho lógico.
+  line="${line%$'\r'}"
   line="$(printf '%s' "$line" | xargs)"
   [[ -n "$line" ]] || continue
   [[ "${line,,}" == *.zip ]] && continue

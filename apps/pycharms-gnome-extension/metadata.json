@@ -1,0 +1,7 @@
+{
+  "uuid": "pycharms-monitor@dev-automation",
+  "name": "PyCharms Monitor",
+  "description": "Move janelas PyCharm para o maior monitor e maximiza no GNOME/Wayland.",
+  "shell-version": ["50"],
+  "version": 1
+}

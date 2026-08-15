@@ -3,6 +3,9 @@
 
 normalize_target() {
   local target="$1"
+  # Arquivos de configuração podem vir do Windows. CRLF nunca pode virar
+  # parte invisível do caminho no Linux.
+  target="${target%$'\r'}"
   target="${target#./}"
   target="${target%/}"
   printf '%s\n' "$target"
@@ -282,8 +285,7 @@ validate_projects() {
 
     if target_is_aggregate "$project"; then
       if ! target_is_code_aggregate "$project" && [ ! -d "$project_dir" ]; then
-        log "ERRO: pasta do agregador configurado não existe: $project_dir"
-        failed=1
+        log "ERRO: agregador configurado não existe; ignorando até aparecer: $project_dir"
       fi
       if [ -n "$source_rel" ]; then
         mapfile -t aggregate_children < <(aggregate_child_targets "$project")
@@ -294,8 +296,7 @@ validate_projects() {
       fi
     else
       if [ ! -d "$project_dir" ]; then
-        log "ERRO: projeto configurado não existe: $project_dir"
-        failed=1
+        log "ERRO: projeto configurado não existe; ignorando até aparecer: $project_dir"
       fi
 
       logical_name="$(project_logical_name "$project")"

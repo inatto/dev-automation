@@ -183,6 +183,7 @@ class Dashboard:
         self.last_metric_at = 0.0
         self.last_draw_at = 0.0
         self.exit_code = None
+        self.child_exited = False
         self.colors = {}
         self.windows = {}
         self.layout_size = None
@@ -534,7 +535,7 @@ class Dashboard:
             self.last_draw_at = now_mono
             return
 
-        footer = "F2/T: tema   Setas/PgUp/PgDn: log   End: seguir   Ctrl+C/Q: sair"
+        footer = "F2/T: tema   Setas/PgUp/PgDn: log   End: seguir   Ctrl+C/Q: sair" if not self.child_exited else "PROCESSO PAROU - veja o LOG acima   Setas/PgUp/PgDn: log   Q: sair"
         # Só atualiza a linha de rodapé; não limpa/redesenha a tela inteira.
         try:
             self.stdscr.move(rows - 1, 0)
@@ -681,19 +682,21 @@ class Dashboard:
             while self.running:
                 self.drain_output()
                 self.collect_metrics()
-                if self.proc and self.proc.poll() is not None:
+                if self.proc and self.proc.poll() is not None and not self.child_exited:
                     self.exit_code = self.proc.returncode
+                    self.child_exited = True
                     self.drain_output()
                     if self.exit_code == 0:
                         self.status = "ENCERRADO"
-                        self.status_detail = "Processo finalizado."
+                        self.status_detail = "Processo finalizou inesperadamente. Q para sair."
                     else:
                         self.status = "ERRO"
-                        self.status_detail = f"Processo encerrou com código {self.exit_code}."
+                        self.status_detail = f"Processo encerrou com código {self.exit_code}. Q para sair."
+                    self.last_action = "DEV-MANAGER PAROU; a interface permanecerá aberta para preservar o diagnóstico."
                     self.dirty = True
                     self.draw(force=True)
-                    self.running = False
-                    continue
+                    # Não fecha a TUI. Antes ela desaparecia imediatamente e escondia
+                    # justamente as últimas linhas que explicavam a falha.
                 self.draw()
                 try:
                     key = self.stdscr.getch()
