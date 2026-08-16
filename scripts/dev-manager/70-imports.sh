@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contexto: importação transacional de ZIPs e Downloads
+# Contexto: importação transacional de ZIPs e worker/from
 
 import_one_zip() {
   local zip_file="$1"
@@ -261,25 +261,25 @@ import_one_zip() {
   line
 }
 
-import_downloads() {
+import_worker_from() {
   local downloads zip_file
   local total index imported=0 failed=0
   local -a zip_files=()
 
-  downloads="$(downloads_dir)"
+  downloads="$(worker_from_dir)"
 
   if [ -z "$downloads" ] || [ ! -d "$downloads" ]; then
-    log "Downloads não encontrado."
+    log "worker/from não encontrado."
     return 0
   fi
 
-  log "Verificando Downloads: $downloads"
+  log "Verificando worker/from: $downloads"
 
   # A fila de importação é EXCLUSIVAMENTE o que está cadastrado no .projects.
-  # ZIP aleatório em Downloads (ROM, instalador, pacote etc.) é invisível para
+  # ZIP aleatório em worker/from (ROM, instalador, pacote etc.) é invisível para
   # o manager: não entra no lote, não é apagado e não mantém o monitor em loop.
   while IFS= read -r -d '' zip_file; do
-    download_zip_is_configured "$zip_file" || continue
+    worker_from_zip_is_configured "$zip_file" || continue
     zip_files+=("$zip_file")
   done < <(
     find "$downloads" \
@@ -291,11 +291,11 @@ import_downloads() {
 
   total="${#zip_files[@]}"
   if [ "$total" -eq 0 ]; then
-    log "Nenhum ZIP configurado no .projects encontrado em Downloads nesta rodada."
+    log "Nenhum ZIP configurado no .projects encontrado em worker/from nesta rodada."
     return 0
   fi
 
-  log "LOTE DE DOWNLOADS: $total ZIP(s) serão processados em sequência antes de continuar o ciclo."
+  log "LOTE DE WORKER/FROM: $total ZIP(s) serão processados em sequência antes de continuar o ciclo."
 
   for ((index = 0; index < total; index++)); do
     wait_if_paused
@@ -308,7 +308,7 @@ import_downloads() {
       failed=$((failed + 1))
       log "ERRO: falha ao importar: $(basename -- "$zip_file")"
       # Falha de ZIP reconhecido é terminal para esta entrada da fila. Manter o
-      # arquivo em Downloads faria o inotify reprocessar o mesmo erro em loop.
+      # arquivo em worker/from faria o inotify reprocessar o mesmo erro em loop.
       if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
         log "ZIP com falha apagado para evitar reprocessamento: $zip_file"
       else
@@ -317,7 +317,7 @@ import_downloads() {
     fi
   done
 
-  LOG_CONTEXT=download_done log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
+  LOG_CONTEXT=download_done log "LOTE DE WORKER/FROM CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
   [ "$failed" -eq 0 ]
 }
 

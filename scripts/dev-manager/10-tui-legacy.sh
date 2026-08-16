@@ -129,11 +129,21 @@ tui_collect_metrics() {
   fi
 
   TUI_PROJECT_COUNT="$(backup_targets 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
-  downloads="$(downloads_dir 2>/dev/null || true)"
-  if [ -n "$downloads" ] && [ -d "$downloads" ]; then
-    TUI_DOWNLOAD_ZIPS="$(find "$downloads" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+  if systemctl --user is-active --quiet dev-automation-worker-to.service 2>/dev/null; then
+    TUI_WORKER_TO="OK"
   else
-    TUI_DOWNLOAD_ZIPS=0
+    TUI_WORKER_TO="PARADO"
+  fi
+  if systemctl --user is-active --quiet dev-automation-worker-from.timer 2>/dev/null; then
+    TUI_WORKER_FROM="OK"
+  else
+    TUI_WORKER_FROM="PARADO"
+  fi
+  downloads="$(worker_from_dir 2>/dev/null || true)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ]; then
+    TUI_FROM_ZIPS="$(find "$downloads" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+  else
+    TUI_FROM_ZIPS=0
   fi
 }
 
@@ -151,9 +161,9 @@ tui_draw_static() {
   printf '\0337'
   tui_write_row 1 '44;96;1' "$(tui_border_text '╔' '╗' 'DEV AUTOMATION :: CLIPPER')"
   tui_write_split_row 2 "STATUS: $TUI_STATUS_STATE  $TUI_STATUS_DETAIL" "HORA: $now" '44;93;1'
-  tui_write_split_row 3 "MODO: ${mode^^} · scan ${LIGHT_SCAN_INTERVAL}s · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty" '44;97'
+  tui_write_split_row 3 "MODO: ${mode^^} · scan ${LIGHT_SCAN_INTERVAL}s · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty · ZIPs FROM: $TUI_FROM_ZIPS" '44;97'
   tui_write_split_row 4 "INOTIFY INST: $TUI_INOTIFY_INSTANCES/$TUI_INOTIFY_MAX_INSTANCES" "WATCHES: $TUI_INOTIFY_WATCHES/$TUI_INOTIFY_MAX_WATCHES" '44;96;1'
-  tui_write_split_row 5 "FD MANAGER: $TUI_MANAGER_FDS/$TUI_MANAGER_FD_LIMIT" "ZIPs DOWNLOADS: $TUI_DOWNLOAD_ZIPS" '44;97'
+  tui_write_split_row 5 "WORKER TO: $TUI_WORKER_TO" "WORKER FROM: $TUI_WORKER_FROM" '44;97;1'
   tui_write_row 6 '44;96;1' "$(tui_border_text '╠' '╣' 'ÚLTIMA AÇÃO')"
   tui_write_box_row 7 "$TUI_LAST_ACTION" '44;93;1'
   tui_write_row 8 '44;96;1' "$(tui_border_text '╠' '╣' 'LOG · área rolável')"

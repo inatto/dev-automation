@@ -53,7 +53,7 @@ project_for_zip() {
   echo "$best"
 }
 
-download_zip_is_configured() {
+worker_from_zip_is_configured() {
   local zip_file="$1"
   local zip_name project
 
@@ -63,14 +63,14 @@ download_zip_is_configured() {
   [ -n "$project" ]
 }
 
-configured_download_zip_exists() {
+configured_worker_from_zip_exists() {
   local downloads zip_file
 
-  downloads="$(downloads_dir)"
+  downloads="$(worker_from_dir)"
   [ -n "$downloads" ] && [ -d "$downloads" ] || return 1
 
   while IFS= read -r -d '' zip_file; do
-    if download_zip_is_configured "$zip_file"; then
+    if worker_from_zip_is_configured "$zip_file"; then
       return 0
     fi
   done < <(find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)

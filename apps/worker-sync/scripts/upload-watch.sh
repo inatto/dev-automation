@@ -1,39 +1,40 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 LOCAL_DIR="${WORKER_LOCAL_TO:-/home/daniel/worker/to}"
 REMOTE_DIR="${WORKER_REMOTE_TO:-danielmaiax:worker/to}"
 RCLONE_BIN="${RCLONE_BIN:-/usr/bin/rclone}"
 INOTIFYWAIT_BIN="${INOTIFYWAIT_BIN:-/usr/bin/inotifywait}"
-DEBOUNCE_SECONDS="${WORKER_UPLOAD_DEBOUNCE_SECONDS:-1}"
 
 log() { printf '[worker-sync][to] [%s] %s\n' "$(date '+%F %T')" "$*"; }
 
 mkdir -p "$LOCAL_DIR"
 
-upload() {
-  log "UPLOAD: $LOCAL_DIR -> $REMOTE_DIR"
-  "$RCLONE_BIN" copy \
-    "$LOCAL_DIR" \
-    "$REMOTE_DIR" \
-    --create-empty-src-dirs \
-    --log-level INFO
-  log "UPLOAD CONCLUÍDO"
-}
+# Catch-up único no start: envia o que já existia antes do watcher subir.
+log "CATCH-UP INICIAL: $LOCAL_DIR -> $REMOTE_DIR"
+"$RCLONE_BIN" copy \
+  "$LOCAL_DIR" \
+  "$REMOTE_DIR" \
+  --create-empty-src-dirs \
+  --log-level ERROR || log "AVISO: catch-up inicial falhou; watcher continuará ativo"
 
-# Garante envio de arquivos que já estavam em /to antes do login/restart.
-upload
-
-log "MONITORANDO ALTERAÇÕES LOCAIS: $LOCAL_DIR"
+log "MONITORANDO: $LOCAL_DIR"
 "$INOTIFYWAIT_BIN" \
   --monitor \
   --recursive \
   --quiet \
-  --event close_write,create,moved_to \
+  --event close_write,moved_to \
   --format '%w%f' \
   "$LOCAL_DIR" |
 while IFS= read -r changed; do
-  log "ALTERAÇÃO LOCAL: $changed"
-  sleep "$DEBOUNCE_SECONDS"
-  upload
+  [ -f "$changed" ] || continue
+  rel="${changed#"$LOCAL_DIR"/}"
+  dest="$REMOTE_DIR/$rel"
+  log "UPLOAD: $changed -> $dest"
+  start="$(date +%s)"
+  if "$RCLONE_BIN" copyto "$changed" "$dest" --no-traverse --log-level ERROR; then
+    elapsed=$(( $(date +%s) - start ))
+    log "OK - UPLOAD CONCLUÍDO EM ${elapsed}s"
+  else
+    log "ERRO - UPLOAD: $changed"
+  fi
 done

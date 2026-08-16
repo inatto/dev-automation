@@ -246,10 +246,10 @@ light_refresh_if_config_changed() {
 light_process_downloads_and_sql() {
   local downloads folder
 
-  downloads="$(downloads_dir)"
-  if configured_download_zip_exists; then
-    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado no monitor leve; ignora todos os demais ZIPs de Downloads." \
-      import_downloads || true
+  downloads="$(worker_from_dir)"
+  if configured_worker_from_zip_exists; then
+    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado no monitor leve; ignora todos os demais ZIPs de worker/from." \
+      import_worker_from || true
   fi
 
   while IFS= read -r folder || [ -n "$folder" ]; do

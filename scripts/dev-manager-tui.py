@@ -133,6 +133,19 @@ def process_fd_metrics(pid):
     return used, limit
 
 
+def systemd_user_active(unit):
+    try:
+        return subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", unit],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=0.2,
+            check=False,
+        ).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def count_download_zips(downloads):
     if not downloads:
         return 0
@@ -172,7 +185,7 @@ class Dashboard:
         self.last_action = "Inicialização"
         self.version = "dev-manager"
         self.mode = "LIGHT"
-        self.downloads = str(Path.home() / "Downloads")
+        self.downloads = str(Path.home() / "worker" / "from")
         self.inotify_instances = 0
         self.inotify_watches = 0
         self.max_instances = 0
@@ -180,6 +193,8 @@ class Dashboard:
         self.manager_fds = 0
         self.manager_fd_limit = 0
         self.zip_count = 0
+        self.worker_to_active = False
+        self.worker_from_active = False
         self.last_metric_at = 0.0
         self.last_draw_at = 0.0
         self.exit_code = None
@@ -378,7 +393,10 @@ class Dashboard:
 
         if clean.startswith("Auto Code Manager - "):
             self.version = clean.split(" - ", 1)[1].strip()
+        elif clean.startswith("worker/from:"):
+            self.downloads = clean.split(":", 1)[1].strip()
         elif clean.startswith("Downloads:"):
+            # Compatibilidade com managers antigos.
             self.downloads = clean.split(":", 1)[1].strip()
         elif clean.startswith("Modo:"):
             self.mode = clean.split(":", 1)[1].strip().split()[0].upper()
@@ -438,6 +456,8 @@ class Dashboard:
             self.manager_fds,
             self.manager_fd_limit,
             self.zip_count,
+            self.worker_to_active,
+            self.worker_from_active,
         )
         self.max_instances = read_int("/proc/sys/fs/inotify/max_user_instances")
         self.max_watches = read_int("/proc/sys/fs/inotify/max_user_watches")
@@ -445,6 +465,8 @@ class Dashboard:
         pid = self.proc.pid if self.proc else None
         self.manager_fds, self.manager_fd_limit = process_fd_metrics(pid)
         self.zip_count = count_download_zips(self.downloads)
+        self.worker_to_active = systemd_user_active("dev-automation-worker-to.service")
+        self.worker_from_active = systemd_user_active("dev-automation-worker-from.timer")
         after = (
             self.max_instances,
             self.max_watches,
@@ -453,6 +475,8 @@ class Dashboard:
             self.manager_fds,
             self.manager_fd_limit,
             self.zip_count,
+            self.worker_to_active,
+            self.worker_from_active,
         )
         if after != before:
             self.dirty = True
@@ -606,11 +630,28 @@ class Dashboard:
                 header,
                 4,
                 half + 2,
-                f"ZIPs DOWNLOADS: {self.zip_count}",
+                f"ZIPs FROM: {self.zip_count}",
                 self.colors["base"],
                 inner - half,
             )
-            safe_add(header, 5, 2, fit(self.version, inner), self.colors["muted"], inner)
+            to_label = "OK" if self.worker_to_active else "PARADO"
+            from_label = "OK" if self.worker_from_active else "PARADO"
+            safe_add(
+                header,
+                5,
+                2,
+                f"WORKER TO: {to_label}",
+                self.colors["ok"] if self.worker_to_active else self.colors["error"],
+                half,
+            )
+            safe_add(
+                header,
+                5,
+                half + 2,
+                f"WORKER FROM: {from_label}",
+                self.colors["ok"] if self.worker_from_active else self.colors["error"],
+                inner - half,
+            )
             header.noutrefresh()
 
         if action:

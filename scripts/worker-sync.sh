@@ -9,6 +9,7 @@ usage() {
 Uso: worker-sync <comando>
 
   install   instala/reinstala os units systemd e para configuração antiga
+  ensure    instala se necessário e garante TO/FROM ativos sem reiniciar os saudáveis
   start     inicia upload por evento + download remoto por timer
   stop      para os dois fluxos
   restart   reinstala e reinicia a configuração do dev-automation
@@ -21,6 +22,7 @@ TXT
 cmd="${1:-status}"
 case "$cmd" in
   install) exec "$LOCAL_DIR/install.sh" ;;
+  ensure) exec "$LOCAL_DIR/ensure.sh" ;;
   start) exec "$LOCAL_DIR/start.sh" ;;
   stop) exec "$LOCAL_DIR/stop.sh" ;;
   restart)

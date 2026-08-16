@@ -194,7 +194,7 @@ backup_beep() {
   fi
 
   # Fallback discreto para ambientes sem interoperabilidade WSL/Windows ou sem
-  # o ding.wav. Não altera o aviso sonoro usado após downloads/importações.
+  # o ding.wav. Não altera o aviso sonoro usado após worker/from/importações.
   (
     BEEP_REPEATS=1
     BEEP_GAP_MS=1

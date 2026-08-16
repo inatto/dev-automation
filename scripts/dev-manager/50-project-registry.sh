@@ -123,7 +123,7 @@ project_archive_path() {
   local archive_name
 
   archive_name="$(project_archive_name "$project")"
-  printf '%s/%s.zip\n' "$CODE_ROOT" "$archive_name"
+  printf '%s/%s.zip\n' "$(worker_to_dir)" "$archive_name"
 }
 
 configured_projects() {

@@ -44,7 +44,7 @@ printf 'new\n' > "$pkg/code.txt"
 : > "$pkg/old-dir.remover"
 (cd "$pkg" && zip -qr "$DOWNLOADS/sample-app.zip" .)
 
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DOWNLOADS_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" WORKER_FROM_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$DOWNLOADS/sample-app.zip" >/dev/null
 
 grep -Fxq new "$DEST/code.txt"
@@ -55,7 +55,7 @@ grep -Fxq new "$DEST/code.txt"
 [ ! -e "$DOWNLOADS/sample-app.zip" ]
 
 # O marcador é transitório e jamais volta para o ZIP de backup.
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DOWNLOADS_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" WORKER_FROM_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 ! unzip -Z1 "$CODE_ROOT/sample-app.zip" | grep -q '\.remover$'
 
@@ -65,7 +65,7 @@ mkdir -p "$pkg"
 printf 'conflict-new\n' > "$pkg/code.txt"
 : > "$pkg/code.txt.remover"
 (cd "$pkg" && zip -qr "$DOWNLOADS/sample-app.zip" .)
-if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DOWNLOADS_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
+if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" WORKER_FROM_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$DOWNLOADS/sample-app.zip" >/dev/null 2>&1; then
   echo 'FALHOU: arquivo + .remover para o mesmo alvo foi aceito' >&2
   exit 1
@@ -82,7 +82,7 @@ pkg="$TEMP/pkg-symlink"
 mkdir -p "$pkg/link"
 : > "$pkg/link/victim.txt.remover"
 (cd "$pkg" && zip -qr "$DOWNLOADS/sample-app.zip" .)
-if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DOWNLOADS_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
+if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" WORKER_FROM_DIR="$DOWNLOADS" AUTO_CODE_STATE_DIR="$STATE" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$DOWNLOADS/sample-app.zip" >/dev/null 2>&1; then
   echo 'FALHOU: .remover atravessando symlink foi aceito' >&2
   exit 1

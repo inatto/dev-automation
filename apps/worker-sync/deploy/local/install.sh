@@ -28,6 +28,11 @@ systemctl --user disable --now dev-automation-worker-to.service 2>/dev/null || t
 systemctl --user disable --now dev-automation-worker-from.timer 2>/dev/null || true
 systemctl --user stop dev-automation-worker-from.service 2>/dev/null || true
 
+# Mata watchers avulsos antigos que tenham sobrado de configurações manuais.
+pkill -f '/usr/bin/inotifywait.*worker/to' 2>/dev/null || true
+pkill -f 'rclone-worker-watch-to.sh' 2>/dev/null || true
+pkill -f '/home/daniel/.local/bin/worker-upload.sh' 2>/dev/null || true
+
 install_unit() {
   local source="$1"
   local target="$2"

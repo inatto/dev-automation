@@ -44,7 +44,7 @@ append_nonrecursive_watch_root() {
   [ -d "$root" ] || return 0
   printf '%s\n' "$root" >> "$WATCH_LIST"
 
-  # O watcher principal usa -r. Para Downloads e pastas SQL que não pertencem
+  # O watcher principal usa -r. Para worker/from e pastas SQL que não pertencem
   # a um projeto, excluímos os subdiretórios para manter o watch efetivamente
   # não recursivo e barato.
   while IFS= read -r -d '' child; do
@@ -87,9 +87,9 @@ start_backup_watcher() {
     done < <(watch_excluded_directories "$root")
   done
 
-  # Downloads: entra no MESMO fluxo de eventos. Se estiver fora dos projetos,
+  # worker/from: entra no MESMO fluxo de eventos. Se estiver fora dos projetos,
   # é observado somente no primeiro nível (onde o navegador grava os ZIPs).
-  downloads="$(downloads_dir)"
+  downloads="$(worker_from_dir)"
   if [ -n "$downloads" ] && [ -d "$downloads" ] && ! path_is_covered_by_roots "$downloads" "${roots[@]}"; then
     append_nonrecursive_watch_root "$downloads"
     roots+=("$downloads")
@@ -153,10 +153,10 @@ event_finished_write() {
   event_has "$events" CLOSE_WRITE || event_has "$events" MOVED_TO
 }
 
-path_is_download_zip() {
+path_is_worker_from_zip() {
   local event_path="$1"
   local downloads
-  downloads="$(downloads_dir)"
+  downloads="$(worker_from_dir)"
   [ -n "$downloads" ] || return 1
   path_is_within_absolute "$event_path" "$downloads" || return 1
   [ "$(dirname -- "$event_path")" = "$downloads" ] || return 1
@@ -222,14 +222,14 @@ handle_watch_event() {
     fi
   fi
 
-  # ZIP novo em Downloads: importa diretamente pelo evento de gravação/rename.
+  # ZIP novo em worker/from: importa diretamente pelo evento de gravação/rename.
   # CLOSE_WRITE/MOVED_TO já garantem que o produtor fechou o arquivo; a própria
   # importação ainda valida o ZIP antes de tocar no projeto.
-  if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
-    # Downloads pode conter qualquer porcaria que o usuário baixou. Só o nome
+  if event_finished_write "$events" && path_is_worker_from_zip "$event_path" && [ -f "$event_path" ]; then
+    # worker/from pode conter qualquer porcaria que o usuário baixou. Só o nome
     # resolvido por project_for_zip(), portanto cadastrado no .projects, entra
     # no pipeline do manager. Os demais ZIPs são ignorados silenciosamente.
-    if download_zip_is_configured "$event_path"; then
+    if worker_from_zip_is_configured "$event_path"; then
       run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo." \
         import_one_zip "$event_path" true || true
     fi

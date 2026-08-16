@@ -9,6 +9,7 @@ AUTO_MANAGER="${DEV_MANAGER_AUTO_MANAGER:-$PROJECT_ROOT/scripts/auto-code-manage
 COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/install-commands.sh}"
 DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
 DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status.sh}"
+WORKER_ENSURE_SCRIPT="${DEV_MANAGER_WORKER_ENSURE:-$PROJECT_ROOT/apps/worker-sync/deploy/local/ensure.sh}"
 if command -v powershell.exe >/dev/null 2>&1; then
   DEV_STATUS_BINARY="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
   DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/src/main.cpp}"
@@ -64,6 +65,23 @@ dev_status_needs_build() {
   return 1
 }
 
+ensure_worker_sync() {
+  if [[ ! -f "$WORKER_ENSURE_SCRIPT" ]]; then
+    printf '[dev-manager] AVISO: worker-sync ensure ausente: %s\n' "$WORKER_ENSURE_SCRIPT" >&2
+    return 0
+  fi
+
+  [[ -x "$WORKER_ENSURE_SCRIPT" ]] || chmod +x "$WORKER_ENSURE_SCRIPT"
+  printf '[dev-manager] garantindo workers TO/FROM...\n'
+  if "$WORKER_ENSURE_SCRIPT"; then
+    printf '[dev-manager] workers TO/FROM OK.\n'
+  else
+    # O monitor continua abrindo para mostrar o estado na TUI; não derruba o terminal.
+    printf '[dev-manager] AVISO: worker-sync não ficou 100%% ativo; confira o indicador na TUI.\n' >&2
+  fi
+  return 0
+}
+
 ensure_dev_status() {
   if ! dev_status_needs_build; then
     return 0
@@ -111,6 +129,7 @@ case "$action" in
   start|run)
     shift || true
     refresh_global_commands
+    ensure_worker_sync
     ensure_dev_status
     printf '[dev-manager] executando em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"

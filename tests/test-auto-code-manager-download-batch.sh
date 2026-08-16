@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 TEMP_ROOT="$(mktemp -d /tmp/auto-code-download-batch-test-XXXXXX)"
 TEST_PROJECT="$TEMP_ROOT/dev-automation"
 CODE_ROOT="$TEMP_ROOT/Code"
-DOWNLOADS_DIR="$TEMP_ROOT/Downloads"
+WORKER_FROM_DIR="$TEMP_ROOT/worker/from"
 LOG_FILE="$TEMP_ROOT/import-batch.log"
 FAKE_BIN="$TEMP_ROOT/fake-bin"
 
@@ -19,7 +19,7 @@ cp -a -- "$PROJECT_ROOT" "$TEST_PROJECT"
 mkdir -p \
   "$CODE_ROOT/orgs/alpha-app" \
   "$CODE_ROOT/orgs/beta-app" \
-  "$DOWNLOADS_DIR" \
+  "$WORKER_FROM_DIR" \
   "$FAKE_BIN"
 
 cat > "$FAKE_BIN/powershell.exe" <<'PS'
@@ -35,11 +35,11 @@ printf 'alpha novo\n' > "$alpha_package/value.txt"
 printf 'beta novo\n' > "$beta_package/value.txt"
 (
   cd "$alpha_package"
-  zip -q "$DOWNLOADS_DIR/alpha-app(2).zip" value.txt
+  zip -q "$WORKER_FROM_DIR/alpha-app(2).zip" value.txt
 )
 (
   cd "$beta_package"
-  zip -q "$DOWNLOADS_DIR/beta-app%2323.zip" value.txt
+  zip -q "$WORKER_FROM_DIR/beta-app%2323.zip" value.txt
 )
 
 
@@ -47,7 +47,7 @@ printf 'beta novo\n' > "$beta_package/value.txt"
 printf 'rom qualquer\n' > "$TEMP_ROOT/unrelated.txt"
 (
   cd "$TEMP_ROOT"
-  zip -q "$DOWNLOADS_DIR/The Goonies (1986) Konami [MSX].zip" unrelated.txt
+  zip -q "$WORKER_FROM_DIR/The Goonies (1986) Konami [MSX].zip" unrelated.txt
 )
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
@@ -70,33 +70,33 @@ ENV
 
 PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
-DOWNLOADS_DIR="$DOWNLOADS_DIR" \
+WORKER_FROM_DIR="$WORKER_FROM_DIR" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
 
 grep -Fxq 'alpha novo' "$CODE_ROOT/orgs/alpha-app/value.txt"
 grep -Fxq 'beta novo' "$CODE_ROOT/orgs/beta-app/value.txt"
-[ ! -e "$DOWNLOADS_DIR/alpha-app(2).zip" ]
-[ ! -e "$DOWNLOADS_DIR/beta-app%2323.zip" ]
-[ -e "$DOWNLOADS_DIR/The Goonies (1986) Konami [MSX].zip" ]
+[ ! -e "$WORKER_FROM_DIR/alpha-app(2).zip" ]
+[ ! -e "$WORKER_FROM_DIR/beta-app%2323.zip" ]
+[ -e "$WORKER_FROM_DIR/The Goonies (1986) Konami [MSX].zip" ]
 
-grep -Fq 'LOTE DE DOWNLOADS: 2 ZIP(s)' "$LOG_FILE"
+grep -Fq 'LOTE DE WORKER/FROM: 2 ZIP(s)' "$LOG_FILE"
 grep -Fq 'LOTE [1/2]:' "$LOG_FILE"
 grep -Fq 'LOTE [2/2]:' "$LOG_FILE"
-grep -Fq 'LOTE DE DOWNLOADS CONCLUÍDO: 2 sucesso(s), 0 falha(s), 2 processado(s).' "$LOG_FILE"
+grep -Fq 'LOTE DE WORKER/FROM CONCLUÍDO: 2 sucesso(s), 0 falha(s), 2 processado(s).' "$LOG_FILE"
 
 
 # Falha de um ZIP reconhecido deve continuar retornando erro, mas o arquivo
-# precisa sair de Downloads para não ser reprocessado indefinidamente.
-printf 'isto nao e um zip\n' > "$DOWNLOADS_DIR/alpha-app-corrompido.zip"
+# precisa sair de worker/from para não ser reprocessado indefinidamente.
+printf 'isto nao e um zip\n' > "$WORKER_FROM_DIR/alpha-app-corrompido.zip"
 if PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
-DOWNLOADS_DIR="$DOWNLOADS_DIR" \
+WORKER_FROM_DIR="$WORKER_FROM_DIR" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once >> "$LOG_FILE" 2>&1; then
   echo 'ERRO: lote com ZIP corrompido deveria retornar falha' >&2
   exit 1
 fi
-[ ! -e "$DOWNLOADS_DIR/alpha-app-corrompido.zip" ]
+[ ! -e "$WORKER_FROM_DIR/alpha-app-corrompido.zip" ]
 grep -Fq 'ERRO: ZIP inválido ou corrompido. O ZIP foi mantido.' "$LOG_FILE"
 grep -Fq 'ZIP com falha apagado para evitar reprocessamento:' "$LOG_FILE"
 
-printf 'OK: todos os ZIPs de Downloads são processados em sequência e falhas saem da fila sem loop\n'
+printf 'OK: todos os ZIPs de worker/from são processados em sequência e falhas saem da fila sem loop\n'

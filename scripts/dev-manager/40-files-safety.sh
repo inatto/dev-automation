@@ -1,35 +1,36 @@
 #!/usr/bin/env bash
-# Contexto: Downloads, estabilidade, arquivos de configuração e regras de segurança
+# Contexto: worker/to, worker/from, estabilidade, arquivos de configuração e segurança
 
-downloads_dir() {
-  local configured_downloads="${DOWNLOADS_DIR:-}"
-  local canonical_downloads="${HOME}/Downloads"
-
-  # Override existe apenas para testes/execuções explicitamente isoladas.
-  # No uso normal, Downloads é sempre o filesystem Linux do WSL:
-  #   /home/<usuario>/Downloads
-  # Nunca fazemos fallback para /mnt/c nem consultamos %USERPROFILE%.
-  if [ -n "$configured_downloads" ]; then
-    printf '%s\n' "$configured_downloads"
+worker_to_dir() {
+  local configured="${WORKER_TO_DIR:-}"
+  if [ -n "$configured" ]; then
+    printf '%s\n' "$configured"
     return
   fi
-
-  printf '%s\n' "$canonical_downloads"
+  printf '%s\n' "${HOME}/worker/to"
 }
 
-ensure_downloads_dir() {
-  local downloads
-  downloads="$(downloads_dir)"
-
-  if [ -z "$downloads" ]; then
-    echo "ERRO: caminho de Downloads WSL não pôde ser determinado." >&2
-    exit 1
+worker_from_dir() {
+  local configured="${WORKER_FROM_DIR:-}"
+  if [ -n "$configured" ]; then
+    printf '%s\n' "$configured"
+    return
   fi
+  printf '%s\n' "${HOME}/worker/from"
+}
 
-  if ! mkdir -p -- "$downloads"; then
-    echo "ERRO: não foi possível preparar Downloads WSL: $downloads" >&2
-    exit 1
+ensure_worker_dirs() {
+  local to from
+  to="$(worker_to_dir)"
+  from="$(worker_from_dir)"
+  if [ -z "$to" ] || [ -z "$from" ]; then
+    echo "ERRO: caminhos worker/to e worker/from não puderam ser determinados." >&2
+    return 1
   fi
+  mkdir -p -- "$to" "$from" || {
+    echo "ERRO: não foi possível preparar worker/to e worker/from." >&2
+    return 1
+  }
 }
 
 stable_file() {

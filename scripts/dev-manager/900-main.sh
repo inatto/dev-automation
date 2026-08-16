@@ -7,7 +7,7 @@ trap tui_on_resize WINCH
 
 ensure_files
 load_env
-ensure_downloads_dir
+ensure_worker_dirs
 validate_timers
 
 if [ "${1:-}" = "--test-sound" ]; then
@@ -46,7 +46,7 @@ if [ "${1:-}" = "--identify-zip" ]; then
   exit 0
 fi
 
-if [ "${1:-}" = "--import-downloads-once" ]; then
+if [ "${1:-}" = "--import-worker-from-once" ] || [ "${1:-}" = "--import-downloads-once" ]; then
   if [ ! -d "$CODE_ROOT" ]; then
     echo "ERRO: diretório não existe: $CODE_ROOT" >&2
     exit 1
@@ -57,7 +57,7 @@ if [ "${1:-}" = "--import-downloads-once" ]; then
     exit 1
   fi
 
-  if import_downloads; then
+  if import_worker_from; then
     taskbar_status done "Importação concluída"
     exit 0
   fi
@@ -146,13 +146,13 @@ if [ "$TUI_ACTIVE" = true ]; then
   TUI_LAST_ACTION="Auto Code Manager $SCRIPT_VERSION"
   tui_refresh
   LOG_CONTEXT=wait log "Auto Code Manager $SCRIPT_VERSION iniciado."
-  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(downloads_dir) · modo=${AUTO_CODE_MONITOR_MODE:-light}."
+  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · worker/from=$(worker_from_dir) · modo=${AUTO_CODE_MONITOR_MODE:-light}."
 else
   line
   echo "Auto Code Manager - $SCRIPT_VERSION"
   line
   echo "CODE_ROOT:     $CODE_ROOT"
-  echo "Downloads:     $(downloads_dir)"
+  echo "worker/from:     $(worker_from_dir)"
   echo "ENV:           $ENV_FILE"
   echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
   echo "Modo:          ${AUTO_CODE_MONITOR_MODE:-light} (leve por metadados; sem inotify no modo light)"
@@ -187,14 +187,14 @@ fi
 if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
 fi
-run_stage downloads "DOWNLOADS INICIAIS" "Importa somente ZIPs que já estavam em Downloads antes do watcher iniciar; depois cada ZIP chega por evento." import_downloads || true
+run_stage downloads "WORKER/FROM INICIAL" "Importa somente ZIPs que já estavam em worker/from antes do watcher iniciar; depois cada ZIP chega por evento." import_worker_from || true
 run_stage sql "SQLs INICIAIS" "Compacta somente SQLs que já existiam antes do watcher iniciar; depois cada pasta é acionada por evento." zip_configured_sql_folders || true
 
 taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
   LOG_CONTEXT=wait log "IDLE leve: sem inotify; somente metadados dos projetos configurados a cada ${LIGHT_SCAN_INTERVAL}s."
 else
-  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads ou SQL."
+  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, worker/from ou SQL."
 fi
 
 while true; do

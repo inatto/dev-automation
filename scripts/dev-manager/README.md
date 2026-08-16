@@ -8,7 +8,7 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `10-tui-legacy.sh`: fallback ANSI da TUI
 - `20-status-logging.sh`: logs/status/lock/pausa
 - `30-sounds.sh`: sons
-- `40-files-safety.sh`: Downloads e segurança
+- `40-files-safety.sh`: worker/from e segurança
 - `50-project-registry.sh`: catálogo de projetos/agregadores
 - `60-project-runtime.sh`: identificação e restart sinalizado
 - `70-imports.sh`: importação de ZIPs

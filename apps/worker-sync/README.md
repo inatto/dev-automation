@@ -1,24 +1,19 @@
-# Worker Sync
+# worker-sync
 
-Canal unidirecional de arquivos via Google Drive.
+Fila de arquivos do `dev-automation`:
 
-```text
-/home/daniel/worker/to -> danielmaiax:worker/to
+- `~/worker/to` -> `danielmaiax:worker/to`: somente upload. Mudança local dispara `rclone copyto` do arquivo alterado.
+- `danielmaiax:worker/from` -> `~/worker/from`: somente download, consultado por timer systemd a cada 5s após o término da rodada anterior.
 
-danielmaiax:worker/from -> /home/daniel/worker/from
-```
+O Auto Code Manager usa as mesmas pastas:
 
-`to` somente sobe. `from` somente baixa. O comando usa `rclone copy`, portanto não espelha exclusões do destino.
+- backups ZIP são gerados em `~/worker/to`;
+- ZIPs recebidos são importados exclusivamente de `~/worker/from`.
 
-## Comandos
+`Downloads` e ZIPs dentro de `Code` não fazem mais parte do fluxo.
 
-```bash
-worker-sync restart
-worker-sync status
-worker-sync test
-worker-sync logs
-worker-sync stop
-worker-sync start
-```
+## Integração com dev-manager
 
-O upload usa `inotifywait` e dispara quando há criação/gravação/movimentação de arquivo em `/home/daniel/worker/to`. O download consulta `danielmaiax:worker/from` a cada 10 segundos.
+Ao executar `dev-manager`, o comando chama `worker-sync ensure` internamente antes
+do Auto Code Manager. A operação é idempotente: units corretos e workers já ativos
+não são reiniciados. A TUI mostra `WORKER TO: OK/PARADO` e `WORKER FROM: OK/PARADO`.

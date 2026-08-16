@@ -52,13 +52,20 @@ assert b"DAY / BASIC" in b, "tema BASIC não foi desenhado"
 assert b"DARK / MATRIX" in b, "atalho T não alternou para MATRIX"
 assert theme == "matrix", "tema selecionado não foi persistido"
 assert "F2/T: tema" in source, "atalho de tema não está documentado no rodapé"
+assert "WORKER TO:" in source, "TUI não mostra worker TO"
+assert "WORKER FROM:" in source, "TUI não mostra worker FROM"
+assert "ZIPs FROM:" in source, "TUI ainda não usa worker/from"
 assert "if self.full_redraw:" in source, "redesenho completo não está protegido por dirty/full redraw"
 PY
 
-# Reinício deve recuperar o tema salvo.
-TERM=xterm-256color DEV_MANAGER_TUI_THEME_FILE="$TMP/theme" timeout 8 \
+# Reinício deve recuperar o tema salvo. Encerra explicitamente a TUI para o
+# timeout de teste não ser confundido com erro do painel.
+(
+  sleep 0.5
+  printf 'q'
+) | TERM=xterm-256color DEV_MANAGER_TUI_THEME_FILE="$TMP/theme" timeout 8 \
   script -qfec "python3 '$PY' '$TMP/fake-manager.sh'" "$TMP/typescript-restart" \
-  </dev/null >/dev/null 2>"$TMP/stderr-restart" || true
+  >/dev/null 2>"$TMP/stderr-restart" || true
 
 [ ! -s "$TMP/stderr-restart" ] || {
   cat "$TMP/stderr-restart" >&2

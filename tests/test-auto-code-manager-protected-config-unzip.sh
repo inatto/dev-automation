@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 TEMP_ROOT="$(mktemp -d /tmp/auto-code-protected-config-test-XXXXXX)"
 TEST_PROJECT="$TEMP_ROOT/dev-automation"
 CODE_ROOT="$TEMP_ROOT/Code"
-DOWNLOADS_DIR="$TEMP_ROOT/Downloads"
+WORKER_FROM_DIR="$TEMP_ROOT/Downloads"
 STATE_DIR="$TEMP_ROOT/state"
 LOG_FILE="$TEMP_ROOT/import.log"
 FAKE_BIN="$TEMP_ROOT/fake-bin"
@@ -22,7 +22,7 @@ mkdir -p \
   "$DEST/apps/api/config/remote" \
   "$DEST/apps/api/config/production" \
   "$DEST/apps/api/config/development" \
-  "$DOWNLOADS_DIR" "$FAKE_BIN"
+  "$WORKER_FROM_DIR" "$FAKE_BIN"
 
 cat > "$FAKE_BIN/powershell.exe" <<'PS'
 #!/usr/bin/env bash
@@ -76,7 +76,7 @@ ENV
 # Gera o backup sanitizado e, junto, a referência exata enviada para análise.
 PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
-DOWNLOADS_DIR="$DOWNLOADS_DIR" \
+WORKER_FROM_DIR="$WORKER_FROM_DIR" \
 AUTO_CODE_STATE_DIR="$STATE_DIR" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null 2>&1
 
@@ -123,12 +123,12 @@ printf 'codigo-novo\n' > "$PACKAGE/app.py"
 
 (
   cd "$PACKAGE"
-  zip -qr "$DOWNLOADS_DIR/sample-app.zip" .
+  zip -qr "$WORKER_FROM_DIR/sample-app.zip" .
 )
 
 PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
-DOWNLOADS_DIR="$DOWNLOADS_DIR" \
+WORKER_FROM_DIR="$WORKER_FROM_DIR" \
 AUTO_CODE_STATE_DIR="$STATE_DIR" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
 
@@ -156,7 +156,7 @@ grep -Fxq 'LEGACY_URL=/legacy' "$DEST/apps/api/config/local/legacy.env.external"
 grep -Fxq 'desenvolvimento-novo' "$DEST/apps/api/config/development/database.env"
 grep -Fxq 'codigo-novo' "$DEST/app.py"
 
-[ ! -e "$DOWNLOADS_DIR/sample-app.zip" ]
+[ ! -e "$WORKER_FROM_DIR/sample-app.zip" ]
 grep -Fq 'ENV protegidos: 4 alterado(s)/novo(s), 2 sem mudança.' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/remote/database.env -> apps/api/config/remote/database.env.external' "$LOG_FILE"
 grep -Fq 'ENV EXTERNAL: apps/api/config/local/new.env -> apps/api/config/local/new.env.external' "$LOG_FILE"

@@ -111,7 +111,10 @@ backup_project() {
 clean_unmanaged_backup_zips() {
   local zip_file expected project managed
 
-  log "Limpando ZIPs de backup fora dos alvos explicitamente configurados em $CODE_ROOT"
+  local output_dir
+  output_dir="$(worker_to_dir)"
+  mkdir -p -- "$output_dir"
+  log "Limpando ZIPs de backup fora dos alvos explicitamente configurados em $output_dir"
   while IFS= read -r -d '' zip_file; do
     wait_if_paused
     managed=false
@@ -128,7 +131,7 @@ clean_unmanaged_backup_zips() {
       log "Removendo ZIP não configurado no .projects: $zip_file"
       rm -f -- "$zip_file" || log "ERRO ao remover ZIP não configurado: $zip_file"
     fi
-  done < <(find "$CODE_ROOT" -mindepth 1 -maxdepth 3 -type f -iname "*.zip" -print0 2>/dev/null)
+  done < <(find "$output_dir" -maxdepth 1 -type f -iname "*.zip" -print0 2>/dev/null)
 }
 
 backup_all() {
