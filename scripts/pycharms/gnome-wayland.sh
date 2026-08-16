@@ -32,16 +32,20 @@ install_extension() {
 {
   "uuid": "$UUID",
   "name": "PyCharms Monitor",
-  "description": "Move janelas PyCharm para o maior monitor e maximiza no GNOME/Wayland.",
+  "description": "Reconcilia janelas PyCharm por projeto, workspace e maior monitor no GNOME/Wayland.",
   "shell-version": ["$major"],
-  "version": 1
+  "version": 2
 }
 JSON
 
-  # O Shell pode reconhecer imediatamente; em algumas versões uma nova extensão
-  # local só entra no registry após nova sessão. Não tratamos isso como falha do
-  # pycharms: a IDE abre normalmente e o diagnóstico informa a situação.
-  gnome-extensions enable "$UUID" >/dev/null 2>&1 || true
+  # Se a extensão já está registrada, force reload para o Shell usar o código
+  # recém-copiado nesta mesma sessão. Extensão nova ainda pode exigir login uma vez.
+  if gnome-extensions info "$UUID" >/dev/null 2>&1; then
+    gnome-extensions disable "$UUID" >/dev/null 2>&1 || true
+    gnome-extensions enable "$UUID" >/dev/null 2>&1 || true
+  else
+    gnome-extensions enable "$UUID" >/dev/null 2>&1 || true
+  fi
 }
 
 extension_state() {

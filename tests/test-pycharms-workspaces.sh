@@ -31,9 +31,9 @@ EOF_EXPECTED
 }
 
 EXT="$ROOT/apps/pycharms-gnome-extension/extension.js"
-grep -q 'change_workspace_by_index(target.workspace - 1, false)' "$EXT" || { echo 'FALHOU: extensão não move para workspace específico' >&2; exit 1; }
+grep -q 'change_workspace_by_index(workspaceIndex, false)' "$EXT" || { echo 'FALHOU: extensão não move para workspace específico' >&2; exit 1; }
 grep -q 'move_to_monitor' "$EXT" || { echo 'FALHOU: extensão não move para monitor 4K/maior área' >&2; exit 1; }
-grep -q 'MaximizeFlags.BOTH' "$EXT" || { echo 'FALHOU: extensão não maximiza' >&2; exit 1; }
+grep -q 'window.maximize()' "$EXT" || { echo 'FALHOU: extensão não maximiza com API Mutter atual' >&2; exit 1; }
 if grep -q 'window.activate(global.get_current_time())' "$EXT"; then
   echo 'FALHOU: extensão ativa a janela e pode trocar o workspace atual do usuário' >&2
   exit 1

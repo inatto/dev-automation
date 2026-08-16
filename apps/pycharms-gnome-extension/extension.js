@@ -3,15 +3,22 @@ import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const PYCHARM_RE = /pycharm|jetbrains[-_. ]?pycharm/i;
-const MAP_PATH = GLib.build_filenamev([
+const STATE_DIR = GLib.build_filenamev([
     GLib.get_home_dir(),
-    '.local', 'state', 'dev-automation', 'pycharms', 'workspaces.tsv',
+    '.local', 'state', 'dev-automation', 'pycharms',
 ]);
+const MAP_PATH = GLib.build_filenamev([STATE_DIR, 'workspaces.tsv']);
+const BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'batch-opening']);
+const RECONCILE_PATH = GLib.build_filenamev([STATE_DIR, 'reconcile.request']);
 
 export default class PyCharmsMonitorExtension extends Extension {
     enable() {
         this._signalIds = [];
         this._timeouts = new Set();
+        this._reconcileRounds = 0;
+        this._lastRequestToken = this._readRequestToken();
+        this._batchWasActive = this._batchActive();
+
         this._signalIds.push([
             global.display,
             global.display.connect('window-created', (_display, window) => {
@@ -19,11 +26,30 @@ export default class PyCharmsMonitorExtension extends Extension {
             }),
         ]);
 
-        for (const actor of global.get_window_actors()) {
-            const window = actor.meta_window;
-            if (window)
-                this._schedulePlacement(window);
-        }
+        // Controle leve: detecta fim do lote e pedidos explícitos de revisão.
+        this._controlTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
+            const batchActive = this._batchActive();
+            if (this._batchWasActive && !batchActive)
+                this._startReconcile(45);
+            this._batchWasActive = batchActive;
+
+            const token = this._readRequestToken();
+            if (token && token !== this._lastRequestToken) {
+                this._lastRequestToken = token;
+                this._startReconcile(45);
+            }
+
+            if (!batchActive && this._reconcileRounds > 0) {
+                this._reconcileAll();
+                this._reconcileRounds--;
+            }
+            return GLib.SOURCE_CONTINUE;
+        });
+
+        // Corrige janelas que já existiam quando a extensão entrou na sessão,
+        // mas só se não houver um lote de abertura em andamento.
+        if (!this._batchWasActive)
+            this._startReconcile(12);
     }
 
     disable() {
@@ -35,32 +61,104 @@ export default class PyCharmsMonitorExtension extends Extension {
             }
         }
         this._signalIds = [];
+
+        if (this._controlTimer) {
+            GLib.source_remove(this._controlTimer);
+            this._controlTimer = 0;
+        }
         for (const id of this._timeouts ?? [])
             GLib.source_remove(id);
         this._timeouts?.clear();
         this._timeouts = new Set();
+        this._reconcileRounds = 0;
+    }
+
+    _batchActive() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(BATCH_PATH);
+            if (!ok)
+                return false;
+            const expiry = Number.parseInt(new TextDecoder('utf-8').decode(bytes).trim(), 10);
+            if (!Number.isFinite(expiry))
+                return false;
+            return Math.floor(GLib.get_real_time() / 1000000) <= expiry;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    _readRequestToken() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(RECONCILE_PATH);
+            if (!ok)
+                return '';
+            return new TextDecoder('utf-8').decode(bytes).trim();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    _startReconcile(rounds = 45) {
+        this._reconcileRounds = Math.max(this._reconcileRounds, rounds);
+    }
+
+    _reconcileAll() {
+        for (const actor of global.get_window_actors()) {
+            const window = actor.meta_window;
+            if (!window || window.get_window_type() !== Meta.WindowType.NORMAL)
+                continue;
+            if (!this._isPyCharm(window))
+                continue;
+            const target = this._projectTarget(window);
+            if (target)
+                this._place(window, target);
+        }
     }
 
     _schedulePlacement(window) {
         let attempts = 0;
-        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+        let stableTarget = '';
+        let stableHits = 0;
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
             attempts++;
             if (!window || window.get_window_type() !== Meta.WindowType.NORMAL) {
                 this._timeouts.delete(id);
                 return GLib.SOURCE_REMOVE;
             }
 
-            if (this._isPyCharm(window)) {
-                const target = this._projectTarget(window);
-                if (target) {
-                    this._place(window, target);
+            // Durante a abertura em lote não encostamos nas janelas. JetBrains
+            // ainda pode estar trocando splash, título, tamanho e sessão nesse ponto.
+            if (this._batchActive()) {
+                if (attempts >= 360) {
                     this._timeouts.delete(id);
                     return GLib.SOURCE_REMOVE;
                 }
+                return GLib.SOURCE_CONTINUE;
             }
 
-            // JetBrains pode demorar para preencher título/WM_CLASS no Wayland.
-            if (attempts >= 60) {
+            if (this._isPyCharm(window)) {
+                const target = this._projectTarget(window);
+                if (target) {
+                    if (stableTarget === target.name)
+                        stableHits++;
+                    else {
+                        stableTarget = target.name;
+                        stableHits = 1;
+                    }
+                    // Exige o mesmo projeto por 2 s antes de mover uma janela
+                    // criada fora do lote normal do comando pycharms.
+                    if (stableHits >= 4) {
+                        this._place(window, target);
+                        this._timeouts.delete(id);
+                        return GLib.SOURCE_REMOVE;
+                    }
+                } else {
+                    stableTarget = '';
+                    stableHits = 0;
+                }
+            }
+
+            if (attempts >= 180) {
                 this._timeouts.delete(id);
                 return GLib.SOURCE_REMOVE;
             }
@@ -152,15 +250,20 @@ export default class PyCharmsMonitorExtension extends Extension {
 
     _place(window, target) {
         try {
-            // O índice do Mutter é zero-based; nosso mapa é 1-based e mantém
-            // Workspace 1 = LAZER. Não ativamos a janela, portanto o usuário
-            // continua no workspace em que já estava.
-            window.change_workspace_by_index(target.workspace - 1, false);
+            // Workspaces são garantidos pelo comando desktops antes do lote.
+            // Não ativamos a janela, então o usuário permanece onde está.
+            const workspaceIndex = target.workspace - 1;
+            const currentWorkspace = window.get_workspace?.();
+            if (!currentWorkspace || currentWorkspace.index() !== workspaceIndex)
+                window.change_workspace_by_index(workspaceIndex, false);
 
             const monitor = this._targetMonitor();
             if (window.get_monitor() !== monitor)
                 window.move_to_monitor(monitor);
-            window.maximize(Meta.MaximizeFlags.BOTH);
+
+            // GNOME/Mutter 49+ removeu MaximizeFlags do argumento de maximize().
+            if (!window.is_maximized?.())
+                window.maximize();
         } catch (error) {
             console.error(`[pycharms-monitor] falha ao posicionar ${target.name}: ${error}`);
         }

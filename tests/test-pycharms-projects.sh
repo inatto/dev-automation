@@ -52,37 +52,37 @@ if grep -Fqx "$CODE_ROOT/bots/dev-automation/apps/exec-agent" <<<"$actual" || \
   exit 1
 fi
 
-if grep -q 'target_relative="$group"\|INCLUDE_DEV_AUTOMATION' "$ROOT/scripts/pycharms.sh"; then
+if grep -q 'target_relative="$group"\|INCLUDE_DEV_AUTOMATION' "$ROOT/scripts/pycharms/windows.sh"; then
   echo 'FALHOU: lógica antiga de agrupamento/ignore ainda existe' >&2
   exit 1
 fi
 
 
-grep -q 'ConvertFrom-Json -InputObject \$json' "$ROOT/scripts/pycharms.sh" || {
+grep -q 'ConvertFrom-Json -InputObject \$json' "$ROOT/scripts/pycharms/windows.sh" || {
   echo 'FALHOU: pycharms não normaliza a lista JSON antes de acessar o primeiro projeto' >&2
   exit 1
 }
 
-if grep -Fq '$projects = @($json | ConvertFrom-Json)' "$ROOT/scripts/pycharms.sh"; then
+if grep -Fq '$projects = @($json | ConvertFrom-Json)' "$ROOT/scripts/pycharms/windows.sh"; then
   echo 'FALHOU: parsing antigo pode aninhar todos os projetos em projects[0] no Windows PowerShell 5.1' >&2
   exit 1
 fi
-grep -Fq 'C:\Program Files\JetBrains\PyCharm 2026.2.1\bin\pycharm64.exe' "$ROOT/scripts/pycharms.sh" || {
+grep -Fq 'C:\Program Files\JetBrains\PyCharm 2026.2.1\bin\pycharm64.exe' "$ROOT/scripts/pycharms/windows.sh" || {
   echo 'FALHOU: pycharms não prioriza o executável solicitado' >&2
   exit 1
 }
 
-grep -q "dontReopenProjects" "$ROOT/scripts/pycharms.sh" || {
+grep -q "dontReopenProjects" "$ROOT/scripts/pycharms/windows.sh" || {
   echo 'FALHOU: pycharms não bloqueia o restore automático da sessão anterior' >&2
   exit 1
 }
 
-grep -q "function Test-ProjectOpen" "$ROOT/scripts/pycharms.sh" || {
+grep -q "function Test-ProjectOpen" "$ROOT/scripts/pycharms/windows.sh" || {
   echo 'FALHOU: pycharms não detecta projetos já abertos' >&2
   exit 1
 }
 
-grep -q 'Já aberto; ignorando' "$ROOT/scripts/pycharms.sh" || {
+grep -q 'Já aberto; ignorando' "$ROOT/scripts/pycharms/windows.sh" || {
   echo 'FALHOU: pycharms não ignora projeto já aberto' >&2
   exit 1
 }

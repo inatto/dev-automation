@@ -1,7 +1,7 @@
 {
   "uuid": "pycharms-monitor@dev-automation",
   "name": "PyCharms Monitor",
-  "description": "Move cada projeto PyCharm para seu workspace, no maior monitor, e maximiza no GNOME/Wayland.",
+  "description": "Reconcilia cada projeto PyCharm no workspace correto após a abertura estabilizar.",
   "shell-version": ["50"],
-  "version": 1
+  "version": 2
 }

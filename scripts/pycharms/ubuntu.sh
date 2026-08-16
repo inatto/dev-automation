@@ -6,9 +6,13 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 CONFIG_FILE="${PYCHARMS_PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PYCHARMS_OPEN_DELAY_SECONDS:-1}"
+STARTUP_SETTLE_SECONDS="${PYCHARMS_STARTUP_SETTLE_SECONDS:-15}"
 GNOME_WAYLAND_HELPER="$SCRIPT_DIR/gnome-wayland.sh"
+DESKTOPS_SCRIPT="$PROJECT_ROOT/scripts/desktops.sh"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
 WORKSPACE_MAP="$STATE_DIR/workspaces.tsv"
+BATCH_MARKER="$STATE_DIR/batch-opening"
+RECONCILE_REQUEST="$STATE_DIR/reconcile.request"
 log(){ printf '[pycharms] %s\n' "$*"; }
 warn(){ printf '[pycharms] AVISO: %s\n' "$*" >&2; }
 fail(){ printf '[pycharms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -123,6 +127,41 @@ show_workspace_map() {
   cat "$WORKSPACE_MAP"
 }
 
+request_reconcile() {
+  mkdir -p "$STATE_DIR"
+  local tmp="$RECONCILE_REQUEST.tmp.$$"
+  printf '%s\n' "$(date +%s%N)" > "$tmp"
+  mv -f "$tmp" "$RECONCILE_REQUEST"
+}
+
+ensure_gnome_workspaces() {
+  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
+  if [[ -x "$DESKTOPS_SCRIPT" ]]; then
+    PROJECTS_FILE="$CONFIG_FILE" DESKTOPS_PLATFORM=gnome "$DESKTOPS_SCRIPT" >/dev/null || \
+      warn 'não foi possível sincronizar os workspaces antes de abrir o PyCharm'
+  fi
+  [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" ensure || true
+}
+
+begin_batch() {
+  mkdir -p "$STATE_DIR"
+  # Expiração de segurança: se o comando for interrompido, a extensão não fica
+  # bloqueada indefinidamente esperando o fim de um lote que morreu.
+  printf '%s\n' "$(( $(date +%s) + 180 ))" > "$BATCH_MARKER"
+}
+
+finish_batch_later() {
+  local settle="$STARTUP_SETTLE_SECONDS"
+  [[ "$settle" =~ ^[0-9]+$ ]] || settle=15
+  (
+    sleep "$settle"
+    rm -f -- "$BATCH_MARKER"
+    request_reconcile
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+  log "janelas serão reconciliadas após ${settle}s de estabilização (workspace + monitor + maximização)"
+}
+
 open_project() {
   local mode="$1" target="$2" project="$3"
   case "$mode" in
@@ -135,7 +174,16 @@ open_project() {
 case "${1:-}" in
   --diagnose|diagnose) show_diagnose; exit 0 ;;
   --workspace-map|workspace-map) show_workspace_map; exit 0 ;;
-  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --diagnose\n'; exit 0 ;;
+  --reconcile|reconcile)
+    load_projects
+    write_workspace_map
+    ensure_gnome_workspaces
+    rm -f -- "$BATCH_MARKER"
+    request_reconcile
+    log 'reconciliação final solicitada.'
+    exit 0
+    ;;
+  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --reconcile | pycharms --diagnose\n'; exit 0 ;;
   --list|list) list_only=1 ;;
   "") list_only=0 ;;
   *) fail "opção inválida: $1" ;;
@@ -146,8 +194,9 @@ write_workspace_map
 if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
 ((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
 IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
-if [[ "${XDG_SESSION_TYPE:-}" == wayland && -x "$GNOME_WAYLAND_HELPER" ]]; then
-  "$GNOME_WAYLAND_HELPER" ensure || true
+ensure_gnome_workspaces
+if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+  begin_batch
 fi
 log "Ubuntu backend: $mode -> $target"
 for ((i=0; i<${#resolved_projects[@]}; i++)); do
@@ -157,3 +206,6 @@ for ((i=0; i<${#resolved_projects[@]}; i++)); do
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done
+if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+  finish_batch_later
+fi
