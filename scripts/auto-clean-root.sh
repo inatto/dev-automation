@@ -15,6 +15,17 @@ set -euo pipefail
 
 PROJECT_ROOT="/home/daniel/Code"
 
+is_wsl_runtime() {
+  [ -n "${WSL_INTEROP:-}" ] && return 0
+  [ -n "${WSL_DISTRO_NAME:-}" ] && return 0
+  grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease /proc/version 2>/dev/null
+}
+
+if ! is_wsl_runtime; then
+  echo "Linux nativo detectado: limpeza Zone.Identifier não é necessária."
+  exit 0
+fi
+
 # Intervalo entre ciclos completos, em segundos.
 INTERVAL_SECONDS=6
 

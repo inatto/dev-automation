@@ -22,6 +22,7 @@ DESKTOPS_SOURCE="$PROJECT_ROOT/scripts/desktops.sh"
 LOCAL_NGINX_SOURCE="$PROJECT_ROOT/scripts/local-nginx.sh"
 DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
 CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
+DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -41,9 +42,10 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$LOCAL_NGINX_SOURCE" ]] || fail "script não encontrado: $LOCAL_NGINX_SOURCE"
 [[ -f "$DEV_STATUS_SOURCE" ]] || fail "script não encontrado: $DEV_STATUS_SOURCE"
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
+[[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
+chmod +x "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -54,6 +56,22 @@ exec "$AUTO_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$AUTO_TARGET"
 log "criado: auto-code-manager -> $AUTO_SOURCE"
+
+LEGACY_DEV_AUTOMATION_TARGET="$TARGET_DIR/dev-automation"
+if [[ -f "$LEGACY_DEV_AUTOMATION_TARGET" ]] && grep -qF 'generated-by: dev-automation-global-command' "$LEGACY_DEV_AUTOMATION_TARGET"; then
+  rm -f "$LEGACY_DEV_AUTOMATION_TARGET"
+  log "removido comando legado: dev-automation"
+fi
+
+DEV_GITSETUP_TARGET="$TARGET_DIR/dev-gitsetup"
+rm -f "$DEV_GITSETUP_TARGET"
+cat > "$DEV_GITSETUP_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec python3 "$DEV_GITSETUP_SOURCE" "\$@"
+EOF_WRAPPER
+chmod +x "$DEV_GITSETUP_TARGET"
+log "criado: dev-gitsetup -> $DEV_GITSETUP_SOURCE"
 
 for command_name in chromes chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status; do
   case "$command_name" in
@@ -103,4 +121,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'

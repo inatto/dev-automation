@@ -2,14 +2,17 @@
 # Contexto: regras, exclusões e árvore de diretórios do inotify
 
 build_inotify_exclude_regex() {
+  local wsl_mode=0
   # Apenas regras de ARQUIVO são enviadas ao --exclude. Diretórios ignorados
   # são removidos da própria árvore de watches com @path, reduzindo drasticamente
   # o número de watches em .venv/node_modules/.git etc.
-  python3 - "$IGNORE_ZIP_FILE" <<'PY_INOTIFY_REGEX'
+  is_wsl_runtime && wsl_mode=1
+  python3 - "$IGNORE_ZIP_FILE" "$wsl_mode" <<'PY_INOTIFY_REGEX'
 import re
 import sys
 
 path = sys.argv[1]
+wsl_mode = sys.argv[2] == '1'
 patterns = []
 
 
@@ -32,8 +35,9 @@ with open(path, 'r', encoding='utf-8', errors='replace') as fh:
             continue
         if line.endswith('/'):
             continue
-        if 'Zone.Identifier' in line:
-            # O evento precisa chegar para que o sidecar seja apagado sem scan.
+        if 'Zone.Identifier' in line and wsl_mode:
+            # No WSL o evento precisa chegar para apagar o sidecar sem scan.
+            # No Linux nativo a própria regra de ignore o remove do watcher.
             continue
         if line.startswith('/'):
             line = line[1:]

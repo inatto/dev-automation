@@ -184,7 +184,9 @@ else
   exit 1
 fi
 
-run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
+if is_wsl_runtime; then
+  run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
+fi
 run_stage downloads "DOWNLOADS INICIAIS" "Importa somente ZIPs que já estavam em Downloads antes do watcher iniciar; depois cada ZIP chega por evento." import_downloads || true
 run_stage sql "SQLs INICIAIS" "Compacta somente SQLs que já existiam antes do watcher iniciar; depois cada pasta é acionada por evento." zip_configured_sql_folders || true
 
@@ -192,7 +194,7 @@ taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
   LOG_CONTEXT=wait log "IDLE leve: sem inotify; somente metadados dos projetos configurados a cada ${LIGHT_SCAN_INTERVAL}s."
 else
-  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads, SQL ou Zone.Identifier."
+  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; nenhuma varredura periódica de projetos, Downloads ou SQL."
 fi
 
 while true; do

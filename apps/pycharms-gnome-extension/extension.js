@@ -3,6 +3,10 @@ import GLib from 'gi://GLib';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const PYCHARM_RE = /pycharm|jetbrains[-_. ]?pycharm/i;
+const MAP_PATH = GLib.build_filenamev([
+    GLib.get_home_dir(),
+    '.local', 'state', 'dev-automation', 'pycharms', 'workspaces.tsv',
+]);
 
 export default class PyCharmsMonitorExtension extends Extension {
     enable() {
@@ -15,8 +19,6 @@ export default class PyCharmsMonitorExtension extends Extension {
             }),
         ]);
 
-        // Também corrige janelas PyCharm que já estavam abertas quando a
-        // extensão foi habilitada/recarregada.
         for (const actor of global.get_window_actors()) {
             const window = actor.meta_window;
             if (window)
@@ -29,11 +31,10 @@ export default class PyCharmsMonitorExtension extends Extension {
             try {
                 object.disconnect(id);
             } catch (_) {
-                // objeto já destruído; nada a fazer
+                // objeto já destruído
             }
         }
         this._signalIds = [];
-
         for (const id of this._timeouts ?? [])
             GLib.source_remove(id);
         this._timeouts?.clear();
@@ -41,10 +42,8 @@ export default class PyCharmsMonitorExtension extends Extension {
     }
 
     _schedulePlacement(window) {
-        // JetBrains pode preencher WM_CLASS/título alguns milissegundos depois
-        // de window-created. Tentamos algumas vezes sem bloquear o Shell.
         let attempts = 0;
-        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 180, () => {
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
             attempts++;
             if (!window || window.get_window_type() !== Meta.WindowType.NORMAL) {
                 this._timeouts.delete(id);
@@ -52,12 +51,16 @@ export default class PyCharmsMonitorExtension extends Extension {
             }
 
             if (this._isPyCharm(window)) {
-                this._place(window);
-                this._timeouts.delete(id);
-                return GLib.SOURCE_REMOVE;
+                const target = this._projectTarget(window);
+                if (target) {
+                    this._place(window, target);
+                    this._timeouts.delete(id);
+                    return GLib.SOURCE_REMOVE;
+                }
             }
 
-            if (attempts >= 30) {
+            // JetBrains pode demorar para preencher título/WM_CLASS no Wayland.
+            if (attempts >= 60) {
                 this._timeouts.delete(id);
                 return GLib.SOURCE_REMOVE;
             }
@@ -76,9 +79,63 @@ export default class PyCharmsMonitorExtension extends Extension {
         return values.some(value => value && PYCHARM_RE.test(String(value)));
     }
 
+    _windowText(window) {
+        return [
+            window.get_title?.(),
+            window.get_description?.(),
+            window.get_wm_class?.(),
+            window.get_wm_class_instance?.(),
+            window.get_gtk_application_id?.(),
+        ]
+            .filter(Boolean)
+            .map(value => String(value).toLocaleLowerCase())
+            .join('\n');
+    }
+
+    _loadTargets() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(MAP_PATH);
+            if (!ok)
+                return [];
+            const text = new TextDecoder('utf-8').decode(bytes);
+            const targets = [];
+            for (const raw of text.split('\n')) {
+                const line = raw.trim();
+                if (!line)
+                    continue;
+                const parts = line.split('\t');
+                if (parts.length < 3)
+                    continue;
+                const workspace = Number.parseInt(parts[0], 10);
+                const name = parts[1];
+                const path = parts.slice(2).join('\t');
+                if (!Number.isInteger(workspace) || workspace < 2 || !name)
+                    continue;
+                targets.push({workspace, name, path});
+            }
+            // Nome mais específico primeiro evita colisões tipo app / orbital-app.
+            targets.sort((a, b) => b.name.length - a.name.length);
+            return targets;
+        } catch (_) {
+            return [];
+        }
+    }
+
+    _projectTarget(window) {
+        const haystack = this._windowText(window);
+        if (!haystack)
+            return null;
+        for (const target of this._loadTargets()) {
+            const name = target.name.toLocaleLowerCase();
+            const path = target.path.toLocaleLowerCase();
+            if (haystack.includes(name) || haystack.includes(path))
+                return target;
+        }
+        return null;
+    }
+
     _targetMonitor() {
-        // Regra Ubuntu deste projeto: PyCharm vai para o monitor de maior área.
-        // No layout do Daniel isso seleciona o DP-6 3840x2160 central.
+        // Maior monitor por área. No layout atual: DP-6, 3840x2160, central.
         const count = global.display.get_n_monitors();
         let best = 0;
         let bestArea = -1;
@@ -93,15 +150,19 @@ export default class PyCharmsMonitorExtension extends Extension {
         return best;
     }
 
-    _place(window) {
-        const monitor = this._targetMonitor();
+    _place(window, target) {
         try {
+            // O índice do Mutter é zero-based; nosso mapa é 1-based e mantém
+            // Workspace 1 = LAZER. Não ativamos a janela, portanto o usuário
+            // continua no workspace em que já estava.
+            window.change_workspace_by_index(target.workspace - 1, false);
+
+            const monitor = this._targetMonitor();
             if (window.get_monitor() !== monitor)
                 window.move_to_monitor(monitor);
             window.maximize(Meta.MaximizeFlags.BOTH);
-            window.activate(global.get_current_time());
         } catch (error) {
-            console.error(`[pycharms-monitor] falha ao posicionar PyCharm: ${error}`);
+            console.error(`[pycharms-monitor] falha ao posicionar ${target.name}: ${error}`);
         }
     }
 }

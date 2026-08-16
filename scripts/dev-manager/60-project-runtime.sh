@@ -53,6 +53,31 @@ project_for_zip() {
   echo "$best"
 }
 
+download_zip_is_configured() {
+  local zip_file="$1"
+  local zip_name project
+
+  [ -n "$zip_file" ] || return 1
+  zip_name="$(basename -- "$zip_file")"
+  project="$(project_for_zip "$zip_name")"
+  [ -n "$project" ]
+}
+
+configured_download_zip_exists() {
+  local downloads zip_file
+
+  downloads="$(downloads_dir)"
+  [ -n "$downloads" ] && [ -d "$downloads" ] || return 1
+
+  while IFS= read -r -d '' zip_file; do
+    if download_zip_is_configured "$zip_file"; then
+      return 0
+    fi
+  done < <(find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)
+
+  return 1
+}
+
 project_update_scope() {
   local source_dir="$1"
   local rel

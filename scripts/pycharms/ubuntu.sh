@@ -7,6 +7,8 @@ CONFIG_FILE="${PYCHARMS_PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.pr
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PYCHARMS_OPEN_DELAY_SECONDS:-1}"
 GNOME_WAYLAND_HELPER="$SCRIPT_DIR/gnome-wayland.sh"
+STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
+WORKSPACE_MAP="$STATE_DIR/workspaces.tsv"
 log(){ printf '[pycharms] %s\n' "$*"; }
 warn(){ printf '[pycharms] AVISO: %s\n' "$*" >&2; }
 fail(){ printf '[pycharms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -18,16 +20,12 @@ find_pycharm_native() {
   done
   while IFS= read -r candidate; do
     [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
-  done < <(find \
-    /opt \
-    "$HOME/.local/share/JetBrains/Toolbox/apps" \
-    "$HOME/.local/share/JetBrains/Toolbox/apps/PyCharm-P" \
-    "$HOME/.local/share/JetBrains/Toolbox/apps/PyCharm-C" \
-    -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) 2>/dev/null | sort -r)
+  done < <(find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) 2>/dev/null | sort -r)
   return 1
 }
 
 pycharm_mode() {
+  local native
   if native="$(find_pycharm_native 2>/dev/null)"; then printf 'native\t%s\n' "$native"; return 0; fi
   if command -v snap >/dev/null 2>&1; then
     if snap list pycharm-professional >/dev/null 2>&1; then printf 'snap\tpycharm-professional\n'; return 0; fi
@@ -47,36 +45,33 @@ show_diagnose() {
   printf 'pycharm-community: '; command -v pycharm-community || true
   printf '\nCandidatos locais:\n'
   find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) -print 2>/dev/null | sort || true
-  printf '\nSnap:\n'; command -v snap >/dev/null 2>&1 && snap list 2>/dev/null | grep -i pycharm || true
-  printf '\nFlatpak:\n'; command -v flatpak >/dev/null 2>&1 && flatpak list --app 2>/dev/null | grep -i pycharm || true
-  printf '\nDetectado pelo comando:\n'
-  pycharm_mode || printf 'NÃO ENCONTRADO\n'
+  printf '\nDetectado pelo comando:\n'; pycharm_mode || printf 'NÃO ENCONTRADO\n'
   printf '\n=== GNOME / MONITOR ===\n'
-  if [[ -x "$GNOME_WAYLAND_HELPER" ]]; then
-    "$GNOME_WAYLAND_HELPER" diagnose || true
-  else
-    printf 'helper GNOME ausente: %s\n' "$GNOME_WAYLAND_HELPER"
-  fi
+  [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" diagnose || true
+  printf '\n=== MAPA PROJETO -> WORKSPACE ===\n'
+  load_projects
+  write_workspace_map
+  cat "$WORKSPACE_MAP"
 }
 
 load_projects() {
   [[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
-  resolved_projects=(); configured_projects=(); effective_projects=()
-  declare -gA configured_set=(); declare -gA effective_set=(); declare -gA seen_projects=()
-  local raw line candidate parent path real skip
+  resolved_projects=(); resolved_workspace_indexes=(); resolved_project_names=()
+  configured_projects=(); configured_workspace_indexes=(); effective_projects=()
+  declare -gA effective_set=(); declare -gA seen_projects=()
+  local raw line candidate parent path real skip workspace_index=2
 
-  # 1) Lê a configuração canônica, mas isso ainda NÃO significa que o projeto
-  # está ativo no grid. Cadastro sem pasta é somente cadastro pendente.
+  # Mesma ordem do comando desktops: Workspace 1 é LAZER; cada linha ativa
+  # cadastrada ocupa sua posição, mesmo que a pasta ainda não exista.
   while IFS= read -r raw || [[ -n "$raw" ]]; do
     raw="${raw%$'\r'}"; line="${raw%%#*}"
     line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"; line="${line#./}"; line="${line%/}"
     [[ -n "$line" && "${line,,}" != *.zip ]] || continue
-    [[ -z "${configured_set[$line]:-}" ]] || continue
-    configured_set[$line]=1; configured_projects+=("$line")
+    configured_projects+=("$line")
+    configured_workspace_indexes+=("$workspace_index")
+    ((workspace_index += 1))
   done < "$CONFIG_FILE"
 
-  # 2) Grid efetivo = projeto cadastrado + pasta realmente existente.
-  # Ausentes são informados e ignorados; não entram na IDE.
   for line in "${configured_projects[@]}"; do
     path="$CODE_ROOT/$line"
     if [[ ! -d "$path" ]]; then
@@ -87,9 +82,10 @@ load_projects() {
     effective_projects+=("$line")
   done
 
-  # 3) Só um pai EFETIVO pode cobrir <pai>/apps/<filho>. Um pai meramente
-  # cadastrado mas inexistente não esconde um filho que existe de verdade.
-  for line in "${effective_projects[@]}"; do
+  local idx
+  for ((idx=0; idx<${#configured_projects[@]}; idx++)); do
+    line="${configured_projects[$idx]}"
+    [[ -n "${effective_set[$line]:-}" ]] || continue
     candidate="$line"; skip=0
     while [[ "$candidate" == */apps/* ]]; do
       parent="${candidate%/apps/*}"
@@ -101,9 +97,32 @@ load_projects() {
     path="$CODE_ROOT/$line"
     real="$(cd -- "$path" && pwd -P)"
     [[ -z "${seen_projects[$real]:-}" ]] || continue
-    seen_projects[$real]=1; resolved_projects+=("$real")
+    seen_projects[$real]=1
+    resolved_projects+=("$real")
+    resolved_workspace_indexes+=("${configured_workspace_indexes[$idx]}")
+    resolved_project_names+=("$(basename -- "$line")")
   done
 }
+
+write_workspace_map() {
+  mkdir -p "$STATE_DIR"
+  local tmp="$WORKSPACE_MAP.tmp.$$" i
+  : > "$tmp"
+  for ((i=0; i<${#resolved_projects[@]}; i++)); do
+    printf '%s\t%s\t%s\n' \
+      "${resolved_workspace_indexes[$i]}" \
+      "${resolved_project_names[$i]}" \
+      "${resolved_projects[$i]}" >> "$tmp"
+  done
+  mv -f "$tmp" "$WORKSPACE_MAP"
+}
+
+show_workspace_map() {
+  load_projects
+  write_workspace_map
+  cat "$WORKSPACE_MAP"
+}
+
 open_project() {
   local mode="$1" target="$2" project="$3"
   case "$mode" in
@@ -115,13 +134,15 @@ open_project() {
 
 case "${1:-}" in
   --diagnose|diagnose) show_diagnose; exit 0 ;;
-  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --diagnose\n'; exit 0 ;;
+  --workspace-map|workspace-map) show_workspace_map; exit 0 ;;
+  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --diagnose\n'; exit 0 ;;
   --list|list) list_only=1 ;;
   "") list_only=0 ;;
   *) fail "opção inválida: $1" ;;
 esac
 
 load_projects
+write_workspace_map
 if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
 ((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
 IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
@@ -129,8 +150,10 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland && -x "$GNOME_WAYLAND_HELPER" ]]; then
   "$GNOME_WAYLAND_HELPER" ensure || true
 fi
 log "Ubuntu backend: $mode -> $target"
-for project in "${resolved_projects[@]}"; do
-  log "abrindo: $project"
+for ((i=0; i<${#resolved_projects[@]}; i++)); do
+  project="${resolved_projects[$i]}"
+  workspace="${resolved_workspace_indexes[$i]}"
+  log "abrindo workspace $workspace: $project"
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done

@@ -79,7 +79,7 @@ file_contains_new() { grep -Fxq 'new-from-download' "$PROJECT_DIR/value.txt" 2>/
 download_gone() { [ ! -e "$DOWNLOADS/alpha-app.zip" ]; }
 sql_gone() { [ ! -e "$SQL_DIR/event.sql" ]; }
 sql_zip_exists() { find "$SQL_DIR" -maxdepth 1 -type f -name '????????-????.zip' -print -quit | grep -q .; }
-zone_gone() { [ ! -e "$PROJECT_DIR/test.txt:Zone.Identifier" ]; }
+zone_present() { [ -e "$PROJECT_DIR/test.txt:Zone.Identifier" ]; }
 
 wait_until 'baseline alpha.zip' test -s "$CODE_ROOT/alpha-app.zip"
 wait_until 'watcher event-driven ativo' grep -Fq 'IDLE event-driven' "$LOG"
@@ -112,9 +112,9 @@ mv "$TEMP/event.sql" "$SQL_DIR/event.sql"
 wait_until 'SQL removido após ZIP validado' sql_gone
 wait_until 'ZIP SQL gerado por evento' sql_zip_exists
 
-# Zone.Identifier: removido pelo próprio evento, sem nova varredura de Code.
+# Linux nativo: Zone.Identifier não recebe tratamento especial.
 printf 'zone\n' > "$PROJECT_DIR/test.txt:Zone.Identifier"
-wait_until 'Zone.Identifier removido por evento' zone_gone
+wait_until 'Zone.Identifier preservado no Linux nativo' zone_present
 
 # Em idle não deve haver nova rodada de scan.
 download_scans_before="$(grep -Fc 'Verificando Downloads:' "$LOG" || true)"
@@ -133,8 +133,8 @@ zone_scans_after="$(grep -Fc 'Limpando Zone.Identifier em' "$LOG" || true)"
   exit 1
 }
 
-grep -Fq 'ZIP detectado pelo filesystem; importa somente este arquivo, sem varrer Downloads.' "$LOG"
+grep -Fq 'ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo.' "$LOG"
 grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "$LOG"
-grep -Fq 'nenhuma varredura periódica de projetos, Downloads, SQL ou Zone.Identifier' "$LOG"
+grep -Fq 'nenhuma varredura periódica de projetos, Downloads ou SQL' "$LOG"
 
-printf 'OK: Downloads, SQL, Zone.Identifier e backup são dirigidos por eventos; idle não volta a fazer scans\n'
+printf 'OK: Downloads/SQL/backup são event-driven; Linux nativo ignora Zone.Identifier\n'

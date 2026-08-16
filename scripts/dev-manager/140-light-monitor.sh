@@ -247,9 +247,8 @@ light_process_downloads_and_sql() {
   local downloads folder
 
   downloads="$(downloads_dir)"
-  if [ -n "$downloads" ] && [ -d "$downloads" ] && \
-     find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print -quit 2>/dev/null | grep -q .; then
-    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP detectado no monitor leve; processa somente o lote presente em Downloads." \
+  if configured_download_zip_exists; then
+    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado no monitor leve; ignora todos os demais ZIPs de Downloads." \
       import_downloads || true
   fi
 

@@ -9,10 +9,13 @@ color_code() {
   case "$1" in
     cycle) printf '1;36' ;;    # ciano forte
     downloads) printf '1;34' ;;# azul
+    download_done) printf '1;94' ;; # azul brilhante para conclusão de downloads
     sql) printf '1;35' ;;      # magenta
     zone) printf '1;33' ;;     # amarelo
     backup) printf '1;32' ;;   # verde
     wait) printf '2;37' ;;     # cinza
+    warning) printf '1;33' ;;  # amarelo forte
+    ok) printf '1;32' ;;       # verde forte
     error) printf '1;31' ;;    # vermelho
     *) printf '0' ;;
   esac
@@ -31,9 +34,17 @@ paint() {
 log() {
   local message="$*"
   local context="${LOG_CONTEXT:-}"
+  local stamp
 
+  # Semântica explícita: erro/aviso ganham prioridade. O restante respeita o
+  # contexto fornecido pela operação (backup/download/sql/etc.). Nada de inferir
+  # cor por palavras encontradas em caminhos de arquivo.
   if [[ "$message" == ERRO:* ]]; then
     context="error"
+  elif [[ "$message" == AVISO:* || "$message" == ATENÇÃO:* || "$message" == ATENCAO:* ]]; then
+    context="warning"
+  elif [ -z "$context" ] && [[ "$message" == OK\ * || "$message" == CONFIRMADO\ * || "$message" == CONCLUÍDO* || "$message" == CONCLUIDO* || "$message" == SUCESSO* ]]; then
+    context="ok"
   fi
 
   if [ "$TUI_ACTIVE" = true ]; then
@@ -41,7 +52,16 @@ log() {
     return 0
   fi
 
-  printf '[%s] ' "$(date '+%Y-%m-%d %H:%M:%S')"
+  stamp="$(date '+%Y-%m-%d %H:%M:%S')"
+
+  # O ncurses recebe contexto estruturado somente pelo pipe privado do filho.
+  # O marcador é removido antes de renderizar e nunca aparece no log visual.
+  if [ "${DEV_MANAGER_TUI_CHILD:-0}" = "1" ]; then
+    printf '@@DEVCTX:%s@@[%s] %s\n' "${context:-base}" "$stamp" "$message"
+    return 0
+  fi
+
+  printf '[%s] ' "$stamp"
   if [ -n "$context" ]; then
     paint "$context" "$message"
     printf '\n'
@@ -74,6 +94,13 @@ stage() {
   [ "$state" = 'skip' ] && marker='·'
 
   taskbar_status "$(tray_state_for_context "$context")" "$title"
+
+  # O filho do ncurses não desenha separadores ANSI. Envia a etapa como log
+  # estruturado para o frontend aplicar a cor exata do contexto.
+  if [ "${DEV_MANAGER_TUI_CHILD:-0}" = "1" ]; then
+    LOG_CONTEXT="$context" log "$marker $title${description:+ — $description}"
+    return 0
+  fi
 
   if [ "$TUI_ACTIVE" = true ]; then
     TUI_LAST_ACTION="$title"

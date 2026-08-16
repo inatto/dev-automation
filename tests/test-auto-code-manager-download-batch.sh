@@ -42,6 +42,14 @@ printf 'beta novo\n' > "$beta_package/value.txt"
   zip -q "$DOWNLOADS_DIR/beta-app%2323.zip" value.txt
 )
 
+
+# ZIP sem correspondência no .projects deve ser completamente ignorado.
+printf 'rom qualquer\n' > "$TEMP_ROOT/unrelated.txt"
+(
+  cd "$TEMP_ROOT"
+  zip -q "$DOWNLOADS_DIR/The Goonies (1986) Konami [MSX].zip" unrelated.txt
+)
+
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
 orgs/alpha-app
 orgs/beta-app
@@ -69,6 +77,7 @@ grep -Fxq 'alpha novo' "$CODE_ROOT/orgs/alpha-app/value.txt"
 grep -Fxq 'beta novo' "$CODE_ROOT/orgs/beta-app/value.txt"
 [ ! -e "$DOWNLOADS_DIR/alpha-app(2).zip" ]
 [ ! -e "$DOWNLOADS_DIR/beta-app%2323.zip" ]
+[ -e "$DOWNLOADS_DIR/The Goonies (1986) Konami [MSX].zip" ]
 
 grep -Fq 'LOTE DE DOWNLOADS: 2 ZIP(s)' "$LOG_FILE"
 grep -Fq 'LOTE [1/2]:' "$LOG_FILE"

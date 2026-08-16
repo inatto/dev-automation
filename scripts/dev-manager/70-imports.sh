@@ -275,10 +275,11 @@ import_downloads() {
 
   log "Verificando Downloads: $downloads"
 
-  # Captura todos os ZIPs existentes no início da rodada e os processa no mesmo
-  # lote. Assim o monitor não volta para limpeza/backup/espera entre um ZIP e
-  # outro. Um arquivo que chegar depois fica para a próxima rodada.
+  # A fila de importação é EXCLUSIVAMENTE o que está cadastrado no .projects.
+  # ZIP aleatório em Downloads (ROM, instalador, pacote etc.) é invisível para
+  # o manager: não entra no lote, não é apagado e não mantém o monitor em loop.
   while IFS= read -r -d '' zip_file; do
+    download_zip_is_configured "$zip_file" || continue
     zip_files+=("$zip_file")
   done < <(
     find "$downloads" \
@@ -290,7 +291,7 @@ import_downloads() {
 
   total="${#zip_files[@]}"
   if [ "$total" -eq 0 ]; then
-    log "Nenhum ZIP encontrado em Downloads nesta rodada."
+    log "Nenhum ZIP configurado no .projects encontrado em Downloads nesta rodada."
     return 0
   fi
 
@@ -305,7 +306,7 @@ import_downloads() {
       imported=$((imported + 1))
     else
       failed=$((failed + 1))
-      log "Falha ao importar: $(basename -- "$zip_file")"
+      log "ERRO: falha ao importar: $(basename -- "$zip_file")"
       # Falha de ZIP reconhecido é terminal para esta entrada da fila. Manter o
       # arquivo em Downloads faria o inotify reprocessar o mesmo erro em loop.
       if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
@@ -316,7 +317,7 @@ import_downloads() {
     fi
   done
 
-  log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
+  LOG_CONTEXT=download_done log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
   [ "$failed" -eq 0 ]
 }
 

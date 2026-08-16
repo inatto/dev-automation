@@ -8,6 +8,7 @@ SOURCES=("$SCRIPT" "$PROJECT_ROOT"/scripts/dev-manager/*.sh)
 
 grep -Fq 'run_stage downloads "DOWNLOADS INICIAIS"' "${SOURCES[@]}"
 grep -Fq 'run_stage sql "SQLs INICIAIS"' "${SOURCES[@]}"
+grep -Fq 'if is_wsl_runtime; then' "${SOURCES[@]}"
 grep -Fq 'run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL"' "${SOURCES[@]}"
 grep -Fq 'stage backup start "BACKUP INTELIGENTE — INÍCIO"' "${SOURCES[@]}"
 grep -Fq 'run_stage downloads "DOWNLOAD / IMPORTAÇÃO"' "${SOURCES[@]}"
@@ -20,7 +21,7 @@ grep -Fq '[ "${NO_COLOR:-}" = "" ]' "${SOURCES[@]}"
 ! grep -Fq 'INTERVAL=' "${SOURCES[@]}"
 ! grep -Fq 'ZONE_EVERY=' "${SOURCES[@]}"
 
-grep -Fq 'ZIP detectado pelo filesystem; importa somente este arquivo, sem varrer Downloads.' "${SOURCES[@]}"
+grep -Fq 'ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo.' "${SOURCES[@]}"
 grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "${SOURCES[@]}"
 grep -Fq 'IDLE event-driven: aguardando inotify' "${SOURCES[@]}"
 grep -Fq 'Estado ocioso real: este read não tem timeout e não consome CPU enquanto' "${SOURCES[@]}"

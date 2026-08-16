@@ -75,6 +75,20 @@ wait_until() {
 wait_until 'backup baseline' test -s "$CODE_ROOT/alpha-app.zip"
 wait_until 'modo light ativo' grep -Fq 'IDLE leve' "$LOG"
 
+# ZIP alheio ao .projects fica em Downloads sem disparar/importar em loop.
+printf 'nao e projeto\n' > "$TEMP/unrelated.txt"
+(cd "$TEMP" && zip -q "$DOWNLOADS/The Goonies (1986) Konami [MSX].zip" unrelated.txt)
+sleep 3
+[ -e "$DOWNLOADS/The Goonies (1986) Konami [MSX].zip" ] || {
+  echo 'FALHOU: ZIP não cadastrado foi removido' >&2
+  exit 1
+}
+[ "$(grep -Fc 'LOTE DE DOWNLOADS:' "$LOG" || true)" -eq 0 ] || {
+  echo 'FALHOU: ZIP não cadastrado disparou lote de Downloads' >&2
+  cat "$LOG" >&2
+  exit 1
+}
+
 before="$(sha256sum "$CODE_ROOT/alpha-app.zip" | awk '{print $1}')"
 printf 'v2\n' > "$PROJECT/app.txt"
 changed="$before"

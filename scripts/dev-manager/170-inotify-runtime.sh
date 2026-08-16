@@ -198,8 +198,9 @@ handle_watch_event() {
 
   [ -n "$event_path" ] || return 0
 
-  # Zone.Identifier: limpeza por evento, sem find periódico.
-  if [[ "$event_path" == *":Zone.Identifier" ]]; then
+  # Compatibilidade WSL apenas. No Linux nativo não existe tratamento especial
+  # para Zone.Identifier.
+  if is_wsl_runtime && [[ "$event_path" == *":Zone.Identifier" ]]; then
     if event_finished_write "$events" || event_has "$events" ATTRIB || event_has "$events" CREATE; then
       rm -f -- "$event_path" 2>/dev/null || true
     fi
@@ -225,8 +226,13 @@ handle_watch_event() {
   # CLOSE_WRITE/MOVED_TO já garantem que o produtor fechou o arquivo; a própria
   # importação ainda valida o ZIP antes de tocar no projeto.
   if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
-    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP detectado pelo filesystem; importa somente este arquivo, sem varrer Downloads." \
-      import_one_zip "$event_path" true || true
+    # Downloads pode conter qualquer porcaria que o usuário baixou. Só o nome
+    # resolvido por project_for_zip(), portanto cadastrado no .projects, entra
+    # no pipeline do manager. Os demais ZIPs são ignorados silenciosamente.
+    if download_zip_is_configured "$event_path"; then
+      run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo." \
+        import_one_zip "$event_path" true || true
+    fi
     return 0
   fi
 

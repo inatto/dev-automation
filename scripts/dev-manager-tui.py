@@ -252,6 +252,8 @@ class Dashboard:
                 error = self.color_number(196, curses.COLOR_RED)
                 sql = self.color_number(48, curses.COLOR_CYAN)
                 muted = self.color_number(22, curses.COLOR_GREEN)
+                download = self.color_number(51, curses.COLOR_CYAN)
+                warning = self.color_number(226, curses.COLOR_YELLOW)
             else:
                 # BASIC/Clipper escurecido: navy profundo sem o azul estourado.
                 bg = self.color_number(17, curses.COLOR_BLUE)
@@ -262,6 +264,8 @@ class Dashboard:
                 error = self.color_number(203, curses.COLOR_RED)
                 sql = self.color_number(213, curses.COLOR_MAGENTA)
                 muted = self.color_number(110, curses.COLOR_CYAN)
+                download = self.color_number(117, curses.COLOR_CYAN)
+                warning = self.color_number(220, curses.COLOR_YELLOW)
 
             pairs = (
                 (1, base, bg),
@@ -271,6 +275,8 @@ class Dashboard:
                 (5, error, bg),
                 (6, sql, bg),
                 (7, muted, bg),
+                (8, download, bg),
+                (9, warning, bg),
             )
             for pair, fg, bg_color in pairs:
                 try:
@@ -286,6 +292,8 @@ class Dashboard:
             "error": curses.color_pair(5) | curses.A_BOLD,
             "sql": curses.color_pair(6) | curses.A_BOLD,
             "muted": curses.color_pair(7),
+            "download": curses.color_pair(8) | curses.A_BOLD,
+            "warning": curses.color_pair(9) | curses.A_BOLD,
         }
         self.stdscr.bkgd(" ", self.colors["base"])
         for win in self.windows.values():
@@ -353,7 +361,15 @@ class Dashboard:
                 except (ProcessLookupError, PermissionError):
                     pass
 
+    @staticmethod
+    def split_log_context(line):
+        match = re.match(r"^@@DEVCTX:([a-z_]+)@@", line)
+        if not match:
+            return "", line
+        return match.group(1), line[match.end():]
+
     def infer_state(self, line):
+        _, line = self.split_log_context(line)
         clean = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", line).strip()
         if not clean:
             return
@@ -367,7 +383,9 @@ class Dashboard:
         elif clean.startswith("Modo:"):
             self.mode = clean.split(":", 1)[1].strip().split()[0].upper()
 
-        if "ERRO:" in upper or "FALH" in upper:
+        # Vermelho é reservado a erro real. Nunca inferir erro só porque uma
+        # linha de resumo contém texto como "0 falha(s)".
+        if "ERRO:" in upper:
             self.status = "ERRO"
             self.status_detail = clean
         elif "PAUSADO" in upper:
@@ -612,17 +630,35 @@ class Dashboard:
             end = total - self.scroll
             start = max(0, end - visible)
             selected = list(self.logs)[start:end]
-            for i, line in enumerate(selected, start=1):
-                upper = line.upper()
-                attr = self.colors["base"]
-                if "ERRO:" in upper or "FALH" in upper:
-                    attr = self.colors["error"]
-                elif "BACKUP" in upper and ("CONCLU" in upper or "OK" in upper):
-                    attr = self.colors["ok"]
-                elif "SQL" in upper:
-                    attr = self.colors["sql"]
-                elif "DOWNLOAD" in upper or "IMPORT" in upper:
-                    attr = self.colors["border"]
+            context_colors = {
+                "error": self.colors["error"],
+                "warning": self.colors["warning"],
+                "backup": self.colors["ok"],
+                "downloads": self.colors["download"],
+                "download_done": self.colors["download"],
+                "cycle": self.colors["highlight"],
+                "sql": self.colors["sql"],
+                "zone": self.colors["warning"],
+                "wait": self.colors["muted"],
+                "ok": self.colors["ok"],
+                "base": self.colors["base"],
+            }
+            for i, raw_line in enumerate(selected, start=1):
+                context, line = self.split_log_context(raw_line)
+                attr = context_colors.get(context, self.colors["base"])
+
+                # Fallback somente para saídas externas não estruturadas. Logs
+                # internos chegam com @@DEVCTX e não dependem do texto/caminho.
+                if not context:
+                    upper = line.upper()
+                    message = re.sub(r"^\[[^]]+\]\s*", "", upper).lstrip()
+                    if message.startswith("ERRO:"):
+                        attr = self.colors["error"]
+                    elif message.startswith(("AVISO:", "ATENÇÃO:", "ATENCAO:")):
+                        attr = self.colors["warning"]
+                    elif message.startswith(("OK ", "CONFIRMADO ", "CONCLUÍDO", "CONCLUIDO", "SUCESSO")):
+                        attr = self.colors["ok"]
+
                 safe_add(logwin, i, 2, fit(line, lw - 5), attr, lw - 5)
             indicator = "SEGUINDO" if self.follow else f"ROLAGEM +{self.scroll}"
             safe_add(

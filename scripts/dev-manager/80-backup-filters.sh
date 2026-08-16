@@ -2,14 +2,17 @@
 # Contexto: limpeza Zone.Identifier e filtros rsync de backup
 
 clean_zone() {
+  # Só existe como compatibilidade para projetos manipulados por Windows/WSL.
+  # Linux nativo não faz varredura inútil atrás de metadata que não cria.
+  is_wsl_runtime || return 0
+
   taskbar_status clean "Zone.Identifier"
-  log "Limpando Zone.Identifier em $CODE_ROOT"
+  LOG_CONTEXT=zone log "Limpando resíduos Zone.Identifier do ambiente WSL em $CODE_ROOT"
 
   find "$CODE_ROOT" \
     -type f \
     -name "*:Zone.Identifier" \
-    -delete 2>/dev/null ||
-    true
+    -delete 2>/dev/null || true
 }
 
 make_rsync_filter() {

@@ -55,6 +55,14 @@ MONITOR_LOCK_FILE="$STATE_DIR/auto-code-manager.monitor.lock"
 MONITOR_LOCK_FD=""
 declare -A DIRTY_BACKUP_TARGETS=()
 
+# Detecção de plataforma centralizada. Zone.Identifier é resíduo de Windows/WSL;
+# no Linux nativo não deve gerar scans, etapas ou eventos especiais.
+is_wsl_runtime() {
+  [ -n "${WSL_INTEROP:-}" ] && return 0
+  [ -n "${WSL_DISTRO_NAME:-}" ] && return 0
+  grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease /proc/version 2>/dev/null
+}
+
 # TUI retrô estilo Clipper. Só entra em tela cheia quando stdout é um terminal.
 # AUTO_CODE_TUI=off desativa e mantém a saída tradicional.
 AUTO_CODE_TUI="${AUTO_CODE_TUI:-clipper}"
