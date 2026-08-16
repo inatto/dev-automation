@@ -13,6 +13,12 @@ STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
 WORKSPACE_MAP="$STATE_DIR/workspaces.tsv"
 BATCH_MARKER="$STATE_DIR/batch-opening"
 RECONCILE_REQUEST="$STATE_DIR/reconcile.request"
+CLOSE_REQUEST="$STATE_DIR/close.request"
+CLOSE_READY="$STATE_DIR/close.ready"
+CLOSE_RESULT="$STATE_DIR/close.result"
+OPEN_PROJECTS_SNAPSHOT="${PYCHARMS_OPEN_PROJECTS_FILE:-$STATE_DIR/open-projects.tsv}"
+OPEN_PROJECTS_REQUEST="$STATE_DIR/open-projects.request"
+OPEN_PROJECTS_READY="$STATE_DIR/open-projects.ready"
 log(){ printf '[pycharms] %s\n' "$*"; }
 warn(){ printf '[pycharms] AVISO: %s\n' "$*" >&2; }
 fail(){ printf '[pycharms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -134,6 +140,105 @@ request_reconcile() {
   mv -f "$tmp" "$RECONCILE_REQUEST"
 }
 
+request_close_all() {
+  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || fail 'pycharms --close requer sessão GNOME/Wayland.'
+  [[ -x "$GNOME_WAYLAND_HELPER" ]] || fail "helper GNOME ausente: $GNOME_WAYLAND_HELPER"
+  "$GNOME_WAYLAND_HELPER" ensure >/dev/null || true
+
+  mkdir -p "$STATE_DIR"
+  local token tmp attempt ready result
+  token="$(date +%s%N)-$$-$RANDOM"
+  tmp="$CLOSE_REQUEST.tmp.$$"
+  rm -f -- "$BATCH_MARKER" "$CLOSE_READY" "$CLOSE_RESULT"
+  printf '%s\n' "$token" > "$tmp"
+  mv -f "$tmp" "$CLOSE_REQUEST"
+
+  for ((attempt=0; attempt<60; attempt++)); do
+    if [[ -f "$CLOSE_READY" ]]; then
+      ready="$(cat "$CLOSE_READY" 2>/dev/null || true)"
+      if [[ "$ready" == "$token" ]]; then
+        result="$(cat "$CLOSE_RESULT" 2>/dev/null || true)"
+        log "fechamento solicitado para todas as janelas PyCharm. ${result:-}"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+  fail 'GNOME não confirmou pycharms --close; nenhum kill forçado foi executado.'
+}
+
+pycharm_process_running() {
+  pgrep -af 'pycharm64|pycharm\.sh|/pycharm([[:space:]]|$)|jetbrains.*pycharm|PyCharm' >/dev/null 2>&1
+}
+
+request_open_projects_snapshot() {
+  mkdir -p "$STATE_DIR"
+
+  # Testes/integrações podem fornecer um snapshot explícito. No uso normal em
+  # GNOME/Wayland, a extensão produz este arquivo a partir das janelas reais.
+  if [[ -n "${PYCHARMS_OPEN_PROJECTS_FILE:-}" ]]; then
+    [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || : > "$OPEN_PROJECTS_SNAPSHOT"
+    return 0
+  fi
+
+  if [[ "${XDG_SESSION_TYPE:-}" != wayland ]]; then
+    # Fora do Wayland não prometemos introspecção de janelas. Mantém o
+    # comportamento anterior sem inventar estado que não conseguimos provar.
+    : > "$OPEN_PROJECTS_SNAPSHOT"
+    return 0
+  fi
+
+  local token tmp attempt ready
+  token="$(date +%s%N)-$$-$RANDOM"
+  tmp="$OPEN_PROJECTS_REQUEST.tmp.$$"
+  rm -f -- "$OPEN_PROJECTS_READY"
+  printf '%s\n' "$token" > "$tmp"
+  mv -f "$tmp" "$OPEN_PROJECTS_REQUEST"
+
+  for ((attempt=0; attempt<50; attempt++)); do
+    if [[ -f "$OPEN_PROJECTS_READY" ]]; then
+      ready="$(cat "$OPEN_PROJECTS_READY" 2>/dev/null || true)"
+      if [[ "$ready" == "$token" ]]; then
+        [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || : > "$OPEN_PROJECTS_SNAPSHOT"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+
+  # Idempotência é mais importante que "tentar mesmo assim". Se já existe
+  # PyCharm rodando e não conseguimos enumerar as janelas, não abrimos nada.
+  if pycharm_process_running; then
+    fail 'não foi possível obter a lista de projetos PyCharm já abertos pelo GNOME; abortando para não duplicar janelas. Rode: pycharms --diagnose'
+  fi
+
+  warn 'snapshot de janelas GNOME indisponível, mas nenhum PyCharm está rodando; seguindo com lista vazia.'
+  : > "$OPEN_PROJECTS_SNAPSHOT"
+}
+
+load_open_project_set() {
+  declare -gA open_project_set=()
+  local a b c path
+  [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || return 0
+  while IFS=$'\t' read -r a b c || [[ -n "${a:-}${b:-}${c:-}" ]]; do
+    path=''
+    if [[ -n "${c:-}" ]]; then
+      path="$c"
+    elif [[ -n "${b:-}" ]]; then
+      path="$b"
+    else
+      path="${a:-}"
+    fi
+    [[ -n "$path" ]] || continue
+    open_project_set["$path"]=1
+  done < "$OPEN_PROJECTS_SNAPSHOT"
+}
+
+refresh_open_projects() {
+  request_open_projects_snapshot
+  load_open_project_set
+}
+
 ensure_gnome_workspaces() {
   [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
   if [[ -x "$DESKTOPS_SCRIPT" ]]; then
@@ -141,6 +246,34 @@ ensure_gnome_workspaces() {
       warn 'não foi possível sincronizar os workspaces antes de abrir o PyCharm'
   fi
   [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" ensure || true
+}
+
+batch_marker_active() {
+  [[ -f "$BATCH_MARKER" ]] || return 1
+  local expiry now
+  expiry="$(cat "$BATCH_MARKER" 2>/dev/null || true)"
+  [[ "$expiry" =~ ^[0-9]+$ ]] || { rm -f -- "$BATCH_MARKER"; return 1; }
+  now="$(date +%s)"
+  if (( now <= expiry )); then
+    return 0
+  fi
+  rm -f -- "$BATCH_MARKER"
+  return 1
+}
+
+wait_for_previous_batch() {
+  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
+  batch_marker_active || return 0
+
+  local max_wait="${PYCHARMS_BATCH_WAIT_SECONDS:-30}" attempt max_attempts
+  [[ "$max_wait" =~ ^[0-9]+$ ]] || max_wait=30
+  max_attempts=$((max_wait * 10))
+  log "lote anterior ainda está estabilizando; aguardando até ${max_wait}s para preservar idempotência..."
+  for ((attempt=0; attempt<max_attempts; attempt++)); do
+    batch_marker_active || return 0
+    sleep 0.1
+  done
+  fail 'lote PyCharm anterior ainda está em estabilização; abortando para não abrir projetos duplicados. Aguarde alguns segundos e rode pycharms novamente.'
 }
 
 begin_batch() {
@@ -174,6 +307,10 @@ open_project() {
 case "${1:-}" in
   --diagnose|diagnose) show_diagnose; exit 0 ;;
   --workspace-map|workspace-map) show_workspace_map; exit 0 ;;
+  --close|close)
+    request_close_all
+    exit 0
+    ;;
   --reconcile|reconcile)
     load_projects
     write_workspace_map
@@ -183,7 +320,7 @@ case "${1:-}" in
     log 'reconciliação final solicitada.'
     exit 0
     ;;
-  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --reconcile | pycharms --diagnose\n'; exit 0 ;;
+  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --reconcile | pycharms --close | pycharms --diagnose\n'; exit 0 ;;
   --list|list) list_only=1 ;;
   "") list_only=0 ;;
   *) fail "opção inválida: $1" ;;
@@ -193,19 +330,45 @@ load_projects
 write_workspace_map
 if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
 ((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
-IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
 ensure_gnome_workspaces
+wait_for_previous_batch
+refresh_open_projects
+
+projects_to_open=()
+workspaces_to_open=()
+for ((i=0; i<${#resolved_projects[@]}; i++)); do
+  project="${resolved_projects[$i]}"
+  workspace="${resolved_workspace_indexes[$i]}"
+  if [[ -n "${open_project_set[$project]:-}" ]]; then
+    log "já aberto; ignorando workspace $workspace: $project"
+    continue
+  fi
+  projects_to_open+=("$project")
+  workspaces_to_open+=("$workspace")
+done
+
+if ((${#projects_to_open[@]} == 0)); then
+  rm -f -- "$BATCH_MARKER"
+  request_reconcile
+  log 'todos os projetos já estão abertos; nenhuma nova janela criada. Reconciliação solicitada.'
+  exit 0
+fi
+
+IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
   begin_batch
 fi
 log "Ubuntu backend: $mode -> $target"
-for ((i=0; i<${#resolved_projects[@]}; i++)); do
-  project="${resolved_projects[$i]}"
-  workspace="${resolved_workspace_indexes[$i]}"
+log "faltando abrir: ${#projects_to_open[@]} de ${#resolved_projects[@]} projeto(s)"
+for ((i=0; i<${#projects_to_open[@]}; i++)); do
+  project="${projects_to_open[$i]}"
+  workspace="${workspaces_to_open[$i]}"
   log "abrindo workspace $workspace: $project"
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
   finish_batch_later
+else
+  request_reconcile
 fi

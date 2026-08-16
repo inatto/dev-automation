@@ -32,4 +32,7 @@ grep -Fq 'org.gnome.desktop.wm.preferences num-workspaces 5' "$GSETTINGS_LOG"
 grep -Fq "workspace-names ['LAZER', 'dev-automation', 'orbital-app', 'lrdp1', 'lrdp2']" "$GSETTINGS_LOG"
 test -f "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/extension.js"
 grep -q "active-workspace-changed" "$ROOT/apps/desktops-gnome-extension/extension.js"
-echo 'OK: GNOME usa workspaces fixos nomeados, lrdp1/lrdp2 no final e instala OSD por troca de workspace.'
+grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
+echo 'OK: GNOME usa workspaces fixos nomeados, lrdp1/lrdp2 no final, OSD e fechamento dos workspaces gerenciados preservando LAZER.'

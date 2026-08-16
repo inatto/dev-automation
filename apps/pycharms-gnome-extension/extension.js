@@ -10,6 +10,12 @@ const STATE_DIR = GLib.build_filenamev([
 const MAP_PATH = GLib.build_filenamev([STATE_DIR, 'workspaces.tsv']);
 const BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'batch-opening']);
 const RECONCILE_PATH = GLib.build_filenamev([STATE_DIR, 'reconcile.request']);
+const OPEN_PROJECTS_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.tsv']);
+const OPEN_PROJECTS_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.request']);
+const OPEN_PROJECTS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.ready']);
+const CLOSE_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'close.request']);
+const CLOSE_READY_PATH = GLib.build_filenamev([STATE_DIR, 'close.ready']);
+const CLOSE_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'close.result']);
 
 export default class PyCharmsMonitorExtension extends Extension {
     enable() {
@@ -17,6 +23,8 @@ export default class PyCharmsMonitorExtension extends Extension {
         this._timeouts = new Set();
         this._reconcileRounds = 0;
         this._lastRequestToken = this._readRequestToken();
+        this._lastOpenProjectsRequestToken = this._readOpenProjectsRequestToken();
+        this._lastCloseRequestToken = this._readCloseRequestToken();
         this._batchWasActive = this._batchActive();
 
         this._signalIds.push([
@@ -37,6 +45,18 @@ export default class PyCharmsMonitorExtension extends Extension {
             if (token && token !== this._lastRequestToken) {
                 this._lastRequestToken = token;
                 this._startReconcile(45);
+            }
+
+            const openProjectsToken = this._readOpenProjectsRequestToken();
+            if (openProjectsToken && openProjectsToken !== this._lastOpenProjectsRequestToken) {
+                this._lastOpenProjectsRequestToken = openProjectsToken;
+                this._writeOpenProjectsSnapshot(openProjectsToken);
+            }
+
+            const closeToken = this._readCloseRequestToken();
+            if (closeToken && closeToken !== this._lastCloseRequestToken) {
+                this._lastCloseRequestToken = closeToken;
+                this._closePyCharmWindows(closeToken);
             }
 
             if (!batchActive && this._reconcileRounds > 0) {
@@ -95,6 +115,88 @@ export default class PyCharmsMonitorExtension extends Extension {
             return new TextDecoder('utf-8').decode(bytes).trim();
         } catch (_) {
             return '';
+        }
+    }
+
+    _readOpenProjectsRequestToken() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(OPEN_PROJECTS_REQUEST_PATH);
+            if (!ok)
+                return '';
+            return new TextDecoder('utf-8').decode(bytes).trim();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    _readCloseRequestToken() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(CLOSE_REQUEST_PATH);
+            if (!ok)
+                return '';
+            return new TextDecoder('utf-8').decode(bytes).trim();
+        } catch (_) {
+            return '';
+        }
+    }
+
+    _closePyCharmWindows(token) {
+        this._reconcileRounds = 0;
+        let requested = 0;
+        let skipped = 0;
+        const timestamp = global.get_current_time();
+
+        for (const actor of global.get_window_actors()) {
+            const window = actor.meta_window;
+            if (!window || window.get_window_type() !== Meta.WindowType.NORMAL)
+                continue;
+            if (!this._isPyCharm(window))
+                continue;
+            if (window.can_close?.() === false) {
+                skipped++;
+                continue;
+            }
+            try {
+                window.delete(timestamp);
+                requested++;
+            } catch (error) {
+                skipped++;
+                console.error(`[pycharms-monitor] falha ao fechar janela PyCharm: ${error}`);
+            }
+        }
+
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            GLib.file_set_contents(CLOSE_RESULT_PATH, `solicitadas=${requested} ignoradas=${skipped}\n`);
+            GLib.file_set_contents(CLOSE_READY_PATH, `${token}\n`);
+        } catch (error) {
+            console.error(`[pycharms-monitor] falha ao confirmar pycharms --close: ${error}`);
+        }
+    }
+
+    _writeOpenProjectsSnapshot(token) {
+        const seen = new Set();
+        const rows = [];
+        for (const actor of global.get_window_actors()) {
+            const window = actor.meta_window;
+            if (!window || window.get_window_type() !== Meta.WindowType.NORMAL)
+                continue;
+            if (!this._isPyCharm(window))
+                continue;
+            const target = this._projectTarget(window);
+            if (!target || seen.has(target.path))
+                continue;
+            seen.add(target.path);
+            rows.push(`${target.workspace}\t${target.name}\t${target.path}`);
+        }
+
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const body = rows.length > 0 ? `${rows.join('\n')}\n` : '';
+            GLib.file_set_contents(OPEN_PROJECTS_PATH, body);
+            GLib.file_set_contents(OPEN_PROJECTS_READY_PATH, `${token}\n`);
+        } catch (error) {
+            console.error(`[pycharms-monitor] falha ao gravar snapshot de projetos abertos: ${error}`);
         }
     }
 

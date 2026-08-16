@@ -15,6 +15,13 @@ grep -q "width \* rect.height" "$EXT" || { echo 'FALHOU: extensão não selecion
 grep -q "workspaces.tsv" "$EXT" || { echo 'FALHOU: extensão não usa mapa projeto/workspace' >&2; exit 1; }
 grep -q "batch-opening" "$EXT" || { echo 'FALHOU: extensão não bloqueia movimentação durante lote' >&2; exit 1; }
 grep -q "reconcile.request" "$EXT" || { echo 'FALHOU: extensão não observa reconciliação final' >&2; exit 1; }
+grep -q "open-projects.request" "$EXT" || { echo 'FALHOU: extensão não recebe pedido de snapshot dos projetos abertos' >&2; exit 1; }
+grep -q "open-projects.ready" "$EXT" || { echo 'FALHOU: extensão não confirma snapshot dos projetos abertos' >&2; exit 1; }
+grep -q "close.request" "$EXT" || { echo 'FALHOU: extensão não recebe pedido de fechamento' >&2; exit 1; }
+grep -q "_closePyCharmWindows" "$EXT" || { echo 'FALHOU: extensão não fecha todas as janelas PyCharm' >&2; exit 1; }
+grep -q "window.delete(timestamp)" "$EXT" || { echo 'FALHOU: extensão não usa fechamento gracioso do Mutter' >&2; exit 1; }
+grep -q -- "--close|close" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não expõe pycharms --close' >&2; exit 1; }
+grep -q "já aberto; ignorando workspace" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não ignora projeto já aberto' >&2; exit 1; }
 grep -q "PYCHARMS_STARTUP_SETTLE_SECONDS" "$UBUNTU" || { echo 'FALHOU: backend não possui janela de estabilização configurável' >&2; exit 1; }
 grep -q "DESKTOPS_SCRIPT" "$UBUNTU" || { echo 'FALHOU: backend não garante workspaces antes de abrir' >&2; exit 1; }
 grep -q "finish_batch_later" "$UBUNTU" || { echo 'FALHOU: backend não dispara reconciliação final após o lote' >&2; exit 1; }

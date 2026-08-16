@@ -10,6 +10,11 @@ DESKTOPS_PLATFORM="${DESKTOPS_PLATFORM:-auto}"
 GNOME_OSD_UUID='workspace-name-osd@dev-automation'
 GNOME_OSD_SOURCE="$PROJECT_ROOT/apps/desktops-gnome-extension"
 GNOME_OSD_TARGET="$HOME/.local/share/gnome-shell/extensions/$GNOME_OSD_UUID"
+STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
+DESKTOPS_STATE_DIR="$STATE_ROOT/desktops"
+DESKTOPS_CLOSE_REQUEST="$DESKTOPS_STATE_DIR/close.request"
+DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
+DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
@@ -44,15 +49,48 @@ show_list() {
   done
 }
 
+request_gnome_close() {
+  command -v gnome-extensions >/dev/null 2>&1 || fail 'gnome-extensions não encontrado'
+  install_gnome_osd
+  gnome-extensions info "$GNOME_OSD_UUID" >/dev/null 2>&1 || \
+    fail 'extensão GNOME de workspaces ainda não registrada; faça logout/login uma vez e rode desktops --close novamente.'
+
+  mkdir -p "$DESKTOPS_STATE_DIR"
+  local token tmp attempt ready result
+  token="$(date +%s%N)-$$-$RANDOM"
+  tmp="$DESKTOPS_CLOSE_REQUEST.tmp.$$"
+  rm -f -- "$DESKTOPS_CLOSE_READY" "$DESKTOPS_CLOSE_RESULT"
+  printf '%s\n' "$token" > "$tmp"
+  mv -f "$tmp" "$DESKTOPS_CLOSE_REQUEST"
+
+  for ((attempt=0; attempt<60; attempt++)); do
+    if [[ -f "$DESKTOPS_CLOSE_READY" ]]; then
+      ready="$(cat "$DESKTOPS_CLOSE_READY" 2>/dev/null || true)"
+      if [[ "$ready" == "$token" ]]; then
+        result="$(cat "$DESKTOPS_CLOSE_RESULT" 2>/dev/null || true)"
+        log "fechamento solicitado para janelas dos workspaces gerenciados (LAZER preservado). ${result:-}"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+  fail 'GNOME não confirmou desktops --close; nenhuma tentativa de kill forçado foi feita.'
+}
+
+requested_action=sync
 case "${1:-}" in
   --list|list)
     show_list
     exit 0
     ;;
+  --close|close)
+    requested_action=close
+    ;;
   --help|-h|help)
     cat <<'HELP'
 Uso:
   desktops --list   Mostra LAZER + projetos + lrdp1 + lrdp2, sem alterar o sistema
+  desktops --close  Solicita fechamento de todas as janelas dos workspaces 2..N; preserva LAZER
   desktops          Sincroniza os workspaces e seus nomes
 
 Ubuntu/GNOME:
@@ -94,13 +132,14 @@ install_gnome_osd() {
   "name": "Dev Automation Workspace Name OSD",
   "description": "Mostra numero e nome do workspace ao alternar no GNOME.",
   "shell-version": ["$major"],
-  "version": 1
+  "version": 2
 }
 JSON
 
   if gnome-extensions info "$GNOME_OSD_UUID" >/dev/null 2>&1; then
+    gnome-extensions disable "$GNOME_OSD_UUID" >/dev/null 2>&1 || true
     gnome-extensions enable "$GNOME_OSD_UUID" >/dev/null 2>&1 || true
-    log 'OSD de nome do workspace instalado/habilitado.'
+    log 'OSD/controle de workspaces instalado, recarregado e habilitado.'
   else
     warn 'OSD instalado, mas o GNOME Shell ainda não registrou a nova extensão; faça logout/login uma vez e rode desktops novamente.'
   fi
@@ -185,7 +224,11 @@ detect_platform() {
   fi
 }
 
-case "$(detect_platform)" in
-  gnome) sync_gnome ;;
-  windows) sync_windows ;;
+platform="$(detect_platform)"
+case "$requested_action:$platform" in
+  sync:gnome) sync_gnome ;;
+  sync:windows) sync_windows ;;
+  close:gnome) request_gnome_close ;;
+  close:windows) fail 'desktops --close está disponível no Ubuntu/GNOME.' ;;
+  *) fail "ação/plataforma inválida: $requested_action/$platform" ;;
 esac

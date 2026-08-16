@@ -34,7 +34,7 @@ install_extension() {
   "name": "PyCharms Monitor",
   "description": "Reconcilia janelas PyCharm por projeto, workspace e maior monitor no GNOME/Wayland.",
   "shell-version": ["$major"],
-  "version": 2
+  "version": 3
 }
 JSON
 
