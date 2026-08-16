@@ -24,6 +24,9 @@ DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
 CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 WORKER_SYNC_SOURCE="$PROJECT_ROOT/scripts/worker-sync.sh"
+CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
+LRDP1_SOURCE="${LRDP1_SOURCE:-$CODE_ROOT/bots/lrdp/lrdp1}"
+LRDP2_SOURCE="${LRDP2_SOURCE:-$CODE_ROOT/bots/lrdp/lrdp2}"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -111,7 +114,27 @@ EOF_WRAPPER
 chmod +x "$ORACLE_MONITOR_TARGET"
 log "criado: oracle-monitor -> $ORACLE_MONITOR_DIR"
 
-TARGET_DIR="$TARGET_DIR" "$PROJECT_INSTALLER"
+for lrdp_name in lrdp1 lrdp2; do
+  case "$lrdp_name" in
+    lrdp1) lrdp_source="$LRDP1_SOURCE" ;;
+    lrdp2) lrdp_source="$LRDP2_SOURCE" ;;
+  esac
+  lrdp_target="$TARGET_DIR/$lrdp_name"
+  rm -f "$lrdp_target"
+  cat > "$lrdp_target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+if [[ ! -x "$lrdp_source" ]]; then
+  printf '[$lrdp_name] ERRO: comando do projeto não encontrado/executável: %s\n' "$lrdp_source" >&2
+  exit 1
+fi
+exec "$lrdp_source" "\$@"
+EOF_WRAPPER
+  chmod +x "$lrdp_target"
+  log "criado: $lrdp_name -> $lrdp_source"
+done
+
+TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" "$PROJECT_INSTALLER"
 
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
 if ! grep -qxF "$PATH_LINE" "$HOME/.bashrc" 2>/dev/null; then
@@ -124,4 +147,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v oracle-monitor\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
