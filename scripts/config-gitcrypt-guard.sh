@@ -191,11 +191,15 @@ ensure_repo_key() {
         critical "repo não está desbloqueado/configurado com a chave padrão: $repo"
         return 1
       fi
-      if git -C "$repo" crypt unlock "$KEY_FILE" >/dev/null 2>&1; then
+      local unlock_err
+      unlock_err="$(git -C "$repo" crypt unlock "$KEY_FILE" 2>&1 >/dev/null || true)"
+      if repo_internal_key_matches "$repo"; then
         fixed "git-crypt configurado/desbloqueado com a chave padrão: $repo"
         return 0
       fi
-      critical "não foi possível aplicar a chave git-crypt padrão; repo preservado: $repo"
+      unlock_err="${unlock_err//$'\n'/; }"
+      [ -n "$unlock_err" ] || unlock_err="git-crypt recusou a chave sem detalhar o motivo"
+      critical "não foi possível aplicar a chave git-crypt padrão; repo preservado: $repo | motivo: $unlock_err"
       return 1
       ;;
   esac
@@ -242,6 +246,63 @@ head_blob_is_encrypted() {
   [ "$hex" = "00474954435259505400" ]
 }
 
+repair_plain_index_blobs() {
+  local repo="$1"
+  shift
+  local -a rels=("$@")
+  local rel path mode blob attr_out filter diff
+  local repaired=0 failed=0
+
+  for rel in "${rels[@]}"; do
+    while IFS= read -r -d '' path; do
+      mode="$(git -C "$repo" ls-files -s -- "$path" 2>/dev/null | awk '$3==0{print $1; exit}')"
+      [ "$mode" = 100644 ] || [ "$mode" = 100755 ] || continue
+      is_git_control_path "$path" && continue
+      index_blob_is_encrypted "$repo" "$path" && continue
+
+      if [ -n "$(git -C "$repo" ls-files -u -- "$path" 2>/dev/null)" ]; then
+        critical "$repo: arquivo config com merge não resolvido; não alterei o índice: $path"
+        failed=$((failed + 1))
+        continue
+      fi
+
+      attr_out="$(git -C "$repo" check-attr filter diff -- "$path" 2>/dev/null || true)"
+      filter="$(printf '%s\n' "$attr_out" | awk -F': ' '$2=="filter"{print $3; exit}')"
+      diff="$(printf '%s\n' "$attr_out" | awk -F': ' '$2=="diff"{print $3; exit}')"
+      if [ "$filter" != git-crypt ] || [ "$diff" != git-crypt ]; then
+        critical "$repo: atributos git-crypt ainda não ativos para $path"
+        failed=$((failed + 1))
+        continue
+      fi
+
+      # Usa EXATAMENTE o conteúdo que já está no índice, não o working tree.
+      # --path faz o Git aplicar o clean filter (git-crypt) ao gerar o novo blob.
+      blob="$(git -C "$repo" show ":$path" 2>/dev/null | git -C "$repo" hash-object -w --path="$path" --stdin 2>/dev/null || true)"
+      if [ -z "$blob" ] || ! git -C "$repo" cat-file -e "$blob^{blob}" 2>/dev/null; then
+        critical "$repo: não consegui gerar blob git-crypt para o índice: $path"
+        failed=$((failed + 1))
+        continue
+      fi
+      if ! git -C "$repo" update-index --cacheinfo "$mode" "$blob" "$path" >/dev/null 2>&1; then
+        critical "$repo: não consegui substituir blob plaintext no índice: $path"
+        failed=$((failed + 1))
+        continue
+      fi
+      if ! index_blob_is_encrypted "$repo" "$path"; then
+        critical "$repo: filtro executou mas o blob continuou plaintext: $path"
+        failed=$((failed + 1))
+        continue
+      fi
+      repaired=$((repaired + 1))
+    done < <(git -C "$repo" ls-files -z -- "$rel" 2>/dev/null)
+  done
+
+  if [ "$repaired" -gt 0 ]; then
+    fixed "$repo: $repaired blob(s) config migrado(s) para git-crypt no índice sem tocar no working tree"
+  fi
+  [ "$failed" -eq 0 ]
+}
+
 verify_repo_configs() {
   local repo="$1"
   shift
@@ -271,7 +332,11 @@ verify_repo_configs() {
   [ "$attr_bad" -eq 0 ] || critical "$repo: $attr_bad arquivo(s) rastreado(s) em config sem atributos git-crypt corretos"
   [ "$plain_index" -eq 0 ] || critical "$repo: $plain_index arquivo(s) de config ainda estão plaintext no índice Git"
   if [ "$plain_head" -gt 0 ]; then
-    critical "$repo: $plain_head arquivo(s) de config estão plaintext no HEAD; índice pode estar reparado, mas histórico Git pode conter segredo"
+    if [ "$plain_index" -eq 0 ] && [ "$attr_bad" -eq 0 ]; then
+      warn "$repo: $plain_head arquivo(s) ainda estão plaintext no HEAD antigo; índice já está criptografado. Um próximo commit grava a proteção; histórico anterior só some com rewrite explícito"
+    else
+      critical "$repo: $plain_head arquivo(s) de config estão plaintext no HEAD e a migração atual ainda não ficou comprovada"
+    fi
   fi
   if [ "$attr_bad" -eq 0 ] && [ "$plain_index" -eq 0 ]; then
     ok "$repo: ${#rels[@]} pasta(s) config protegida(s); $tracked arquivo(s) rastreado(s) verificados"
@@ -334,17 +399,9 @@ protect_repo() {
     fixed "regras git-crypt adicionadas/normalizadas em .gitattributes: $repo"
   fi
 
-  if tracked_config_dirty "$repo" "${rels[@]}"; then
-    critical "config tem alteração rastreada não commitada; regras aplicadas, mas não re-stageei arquivos para não mexer no seu trabalho: $repo"
-  else
-    for rel in "${rels[@]}"; do
-      if git -C "$repo" crypt status -f "$rel" >/dev/null 2>&1; then
-        :
-      else
-        critical "git-crypt não conseguiu normalizar blobs já rastreados em $rel: $repo"
-      fi
-    done
-  fi
+  # Migra somente o conteúdo JÁ presente no índice. Isso funciona mesmo com
+  # arquivo modificado/staged e não puxa mudanças do working tree para o stage.
+  repair_plain_index_blobs "$repo" "${rels[@]}" || true
 
   rm -f -- "$block" "$rendered"
   verify_repo_configs "$repo" "${rels[@]}"

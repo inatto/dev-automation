@@ -45,6 +45,7 @@ case "$cmd" in
 esac
 EOF_FAKE
 chmod +x "$BIN/git-crypt"
+export PATH="$BIN:$PATH"
 
 cd "$CODE/orgs/test"
 git init -q
@@ -58,10 +59,10 @@ set +e
 PATH="$BIN:$PATH" "$GUARD" --fix --code-root "$CODE" --projects-file "$PROJECTS" --key "$KEY" > "$TMP/first.log" 2>&1
 rc=$?
 set -e
-[ "$rc" -eq 3 ] # histórico anterior plaintext é crítico, mesmo após reparo do índice.
+[ "$rc" -eq 0 ] # HEAD antigo vira aviso; índice atual é reparado automaticamente.
 grep -Fq 'FIX: git-crypt configurado/desbloqueado' "$TMP/first.log"
 grep -Fq 'FIX: regras git-crypt adicionadas/normalizadas' "$TMP/first.log"
-grep -Fq 'histórico Git pode conter segredo' "$TMP/first.log"
+grep -Fq 'HEAD antigo; índice já está criptografado' "$TMP/first.log"
 grep -Fq 'config/** filter=git-crypt diff=git-crypt' .gitattributes
 grep -Fq '**/.gitignore !filter !diff' .gitattributes
 [ "$(git show :config/app.env | head -c 10 | od -An -tx1 | tr -d ' \n')" = '00474954435259505400' ]
@@ -71,6 +72,27 @@ git commit -qm 'protect config'
 PATH="$BIN:$PATH" "$GUARD" --fix --code-root "$CODE" --projects-file "$PROJECTS" --key "$KEY" > "$TMP/second.log" 2>&1
 grep -Fq 'RESUMO: 0 críticos, 0 correção(ões)' "$TMP/second.log"
 [ -z "$(git status --porcelain)" ]
+
+# Config modificada/staged continua com o MESMO estado de trabalho: o guard
+# transforma somente o blob já existente no índice, nunca usa o working tree.
+printf 'PASSWORD=staged-user-change\n' > config/app.env
+git add -- config/app.env
+# Simula índice plaintext legado mantendo o conteúdo staged do usuário.
+plain_blob="$(printf 'PASSWORD=staged-user-change\n' | git hash-object -w --stdin)"
+git update-index --cacheinfo 100644 "$plain_blob" config/app.env
+printf 'PASSWORD=unstaged-user-change\n' > config/app.env
+before_worktree="$(cat config/app.env)"
+PATH="$BIN:$PATH" "$GUARD" --fix --code-root "$CODE" --projects-file "$PROJECTS" --key "$KEY" > "$TMP/dirty.log" 2>&1
+grep -Fq 'blob(s) config migrado(s) para git-crypt no índice sem tocar no working tree' "$TMP/dirty.log"
+[ "$(cat config/app.env)" = "$before_worktree" ]
+[ "$(git show :config/app.env | head -c 10 | od -An -tx1 | tr -d ' \n')" = '00474954435259505400' ]
+# O staged continua representando staged-user-change, e o working tree continua
+# unstaged-user-change após o smudge do fake.
+[ "$(git show :config/app.env | PATH="$BIN:$PATH" git-crypt smudge)" = 'PASSWORD=staged-user-change' ]
+[ "$(cat config/app.env)" = 'PASSWORD=unstaged-user-change' ]
+# Restaura para testar chave divergente sem ruído do working tree.
+git checkout -- config/app.env
+git reset -q HEAD -- config/app.env
 
 # Chave local diferente nunca é substituída automaticamente.
 printf 'different-key\n' > "$TMP/other.key"
