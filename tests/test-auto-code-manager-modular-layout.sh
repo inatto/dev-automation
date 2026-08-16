@@ -10,7 +10,7 @@ MOD="$ROOT/scripts/dev-manager"
 
 count="$(find "$MOD" -maxdepth 1 -type f -name '*.sh' | wc -l)"
 [ "$count" -ge 10 ]
-[ "$count" -le 20 ]
+[ "$count" -le 21 ]
 
 while IFS= read -r file; do
   bash -n "$file"

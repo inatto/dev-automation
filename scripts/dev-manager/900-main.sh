@@ -30,6 +30,15 @@ if [ "${1:-}" = "--list-backup-targets" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "--git-crypt-audit" ] || [ "${1:-}" = "--gitcrypt-audit" ]; then
+  if gitcrypt_guard_all; then
+    taskbar_status done "Git-crypt config OK"
+    exit 0
+  fi
+  taskbar_status error "CRÍTICO: config sem git-crypt"
+  exit 3
+fi
+
 if [ "${1:-}" = "--identify-zip" ]; then
   if [ -z "${2:-}" ]; then
     echo "Uso: auto-code-manager --identify-zip <arquivo.zip>" >&2
@@ -162,6 +171,11 @@ else
 fi
 
 initialize_pause_control
+
+# Segurança de configuração é verificada imediatamente ao abrir o dev-manager,
+# além da checagem antes de cada backup. Falha não derruba a TUI: mantém o
+# status CRÍTICO visível, toca o alerta e deixa o monitor iniciar normalmente.
+gitcrypt_guard_all || true
 
 if ! start_change_monitor; then
   taskbar_status error "Monitor indisponível"

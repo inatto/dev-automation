@@ -37,6 +37,7 @@ Uso:
   dev-manager --test-backup-sound Testa o aviso sutil de backup
   dev-manager commands     Atualiza todos os comandos globais
   dev-manager desktops     Cria/nomeia desktops pelos projetos ativos
+  dev-manager git-crypt    Audita/corrige git-crypt de toda pasta config ativa
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
   dev-manager help         Mostra esta ajuda
@@ -149,6 +150,10 @@ case "$action" in
     [[ -f "$DESKTOPS_SCRIPT" ]] || fail "script de desktops não encontrado: $DESKTOPS_SCRIPT"
     [[ -x "$DESKTOPS_SCRIPT" ]] || chmod +x "$DESKTOPS_SCRIPT"
     exec "$DESKTOPS_SCRIPT" "$@"
+    ;;
+  git-crypt|gitcrypt|config-crypt|security-config)
+    shift || true
+    exec "$AUTO_MANAGER" --git-crypt-audit "$@"
     ;;
   status)
     status_manager

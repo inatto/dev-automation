@@ -43,6 +43,7 @@ DEV_MANAGER_MODULES=(
   160-dirty-backups.sh
   170-inotify-runtime.sh
   180-lifecycle.sh
+  190-config-gitcrypt-guard.sh
   900-main.sh
 )
 

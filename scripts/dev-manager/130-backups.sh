@@ -17,6 +17,12 @@ backup_project() {
     return 1
   fi
 
+  if ! target_is_aggregate "$project"; then
+    # Segurança desacoplada: audita/aplica git-crypt antes do backup, mas nunca
+    # derruba a esteira. Falha vira alerta crítico vermelho + som pelo módulo 190.
+    gitcrypt_guard_project "$project" || true
+  fi
+
   taskbar_status backup "$archive_name"
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
