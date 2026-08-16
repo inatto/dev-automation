@@ -6,6 +6,13 @@ APP_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 PROJECT_ROOT="$(cd -- "$APP_ROOT/../.." && pwd -P)"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 REMOTE_NAME="${WORKER_RCLONE_REMOTE:-danielmaiax}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation/worker-sync"
+FINGERPRINT_FILE="$STATE_DIR/source.sha256"
+
+worker_source_fingerprint() {
+  find "$APP_ROOT/scripts" "$APP_ROOT/systemd/user" -type f -print0 2>/dev/null | \
+    sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+}
 
 log() { printf '[worker-sync][install] %s\n' "$*"; }
 fail() { printf '[worker-sync][install] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -51,9 +58,11 @@ install_unit "$APP_ROOT/systemd/user/dev-automation-worker-from-delete.service" 
 
 systemctl --user daemon-reload
 systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer dev-automation-worker-from-delete.service >/dev/null
+mkdir -p "$STATE_DIR"
+worker_source_fingerprint > "$FINGERPRINT_FILE"
 
 log 'instalado. Fluxo fixo:'
 log '  /home/daniel/worker/to -> danielmaiax:worker/to'
 log '  danielmaiax:worker/from -> /home/daniel/worker/from'
-log '  DELETE local em /home/daniel/worker/from -> DELETE do mesmo arquivo em danielmaiax:worker/from'
-log 'nenhum arquivo novo/alterado de FROM é enviado ao Drive.'
+log '  ZIP processado/removido local -> MOVE remoto para danielmaiax:worker/from/backup'
+log 'backup remoto de FROM é histórico e não volta para a fila local.'

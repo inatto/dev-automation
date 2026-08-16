@@ -63,6 +63,35 @@ worker_from_zip_is_configured() {
   [ -n "$project" ]
 }
 
+worker_from_zip_purpose() {
+  local zip_name="$1" project="$2" stem stem_lower alias alias_lower suffix best_alias=""
+  [[ "${zip_name,,}" == *.zip ]] || return 1
+  stem="${zip_name:0:${#zip_name}-4}"
+  stem_lower="${stem,,}"
+
+  while IFS= read -r alias || [ -n "$alias" ]; do
+    [ -n "$alias" ] || continue
+    alias_lower="${alias,,}"
+    if [[ "$stem_lower" == "$alias_lower"* ]] && [ "${#alias}" -gt "${#best_alias}" ]; then
+      best_alias="$alias"
+    fi
+  done < <(project_import_names "$project")
+
+  [ -n "$best_alias" ] || return 1
+  suffix="${stem:${#best_alias}}"
+  [[ "$suffix" == --* ]] || return 1
+  suffix="${suffix#--}"
+  [ -n "$suffix" ] || return 1
+  printf '%s\n' "$suffix"
+}
+
+worker_from_zip_has_purpose() {
+  local zip_name="$1" project
+  project="$(project_for_zip "$zip_name")"
+  [ -n "$project" ] || return 1
+  worker_from_zip_purpose "$zip_name" "$project" >/dev/null
+}
+
 configured_worker_from_zip_exists() {
   local downloads zip_file
 

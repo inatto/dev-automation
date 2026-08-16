@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Somente REMOTO -> LOCAL. Nunca envia arquivos locais para worker/from.
+# worker/from/backup é arquivo morto remoto e nunca volta para a fila local.
 
 REMOTE_DIR="${WORKER_REMOTE_FROM:-danielmaiax:worker/from}"
 LOCAL_DIR="${WORKER_LOCAL_FROM:-/home/daniel/worker/from}"
@@ -9,12 +10,15 @@ LOCK_FILE="${WORKER_FROM_LOCK_FILE:-${XDG_RUNTIME_DIR:-/tmp}/dev-automation-work
 log() { printf '[worker-sync][from] [%s] %s\n' "$(date '+%F %T')" "$*"; }
 
 mkdir -p "$LOCAL_DIR"
-log "DOWNLOAD: $REMOTE_DIR -> $LOCAL_DIR"
+mkdir -p "$(dirname -- "$LOCK_FILE")"
+log "DOWNLOAD FILA: $REMOTE_DIR -> $LOCAL_DIR (backup remoto excluído)"
 
 run_download() {
   "$RCLONE_BIN" copy \
     "$REMOTE_DIR" \
     "$LOCAL_DIR" \
+    --exclude '/backup/**' \
+    --exclude '/backup/' \
     --create-empty-src-dirs \
     --log-level INFO
 }

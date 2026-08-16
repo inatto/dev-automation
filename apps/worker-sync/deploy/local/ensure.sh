@@ -7,6 +7,13 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 APP_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 PROJECT_ROOT="$(cd -- "$APP_ROOT/../.." && pwd -P)"
 USER_UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation/worker-sync"
+FINGERPRINT_FILE="$STATE_DIR/source.sha256"
+
+worker_source_fingerprint() {
+  find "$APP_ROOT/scripts" "$APP_ROOT/systemd/user" -type f -print0 2>/dev/null | \
+    sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | awk '{print $1}'
+}
 
 log() { printf '[worker-sync][ensure] %s\n' "$*"; }
 warn() { printf '[worker-sync][ensure] AVISO: %s\n' "$*" >&2; }
@@ -32,6 +39,12 @@ render_matches() {
 }
 
 needs_install=false
+current_fingerprint="$(worker_source_fingerprint 2>/dev/null || true)"
+installed_fingerprint="$(cat "$FINGERPRINT_FILE" 2>/dev/null || true)"
+if [ -z "$current_fingerprint" ] || [ "$current_fingerprint" != "$installed_fingerprint" ]; then
+  log 'scripts/units do worker-sync mudaram; atualização necessária.'
+  needs_install=true
+fi
 render_matches "$APP_ROOT/systemd/user/dev-automation-worker-to.service" \
   "$USER_UNIT_DIR/dev-automation-worker-to.service" || needs_install=true
 render_matches "$APP_ROOT/systemd/user/dev-automation-worker-from.service" \

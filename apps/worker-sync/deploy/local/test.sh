@@ -5,6 +5,7 @@ bash -n "$APP_ROOT/scripts/upload-watch.sh"
 bash -n "$APP_ROOT/scripts/download-from.sh"
 bash -n "$APP_ROOT/scripts/delete-from-watch.sh"
 bash -n "$APP_ROOT/deploy/local/install.sh"
+bash -n "$APP_ROOT/deploy/local/ensure.sh"
 bash -n "$APP_ROOT/deploy/local/start.sh"
 bash -n "$APP_ROOT/deploy/local/stop.sh"
 bash -n "$APP_ROOT/deploy/local/status.sh"
@@ -13,8 +14,15 @@ grep -q 'REMOTE_DIR="${WORKER_REMOTE_TO:-danielmaiax:worker/to}"' "$APP_ROOT/scr
 grep -q 'copyto "$changed" "$dest"' "$APP_ROOT/scripts/upload-watch.sh"
 grep -q 'REMOTE_DIR="${WORKER_REMOTE_FROM:-danielmaiax:worker/from}"' "$APP_ROOT/scripts/download-from.sh"
 grep -q 'LOCAL_DIR="${WORKER_LOCAL_FROM:-/home/daniel/worker/from}"' "$APP_ROOT/scripts/download-from.sh"
-grep -q 'deletefile "$remote"' "$APP_ROOT/scripts/delete-from-watch.sh"
+grep -q -- "--exclude '/backup/\\*\\*'" "$APP_ROOT/scripts/download-from.sh"
+grep -q 'moveto "$remote_source" "$remote_backup"' "$APP_ROOT/scripts/delete-from-watch.sh"
+grep -q 'PROCESSED.zip' "$APP_ROOT/scripts/delete-from-watch.sh"
+if grep -q 'deletefile "$remote"' "$APP_ROOT/scripts/delete-from-watch.sh"; then
+  echo 'ERRO: FROM ainda apaga o ZIP remoto em vez de arquivar' >&2
+  exit 1
+fi
 grep -q -- '--event delete,moved_from' "$APP_ROOT/scripts/delete-from-watch.sh"
+grep -q 'FINGERPRINT_FILE=' "$APP_ROOT/deploy/local/ensure.sh"
 grep -q 'dev-automation-worker-from-delete.service' "$APP_ROOT/deploy/local/ensure.sh"
 grep -q '^OnUnitInactiveSec=2s$' "$APP_ROOT/systemd/user/dev-automation-worker-from.timer"
 if grep -R -E 'danielmaiax:worker/from.*(/home/daniel/worker/to)|/home/daniel/worker/from.*danielmaiax:worker/from' "$APP_ROOT/scripts"; then

@@ -31,6 +31,7 @@ assert_rejected() {
 }
 
 assert_match 'dev-automation.zip' 'bots/dev-automation'
+assert_match 'dev-automation--worker-from-backup-esteira.zip' 'bots/dev-automation'
 assert_match 'dev-automation(15).zip' 'bots/dev-automation'
 assert_match 'dev-automation%23232-3434.zip' 'bots/dev-automation'
 assert_match 'dev-automation#23232-3434.zip' 'bots/dev-automation'

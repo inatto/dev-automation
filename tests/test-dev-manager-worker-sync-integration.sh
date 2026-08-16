@@ -14,4 +14,6 @@ grep -q 'ZIPs FROM:' "$ROOT/scripts/dev-manager-tui.py"
 grep -q 'TUI_WORKER_TO' "$ROOT/scripts/dev-manager/10-tui-legacy.sh"
 grep -q 'TUI_WORKER_FROM' "$ROOT/scripts/dev-manager/10-tui-legacy.sh"
 
+grep -A3 -F 'commands|refresh-commands|install-commands)' "$ROOT/scripts/dev-manager.sh" | grep -q 'ensure_worker_sync'
+
 echo 'OK: dev-manager garante worker-sync idempotente e TUI exibe TO/FROM'

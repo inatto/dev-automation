@@ -302,6 +302,10 @@ import_worker_from() {
     zip_file="${zip_files[$index]}"
     log "LOTE [$((index + 1))/$total]: $(basename -- "$zip_file")"
 
+    if ! worker_from_zip_has_purpose "$(basename -- "$zip_file")"; then
+      log "AVISO PADRÃO DE NOME: use <projeto>--<o-que-faz>.zip; pacote atual não descreve a finalidade."
+    fi
+
     if import_one_zip "$zip_file"; then
       imported=$((imported + 1))
     else

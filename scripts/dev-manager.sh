@@ -142,6 +142,7 @@ case "$action" in
     ;;
   commands|refresh-commands|install-commands)
     refresh_global_commands
+    ensure_worker_sync
     ;;
   desktops)
     shift || true
