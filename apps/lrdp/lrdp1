@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exec xfreerdp3 \
+  /v:192.168.1.143 \
+  /u:daniel \
+  /p:20bqns_DL.. \
+  /multimon \
+  /cert:ignore \
+  "$@"

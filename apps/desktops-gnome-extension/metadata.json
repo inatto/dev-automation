@@ -1,0 +1,7 @@
+{
+  "uuid": "workspace-name-osd@dev-automation",
+  "name": "Dev Automation Workspace Name OSD",
+  "description": "Mostra numero e nome do workspace ao alternar no GNOME.",
+  "shell-version": ["50"],
+  "version": 1
+}

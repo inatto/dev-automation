@@ -15,7 +15,7 @@ orgs/orbital/orbital-app
 PROJECTS
 
 output="$(PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" --list)"
-expected=$'1\tLAZER (preservado)\n2\tdev-automation\n3\tamazon-infra\n4\torbital-app'
+expected=$'1\tLAZER (preservado)\n2\tdev-automation\n3\tamazon-infra\n4\torbital-app\n5\tlrdp1\n6\tlrdp2'
 
 [[ "$output" == "$expected" ]] || {
   printf 'FALHOU: ordem de desktops inesperada\nEsperado:\n%s\nRecebido:\n%s\n' "$expected" "$output" >&2
@@ -45,6 +45,8 @@ grep -q 'Set-DesktopName' <<<"$decoded" || { printf 'FALHOU: Set-DesktopName aus
 grep -q "'dev-automation'" <<<"$decoded" || { printf 'FALHOU: dev-automation ausente\n' >&2; exit 94; }
 grep -q "'amazon-infra'" <<<"$decoded" || { printf 'FALHOU: amazon-infra ausente\n' >&2; exit 93; }
 grep -q "'orbital-app'" <<<"$decoded" || { printf 'FALHOU: orbital-app ausente\n' >&2; exit 92; }
+grep -q "'lrdp1'" <<<"$decoded" || { printf 'FALHOU: lrdp1 ausente\n' >&2; exit 91; }
+grep -q "'lrdp2'" <<<"$decoded" || { printf 'FALHOU: lrdp2 ausente\n' >&2; exit 90; }
 printf '[desktops] fake sync ok\n'
 FAKEPS
 cat > "$FAKE_BIN/wslpath" <<'FAKEWSL'
@@ -55,12 +57,12 @@ FAKEWSL
 chmod +x "$FAKE_BIN/powershell.exe" "$FAKE_BIN/wslpath"
 
 for _ in 1 2 3; do
-  PATH="$FAKE_BIN:$PATH" PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" >/dev/null
+  PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" >/dev/null
 done
 
 printf 'OK: desktops simples roda repetidamente sem wslpath nem temporários Windows\n'
 
-if PATH="$FAKE_BIN:$PATH" PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" --apps >/dev/null 2>&1; then
+if PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" --apps >/dev/null 2>&1; then
   printf 'FALHOU: --apps ainda foi aceito\n' >&2
   exit 1
 fi

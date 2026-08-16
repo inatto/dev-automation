@@ -1,0 +1,9 @@
+.dev-automation-workspace-name {
+    font-size: 28px;
+    font-weight: 700;
+    color: #ffffff;
+    background-color: rgba(20, 22, 28, 0.90);
+    border-radius: 16px;
+    padding: 14px 24px;
+    box-shadow: 0 6px 20px 0 rgba(0, 0, 0, 0.35);
+}

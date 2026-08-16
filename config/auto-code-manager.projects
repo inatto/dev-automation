@@ -11,7 +11,6 @@
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 bots/general-crawler
-bots/lrdp
 infra/amazon-infra
 infra/amazon-infra/apps/monitor-app
 infra/oracle-infra

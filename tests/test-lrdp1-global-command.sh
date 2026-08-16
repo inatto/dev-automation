@@ -8,17 +8,14 @@ trap 'rm -rf "$TMP"' EXIT
 HOME_DIR="$TMP/home"
 TARGET_DIR="$HOME_DIR/.local/bin"
 CODE_ROOT="$TMP/Code"
-LRDP_DIR="$CODE_ROOT/bots/lrdp"
-mkdir -p "$HOME_DIR" "$LRDP_DIR"
+mkdir -p "$HOME_DIR" "$CODE_ROOT"
 : > "$HOME_DIR/.bashrc"
 
 for name in lrdp1 lrdp2; do
-  cat > "$LRDP_DIR/$name" <<SCRIPT
-#!/usr/bin/env bash
-printf '$name:%s\\n' "\$*"
-SCRIPT
-  chmod +x "$LRDP_DIR/$name"
+  [[ -x "$ROOT/apps/lrdp/$name" ]]
 done
+
+! grep -qxF 'bots/lrdp' "$ROOT/config/auto-code-manager.projects"
 
 HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" \
   "$ROOT/deploy/local/install-commands.sh" >/dev/null
@@ -26,9 +23,7 @@ HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" \
 for name in lrdp1 lrdp2; do
   [[ -x "$TARGET_DIR/$name" ]]
   grep -Fq '# generated-by: dev-automation-global-command' "$TARGET_DIR/$name"
-  grep -Fq "$LRDP_DIR/$name" "$TARGET_DIR/$name"
-  output="$("$TARGET_DIR/$name" alpha beta)"
-  [[ "$output" == "$name:alpha beta" ]]
+  grep -Fq "$ROOT/apps/lrdp/$name" "$TARGET_DIR/$name"
 done
 
-printf 'OK: lrdp1 e lrdp2 autocontidos instalados como comandos globais pelo dev-manager/install-commands\n'
+printf 'OK: lrdp1/lrdp2 integrados em dev-automation/apps/lrdp e instalados globalmente\n'

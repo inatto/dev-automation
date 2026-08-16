@@ -25,8 +25,8 @@ CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 WORKER_SYNC_SOURCE="$PROJECT_ROOT/scripts/worker-sync.sh"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
-LRDP1_SOURCE="${LRDP1_SOURCE:-$CODE_ROOT/bots/lrdp/lrdp1}"
-LRDP2_SOURCE="${LRDP2_SOURCE:-$CODE_ROOT/bots/lrdp/lrdp2}"
+LRDP1_SOURCE="${LRDP1_SOURCE:-$PROJECT_ROOT/apps/lrdp/lrdp1}"
+LRDP2_SOURCE="${LRDP2_SOURCE:-$PROJECT_ROOT/apps/lrdp/lrdp2}"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -48,9 +48,11 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 [[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
 [[ -f "$WORKER_SYNC_SOURCE" ]] || fail "script não encontrado: $WORKER_SYNC_SOURCE"
+[[ -f "$LRDP1_SOURCE" ]] || fail "script não encontrado: $LRDP1_SOURCE"
+[[ -f "$LRDP2_SOURCE" ]] || fail "script não encontrado: $LRDP2_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$WORKER_SYNC_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
+chmod +x "$WORKER_SYNC_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER

@@ -222,7 +222,7 @@ Para criar os desktops que faltam e aplicar os nomes:
 desktops
 ```
 
-O comando `desktops` cuida somente dos desktops virtuais. Ele não abre, move ou posiciona aplicativos.
+No Ubuntu/GNOME, `desktops` usa workspaces fixos, mostra o nome ao alternar e reserva `lrdp1` e `lrdp2` como os dois últimos workspaces. O comando não abre aplicativos.
 
 O mesmo pode ser executado pelo comando geral:
 
