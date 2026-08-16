@@ -23,6 +23,7 @@ LOCAL_NGINX_SOURCE="$PROJECT_ROOT/scripts/local-nginx.sh"
 DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
 CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
+WORKER_SYNC_SOURCE="$PROJECT_ROOT/scripts/worker-sync.sh"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -43,9 +44,10 @@ fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$DEV_STATUS_SOURCE" ]] || fail "script não encontrado: $DEV_STATUS_SOURCE"
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 [[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
+[[ -f "$WORKER_SYNC_SOURCE" ]] || fail "script não encontrado: $WORKER_SYNC_SOURCE"
 
 mkdir -p "$TARGET_DIR"
-chmod +x "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
+chmod +x "$WORKER_SYNC_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -73,7 +75,7 @@ EOF_WRAPPER
 chmod +x "$DEV_GITSETUP_TARGET"
 log "criado: dev-gitsetup -> $DEV_GITSETUP_SOURCE"
 
-for command_name in chromes chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status; do
+for command_name in chromes chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status worker-sync; do
   case "$command_name" in
     chromes) source_file="$CHROMES_SOURCE" ;;
     chatgpts) source_file="$CHATGPTS_SOURCE" ;;
@@ -84,6 +86,7 @@ for command_name in chromes chatgpts phpstorms pycharms phpstorm-dev dev-manager
     desktops) source_file="$DESKTOPS_SOURCE" ;;
     local-nginx) source_file="$LOCAL_NGINX_SOURCE" ;;
     dev-status) source_file="$DEV_STATUS_SOURCE" ;;
+    worker-sync) source_file="$WORKER_SYNC_SOURCE" ;;
   esac
   target_file="$TARGET_DIR/$command_name"
 

@@ -1,0 +1,11 @@
+[Unit]
+Description=Dev Automation Worker FROM - verifica Google Drive a cada 10 segundos
+
+[Timer]
+OnBootSec=3s
+OnUnitInactiveSec=10s
+AccuracySec=1s
+Unit=dev-automation-worker-from.service
+
+[Install]
+WantedBy=timers.target

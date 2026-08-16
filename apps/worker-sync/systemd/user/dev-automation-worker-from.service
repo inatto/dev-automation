@@ -1,0 +1,8 @@
+[Unit]
+Description=Dev Automation Worker FROM - download Google Drive para local
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=@PROJECT_ROOT@/apps/worker-sync/scripts/download-from.sh

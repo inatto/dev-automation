@@ -15,10 +15,32 @@ chromes
 phpstorms
 phpstorm-dev
 local-nginx
+worker-sync
 orbital-app
 station-app
 inst-app
 ```
+
+### `worker-sync`
+
+Gerencia o canal Google Drive do worker com direção fixa:
+
+```text
+/home/daniel/worker/to -> danielmaiax:worker/to
+danielmaiax:worker/from -> /home/daniel/worker/from
+```
+
+`to` somente sobe por evento local (`inotifywait`). `from` somente baixa, verificado a cada 10 segundos.
+
+```bash
+worker-sync restart
+worker-sync status
+worker-sync test
+worker-sync logs
+worker-sync stop
+```
+
+O `restart` para units antigos, reinstala os units mantidos dentro deste repositório e inicia a configuração nova.
 
 ### `auto-code-manager`
 

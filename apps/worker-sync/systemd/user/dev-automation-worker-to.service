@@ -1,0 +1,13 @@
+[Unit]
+Description=Dev Automation Worker TO - upload local para Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@PROJECT_ROOT@/apps/worker-sync/scripts/upload-watch.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
