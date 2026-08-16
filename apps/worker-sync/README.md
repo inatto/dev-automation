@@ -3,7 +3,9 @@
 Fila de arquivos do `dev-automation`:
 
 - `~/worker/to` -> `danielmaiax:worker/to`: somente upload. Mudança local dispara `rclone copyto` do arquivo alterado.
-- `danielmaiax:worker/from` -> `~/worker/from`: somente download, consultado por timer systemd a cada 5s após o término da rodada anterior.
+- `danielmaiax:worker/from` -> `~/worker/from`: somente download, consultado por timer systemd a cada 2s após o término da rodada anterior.
+
+Quando o Auto Code Manager apaga um ZIP processado de `~/worker/from`, o watcher de remoção apaga automaticamente o mesmo arquivo em `danielmaiax:worker/from`. Arquivos locais novos/alterados em `from` nunca são enviados.
 
 O Auto Code Manager usa as mesmas pastas:
 

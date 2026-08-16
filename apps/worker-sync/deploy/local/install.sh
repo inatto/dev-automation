@@ -27,6 +27,7 @@ systemctl --user stop rclone-worker-from.service 2>/dev/null || true
 systemctl --user disable --now dev-automation-worker-to.service 2>/dev/null || true
 systemctl --user disable --now dev-automation-worker-from.timer 2>/dev/null || true
 systemctl --user stop dev-automation-worker-from.service 2>/dev/null || true
+systemctl --user disable --now dev-automation-worker-from-delete.service 2>/dev/null || true
 
 # Mata watchers avulsos antigos que tenham sobrado de configurações manuais.
 pkill -f '/usr/bin/inotifywait.*worker/to' 2>/dev/null || true
@@ -45,11 +46,14 @@ install_unit "$APP_ROOT/systemd/user/dev-automation-worker-from.service" \
   "$USER_UNIT_DIR/dev-automation-worker-from.service"
 install_unit "$APP_ROOT/systemd/user/dev-automation-worker-from.timer" \
   "$USER_UNIT_DIR/dev-automation-worker-from.timer"
+install_unit "$APP_ROOT/systemd/user/dev-automation-worker-from-delete.service" \
+  "$USER_UNIT_DIR/dev-automation-worker-from-delete.service"
 
 systemctl --user daemon-reload
-systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer >/dev/null
+systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer dev-automation-worker-from-delete.service >/dev/null
 
 log 'instalado. Fluxo fixo:'
 log '  /home/daniel/worker/to -> danielmaiax:worker/to'
 log '  danielmaiax:worker/from -> /home/daniel/worker/from'
-log 'nenhuma sincronização inversa é configurada.'
+log '  DELETE local em /home/daniel/worker/from -> DELETE do mesmo arquivo em danielmaiax:worker/from'
+log 'nenhum arquivo novo/alterado de FROM é enviado ao Drive.'

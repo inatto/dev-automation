@@ -38,6 +38,8 @@ render_matches "$APP_ROOT/systemd/user/dev-automation-worker-from.service" \
   "$USER_UNIT_DIR/dev-automation-worker-from.service" || needs_install=true
 render_matches "$APP_ROOT/systemd/user/dev-automation-worker-from.timer" \
   "$USER_UNIT_DIR/dev-automation-worker-from.timer" || needs_install=true
+render_matches "$APP_ROOT/systemd/user/dev-automation-worker-from-delete.service" \
+  "$USER_UNIT_DIR/dev-automation-worker-from-delete.service" || needs_install=true
 
 if [ "$needs_install" = true ]; then
   log 'units ausentes/desatualizados; instalando a versão do dev-automation...'
@@ -48,7 +50,7 @@ fi
 
 # enable/start são idempotentes: se já estiver habilitado/ativo, nada é reiniciado.
 systemctl --user daemon-reload >/dev/null 2>&1 || true
-systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer >/dev/null 2>&1 || true
+systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer dev-automation-worker-from-delete.service >/dev/null 2>&1 || true
 
 if ! systemctl --user is-active --quiet dev-automation-worker-to.service; then
   log 'iniciando worker TO...'
@@ -56,12 +58,18 @@ if ! systemctl --user is-active --quiet dev-automation-worker-to.service; then
 fi
 
 if ! systemctl --user is-active --quiet dev-automation-worker-from.timer; then
-  log 'iniciando worker FROM...'
+  log 'iniciando worker FROM download...'
   systemctl --user start dev-automation-worker-from.timer || exit $?
 fi
 
+if ! systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
+  log 'iniciando worker FROM delete-watch...'
+  systemctl --user start dev-automation-worker-from-delete.service || exit $?
+fi
+
 if systemctl --user is-active --quiet dev-automation-worker-to.service && \
-   systemctl --user is-active --quiet dev-automation-worker-from.timer; then
+   systemctl --user is-active --quiet dev-automation-worker-from.timer && \
+   systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
   log 'OK: TO ativo · FROM ativo'
   exit 0
 fi

@@ -134,7 +134,8 @@ tui_collect_metrics() {
   else
     TUI_WORKER_TO="PARADO"
   fi
-  if systemctl --user is-active --quiet dev-automation-worker-from.timer 2>/dev/null; then
+  if systemctl --user is-active --quiet dev-automation-worker-from.timer 2>/dev/null && \
+     systemctl --user is-active --quiet dev-automation-worker-from-delete.service 2>/dev/null; then
     TUI_WORKER_FROM="OK"
   else
     TUI_WORKER_FROM="PARADO"
@@ -235,7 +236,11 @@ tui_log_line() {
   esac
   printf '[%s] %s\n' "$stamp" "$message" >> "$TUI_LOG_FILE" 2>/dev/null || true
   tui_refresh
-  printf '\033[%sm[%s] %s\033[0m\033[44;97m\n' "$color" "$stamp" "$message"
+  # Timestamp no mesmo tom da linha, porém levemente mais apagado.
+  # O texto principal preserva a intensidade semântica do contexto.
+  local stamp_color="${color%;1}"
+  [ "$stamp_color" = "$color" ] || true
+  printf '\033[%s;2m[%s] \033[%sm%s\033[0m\033[44;97m\n' "$stamp_color" "$stamp" "$color" "$message"
   return 0
 }
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Dev Automation Worker FROM - propaga exclusoes locais para Google Drive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@PROJECT_ROOT@/apps/worker-sync/scripts/delete-from-watch.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -61,12 +61,22 @@ log() {
     return 0
   fi
 
-  printf '[%s] ' "$stamp"
-  if [ -n "$context" ]; then
+  if [ -n "$context" ] && color_enabled; then
+    # Timestamp usa a mesma cor do contexto, sem o brilho/negrito do texto.
+    local code dim_code
+    code="$(color_code "$context")"
+    dim_code="${code#1;}"
+    printf '\033[2;%sm[%s] \033[0m' "$dim_code" "$stamp"
     paint "$context" "$message"
     printf '\n'
   else
-    printf '%s\n' "$message"
+    printf '[%s] ' "$stamp"
+    if [ -n "$context" ]; then
+      paint "$context" "$message"
+      printf '\n'
+    else
+      printf '%s\n' "$message"
+    fi
   fi
 }
 

@@ -466,7 +466,10 @@ class Dashboard:
         self.manager_fds, self.manager_fd_limit = process_fd_metrics(pid)
         self.zip_count = count_download_zips(self.downloads)
         self.worker_to_active = systemd_user_active("dev-automation-worker-to.service")
-        self.worker_from_active = systemd_user_active("dev-automation-worker-from.timer")
+        self.worker_from_active = (
+            systemd_user_active("dev-automation-worker-from.timer")
+            and systemd_user_active("dev-automation-worker-from-delete.service")
+        )
         after = (
             self.max_instances,
             self.max_watches,
@@ -700,7 +703,18 @@ class Dashboard:
                     elif message.startswith(("OK ", "CONFIRMADO ", "CONCLUÍDO", "CONCLUIDO", "SUCESSO")):
                         attr = self.colors["ok"]
 
-                safe_add(logwin, i, 2, fit(line, lw - 5), attr, lw - 5)
+                display_line = fit(line, lw - 5)
+                match = re.match(r"^(\[[^]]+\]\s*)(.*)$", display_line)
+                if match:
+                    stamp, message = match.groups()
+                    # Data/hora mantém exatamente a cor semântica da linha, mas
+                    # com brilho discretamente menor para separar visualmente o
+                    # timestamp sem criar uma nova cor aleatória no meio do log.
+                    stamp_attr = (attr & ~curses.A_BOLD) | curses.A_DIM
+                    safe_add(logwin, i, 2, stamp, stamp_attr, lw - 5)
+                    safe_add(logwin, i, 2 + len(stamp), message, attr, lw - 5 - len(stamp))
+                else:
+                    safe_add(logwin, i, 2, display_line, attr, lw - 5)
             indicator = "SEGUINDO" if self.follow else f"ROLAGEM +{self.scroll}"
             safe_add(
                 logwin,

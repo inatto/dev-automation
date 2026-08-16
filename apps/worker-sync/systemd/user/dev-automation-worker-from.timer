@@ -1,10 +1,10 @@
 [Unit]
-Description=Dev Automation Worker FROM - verifica Google Drive a cada 5 segundos
+Description=Dev Automation Worker FROM - verifica Google Drive a cada 2 segundos apos cada rodada
 
 [Timer]
-OnBootSec=3s
-OnUnitInactiveSec=5s
-AccuracySec=1s
+OnBootSec=2s
+OnUnitInactiveSec=2s
+AccuracySec=500ms
 Unit=dev-automation-worker-from.service
 
 [Install]
