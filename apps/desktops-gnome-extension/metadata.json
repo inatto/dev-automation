@@ -1,7 +1,7 @@
 {
   "uuid": "workspace-name-osd@dev-automation",
-  "name": "Dev Automation Workspace Name OSD",
-  "description": "Mostra numero e nome do workspace ao alternar no GNOME.",
+  "name": "Dev Automation Workspace Names",
+  "description": "Mostra o workspace atual no painel, no Overview e em OSD; exibe todos os nomes no Overview.",
   "shell-version": ["50"],
-  "version": 1
+  "version": 3
 }

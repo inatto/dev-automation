@@ -15,6 +15,7 @@ DESKTOPS_STATE_DIR="$STATE_ROOT/desktops"
 DESKTOPS_CLOSE_REQUEST="$DESKTOPS_STATE_DIR/close.request"
 DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
 DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
+DESKTOPS_UI_READY="$DESKTOPS_STATE_DIR/ui.ready"
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
@@ -94,8 +95,9 @@ Uso:
   desktops          Sincroniza os workspaces e seus nomes
 
 Ubuntu/GNOME:
-  usa quantidade fixa de workspaces, nomeia todos e instala OSD que mostra
-  "numero  nome" ao alternar. lrdp1 e lrdp2 ficam sempre por último.
+  usa quantidade fixa de workspaces, nomeia todos e instala uma extensão que mostra
+  o nome atual sempre no painel, todos os nomes no Overview e OSD ao alternar.
+  lrdp1 e lrdp2 ficam sempre por último.
 
 WSL/Windows:
   preserva Desktop 1 e cria/nomeia os demais na mesma ordem.
@@ -117,8 +119,8 @@ shell_major() {
 }
 
 install_gnome_osd() {
-  command -v gnome-extensions >/dev/null 2>&1 || { warn 'gnome-extensions não encontrado; nomes serão aplicados, mas o OSD não será instalado.'; return 0; }
-  [[ -f "$GNOME_OSD_SOURCE/extension.js" ]] || { warn "extensão OSD ausente: $GNOME_OSD_SOURCE"; return 0; }
+  command -v gnome-extensions >/dev/null 2>&1 || fail 'gnome-extensions não encontrado; não é possível garantir os nomes visuais.'
+  [[ -f "$GNOME_OSD_SOURCE/extension.js" ]] || fail "extensão visual ausente: $GNOME_OSD_SOURCE"
 
   mkdir -p "$GNOME_OSD_TARGET"
   cp -f "$GNOME_OSD_SOURCE/extension.js" "$GNOME_OSD_TARGET/extension.js"
@@ -129,19 +131,37 @@ install_gnome_osd() {
   cat > "$GNOME_OSD_TARGET/metadata.json" <<JSON
 {
   "uuid": "$GNOME_OSD_UUID",
-  "name": "Dev Automation Workspace Name OSD",
-  "description": "Mostra numero e nome do workspace ao alternar no GNOME.",
+  "name": "Dev Automation Workspace Names",
+  "description": "Mostra o workspace atual no painel, no Overview e em OSD; exibe todos os nomes no Overview.",
   "shell-version": ["$major"],
-  "version": 2
+  "version": 3
 }
 JSON
 
   if gnome-extensions info "$GNOME_OSD_UUID" >/dev/null 2>&1; then
+    mkdir -p "$DESKTOPS_STATE_DIR"
+    rm -f -- "$DESKTOPS_UI_READY"
     gnome-extensions disable "$GNOME_OSD_UUID" >/dev/null 2>&1 || true
-    gnome-extensions enable "$GNOME_OSD_UUID" >/dev/null 2>&1 || true
-    log 'OSD/controle de workspaces instalado, recarregado e habilitado.'
+    gnome-extensions enable "$GNOME_OSD_UUID" >/dev/null 2>&1 || \
+      fail 'GNOME recusou habilitar a extensão visual de workspaces.'
+
+    local attempt ready=""
+    for ((attempt=0; attempt<50; attempt++)); do
+      if [[ -s "$DESKTOPS_UI_READY" ]]; then
+        ready="$(cat "$DESKTOPS_UI_READY" 2>/dev/null || true)"
+        if grep -Fqx 'version=3' <<<"$ready" && \
+           grep -Fqx 'panel=1' <<<"$ready" && \
+           grep -Fqx 'overview=1' <<<"$ready" && \
+           grep -Fqx 'osd=1' <<<"$ready"; then
+          log 'UI de workspaces confirmada pelo GNOME: painel + Overview + OSD ativos.'
+          return 0
+        fi
+      fi
+      sleep 0.1
+    done
+    fail 'a extensão foi habilitada, mas não confirmou painel + Overview + OSD; veja journalctl --user -b | grep workspace-name-osd.'
   else
-    warn 'OSD instalado, mas o GNOME Shell ainda não registrou a nova extensão; faça logout/login uma vez e rode desktops novamente.'
+    fail 'extensão visual instalada, mas o GNOME Shell ainda não a registrou; faça logout/login uma vez e rode desktops novamente.'
   fi
 }
 

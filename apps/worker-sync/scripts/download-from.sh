@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Somente REMOTO -> LOCAL. Nunca envia arquivos locais para worker/from.
-# worker/from/backup é arquivo morto remoto e nunca volta para a fila local.
+# Somente REMOTO -> LOCAL para a fila raiz.
+# backup/ não entra na fila; o serviço from-backup reconcilia o histórico no
+# start e publica cada novo ZIP arquivado localmente.
+set -euo pipefail
 
 REMOTE_DIR="${WORKER_REMOTE_FROM:-danielmaiax:worker/from}"
 LOCAL_DIR="${WORKER_LOCAL_FROM:-/home/daniel/worker/from}"
@@ -9,9 +11,9 @@ LOCK_FILE="${WORKER_FROM_LOCK_FILE:-${XDG_RUNTIME_DIR:-/tmp}/dev-automation-work
 
 log() { printf '[worker-sync][from] [%s] %s\n' "$(date '+%F %T')" "$*"; }
 
-mkdir -p "$LOCAL_DIR"
+mkdir -p "$LOCAL_DIR/backup"
 mkdir -p "$(dirname -- "$LOCK_FILE")"
-log "DOWNLOAD FILA: $REMOTE_DIR -> $LOCAL_DIR (backup remoto excluído)"
+log "DOWNLOAD FILA: $REMOTE_DIR -> $LOCAL_DIR (backup excluído da fila)"
 
 run_download() {
   "$RCLONE_BIN" copy \

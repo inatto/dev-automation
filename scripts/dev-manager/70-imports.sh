@@ -1,6 +1,83 @@
 #!/usr/bin/env bash
 # Contexto: importação transacional de ZIPs e worker/from
 
+archive_worker_from_zip() {
+  local zip_file="$1"
+  local status="${2:-PROCESSED}"
+  local downloads zip_parent downloads_real backup_dir base stem stamp archive_name archive_path seq=0
+
+  [ -f "$zip_file" ] || {
+    log "ERRO: ZIP não existe para arquivamento: $zip_file"
+    return 1
+  }
+
+  case "$status" in
+    PROCESSED|FAILED) ;;
+    *)
+      log "ERRO: status de arquivamento inválido: $status"
+      return 1
+      ;;
+  esac
+
+  downloads="$(worker_from_dir)"
+  zip_parent="$(cd -- "$(dirname -- "$zip_file")" && pwd -P)" || return 1
+  downloads_real="$(cd -- "$downloads" 2>/dev/null && pwd -P || printf '%s' "$downloads")"
+
+  # Só a fila worker/from vira histórico. ZIP temporário/invocado fora da fila
+  # continua sendo removido após a importação, como antes.
+  if [ "$zip_parent" != "$downloads_real" ]; then
+    if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
+      return 0
+    fi
+    log "ERRO: ZIP importado, mas não pôde ser removido: $zip_file"
+    return 1
+  fi
+
+  backup_dir="$downloads_real/backup"
+  mkdir -p -- "$backup_dir" || {
+    log "ERRO: não foi possível criar backup local de worker/from: $backup_dir"
+    return 1
+  }
+
+  base="$(basename -- "$zip_file")"
+  stem="${base%.*}"
+  stamp="${WORKER_ARCHIVE_STAMP:-$(date '+%Y%m%d-%H%M%S')}"
+  archive_name="${stem}--${stamp}--${status}.zip"
+  archive_path="$backup_dir/$archive_name"
+  while [ -e "$archive_path" ]; do
+    seq=$((seq + 1))
+    archive_name="${stem}--${stamp}-${seq}--${status}.zip"
+    archive_path="$backup_dir/$archive_name"
+  done
+
+  if ! mv -- "$zip_file" "$archive_path"; then
+    log "ERRO: não foi possível mover ZIP para o backup local: $zip_file"
+    return 1
+  fi
+
+  log "ZIP ARQUIVADO LOCALMENTE: $base -> backup/$archive_name"
+  return 0
+}
+
+refresh_worker_sync_after_self_update() {
+  local project_dir="$1"
+  local ensure_script="$PROJECT_ROOT/apps/worker-sync/deploy/local/ensure.sh"
+  local project_real root_real
+
+  project_real="$(cd -- "$project_dir" 2>/dev/null && pwd -P || true)"
+  root_real="$(cd -- "$PROJECT_ROOT" 2>/dev/null && pwd -P || true)"
+  [ -n "$project_real" ] && [ "$project_real" = "$root_real" ] || return 0
+  [ -f "$ensure_script" ] || return 0
+
+  chmod +x "$ensure_script" 2>/dev/null || true
+  log "SELF-UPDATE: recarregando worker-sync após atualizar dev-automation..."
+  if "$ensure_script"; then
+    log "SELF-UPDATE: worker-sync recarregado e backup reconciliado."
+  else
+    log "AVISO: self-update aplicado, mas worker-sync não pôde ser recarregado agora."
+  fi
+}
+
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
@@ -133,12 +210,13 @@ import_one_zip() {
     done
 
     rm -rf -- "$temp_dir"
-    if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
-      log "ERRO: filhos importados, mas o ZIP agregador não foi apagado: $zip_file"
+    if ! archive_worker_from_zip "$zip_file" PROCESSED; then
+      log "ERRO: filhos importados, mas o ZIP agregador não pôde ser arquivado/removido: $zip_file"
       return 1
     fi
     log "$nested_count ZIP(s) filho(s) importado(s) e confirmado(s)."
     log "IMPORTAÇÃO DE AGREGADOR CONCLUÍDA: $project"
+    refresh_worker_sync_after_self_update "$project_dir"
     soft_beep
     line
     return 0
@@ -247,15 +325,15 @@ import_one_zip() {
   fi
   log "Escopo de runtime detectado: $update_scope"
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
-  log "Apagando ZIP original somente após todas as confirmações..."
-  if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
-    log "ERRO: arquivos importados, mas o ZIP não foi apagado: $zip_file"
+  log "Arquivando ZIP original somente após todas as confirmações..."
+  if ! archive_worker_from_zip "$zip_file" PROCESSED; then
+    log "ERRO: arquivos importados, mas o ZIP não pôde ser arquivado/removido: $zip_file"
     return 1
   fi
 
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
-  log "ZIP apagado: $zip_file"
+  refresh_worker_sync_after_self_update "$project_dir"
   notify_running_project_update "$project_dir" "$update_scope"
   soft_beep
   line
@@ -311,12 +389,10 @@ import_worker_from() {
     else
       failed=$((failed + 1))
       log "ERRO: falha ao importar: $(basename -- "$zip_file")"
-      # Falha de ZIP reconhecido é terminal para esta entrada da fila. Manter o
-      # arquivo em worker/from faria o inotify reprocessar o mesmo erro em loop.
-      if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
-        log "ZIP com falha apagado para evitar reprocessamento: $zip_file"
-      else
-        log "ERRO: ZIP com falha não pôde ser apagado: $zip_file"
+      # Falha de ZIP reconhecido é terminal para esta entrada da fila. Sai da
+      # raiz, mas é preservado em backup/ com status FAILED para auditoria.
+      if ! archive_worker_from_zip "$zip_file" FAILED; then
+        log "ERRO: ZIP com falha não pôde ser arquivado: $zip_file"
       fi
     fi
   done

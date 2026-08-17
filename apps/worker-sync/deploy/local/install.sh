@@ -24,7 +24,7 @@ if ! rclone listremotes 2>/dev/null | grep -qx "${REMOTE_NAME}:"; then
   fail "remote rclone '${REMOTE_NAME}:' não encontrado. Configure primeiro com: rclone config"
 fi
 
-mkdir -p /home/daniel/worker/to /home/daniel/worker/from "$USER_UNIT_DIR"
+mkdir -p /home/daniel/worker/to /home/daniel/worker/from/backup "$USER_UNIT_DIR"
 
 log 'parando configuração antiga/avulsa, se existir'
 systemctl --user disable --now rclone-worker-to.timer 2>/dev/null || true
@@ -64,5 +64,6 @@ worker_source_fingerprint > "$FINGERPRINT_FILE"
 log 'instalado. Fluxo fixo:'
 log '  /home/daniel/worker/to -> danielmaiax:worker/to'
 log '  danielmaiax:worker/from -> /home/daniel/worker/from'
-log '  ZIP processado/removido local -> MOVE remoto para danielmaiax:worker/from/backup'
-log 'backup remoto de FROM é histórico e não volta para a fila local.'
+log '  ZIP processado: /home/daniel/worker/from -> /home/daniel/worker/from/backup'
+log '  backup local <-> danielmaiax:worker/from/backup (histórico preservado nos dois lados)'
+log '  após confirmar backup remoto, a cópia da fila remota é removida.'

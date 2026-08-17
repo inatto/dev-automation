@@ -1,5 +1,5 @@
 [Unit]
-Description=Dev Automation Worker FROM - propaga exclusoes locais para Google Drive
+Description=Dev Automation Worker FROM - espelha backup local no Google Drive
 After=network-online.target
 Wants=network-online.target
 

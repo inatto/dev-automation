@@ -23,7 +23,7 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$USER_UNIT_DIR" /home/daniel/worker/to /home/daniel/worker/from
+mkdir -p "$USER_UNIT_DIR" /home/daniel/worker/to /home/daniel/worker/from/backup
 
 render_matches() {
   local source="$1" target="$2" tmp
@@ -76,7 +76,7 @@ if ! systemctl --user is-active --quiet dev-automation-worker-from.timer; then
 fi
 
 if ! systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
-  log 'iniciando worker FROM delete-watch...'
+  log 'iniciando worker FROM backup-sync...'
   systemctl --user start dev-automation-worker-from-delete.service || exit $?
 fi
 

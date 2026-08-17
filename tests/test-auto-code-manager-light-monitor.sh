@@ -123,7 +123,8 @@ mkdir -p "$pkg"
 printf 'fromzip\n' > "$pkg/app.txt"
 (cd "$pkg" && zip -q "$DOWNLOADS/alpha-app.zip" app.txt)
 wait_until 'ZIP importado' grep -Fxq fromzip "$PROJECT/app.txt"
-wait_until 'ZIP apagado' test ! -e "$DOWNLOADS/alpha-app.zip"
+wait_until 'ZIP saiu da fila' test ! -e "$DOWNLOADS/alpha-app.zip"
+wait_until 'ZIP arquivado' bash -lc "find '$DOWNLOADS/backup' -maxdepth 1 -type f -name 'alpha-app--*--PROCESSED.zip' -print -quit | grep -q ."
 
 # O processo do manager não pode consumir instância inotify no modo light.
 for fd in /proc/$PID/fd/*; do

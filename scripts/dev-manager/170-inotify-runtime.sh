@@ -230,8 +230,10 @@ handle_watch_event() {
     # resolvido por project_for_zip(), portanto cadastrado no .projects, entra
     # no pipeline do manager. Os demais ZIPs são ignorados silenciosamente.
     if worker_from_zip_is_configured "$event_path"; then
-      run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo." \
-        import_one_zip "$event_path" true || true
+      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo." \
+        import_one_zip "$event_path" true; then
+        archive_worker_from_zip "$event_path" FAILED || true
+      fi
     fi
     return 0
   fi
