@@ -10,6 +10,7 @@ COMMAND_INSTALLER="${DEV_MANAGER_INSTALL_COMMANDS:-$PROJECT_ROOT/deploy/local/in
 DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops.sh}"
 DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status.sh}"
 WORKER_ENSURE_SCRIPT="${DEV_MANAGER_WORKER_ENSURE:-$PROJECT_ROOT/apps/worker-sync/deploy/local/ensure.sh}"
+G512_RGB_SCRIPT="${DEV_MANAGER_G512_RGB_SCRIPT:-$PROJECT_ROOT/scripts/g512-rgb.sh}"
 if command -v powershell.exe >/dev/null 2>&1; then
   DEV_STATUS_BINARY="${DEV_MANAGER_DEV_STATUS_EXE:-$PROJECT_ROOT/apps/dev-status/bin/dev-status.exe}"
   DEV_STATUS_SOURCE="${DEV_MANAGER_DEV_STATUS_SOURCE:-$PROJECT_ROOT/apps/dev-status/src/main.cpp}"
@@ -38,6 +39,7 @@ Uso:
   dev-manager commands     Atualiza todos os comandos globais
   dev-manager desktops     Cria/nomeia desktops pelos projetos ativos
   dev-manager git-crypt    Audita/corrige git-crypt de toda pasta config ativa
+  dev-manager g512         Mostra/controla o auxiliar RGB do Logitech G512
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
   dev-manager help         Mostra esta ajuda
@@ -79,6 +81,23 @@ ensure_worker_sync() {
   else
     # O monitor continua abrindo para mostrar o estado na TUI; não derruba o terminal.
     printf '[dev-manager] AVISO: worker-sync não ficou 100%% ativo; confira o indicador na TUI.\n' >&2
+  fi
+  return 0
+}
+
+ensure_g512_rgb() {
+  if [[ ! -f "$G512_RGB_SCRIPT" ]]; then
+    printf '[dev-manager] AVISO: auxiliar G512 ausente: %s\n' "$G512_RGB_SCRIPT" >&2
+    return 0
+  fi
+
+  [[ -x "$G512_RGB_SCRIPT" ]] || chmod +x "$G512_RGB_SCRIPT"
+  printf '[dev-manager] garantindo auxiliar RGB G512 independente...\n'
+  if "$G512_RGB_SCRIPT" ensure; then
+    printf '[dev-manager] auxiliar RGB G512 verificado.\n'
+  else
+    # RGB nunca impede o monitor principal de abrir.
+    printf '[dev-manager] AVISO: não foi possível garantir o G512; dev-manager seguirá normalmente.\n' >&2
   fi
   return 0
 }
@@ -132,6 +151,7 @@ case "$action" in
     refresh_global_commands
     ensure_worker_sync
     ensure_dev_status
+    ensure_g512_rgb
     printf '[dev-manager] executando em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"
     ;;
@@ -154,6 +174,12 @@ case "$action" in
   git-crypt|gitcrypt|config-crypt|security-config)
     shift || true
     exec "$AUTO_MANAGER" --git-crypt-audit "$@"
+    ;;
+  g512|g512-rgb)
+    shift || true
+    [[ -f "$G512_RGB_SCRIPT" ]] || fail "auxiliar G512 não encontrado: $G512_RGB_SCRIPT"
+    [[ -x "$G512_RGB_SCRIPT" ]] || chmod +x "$G512_RGB_SCRIPT"
+    exec "$G512_RGB_SCRIPT" "${1:-status}" "${@:2}"
     ;;
   status)
     status_manager

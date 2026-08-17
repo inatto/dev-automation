@@ -41,6 +41,31 @@ recria os comandos dos projetos listados em `config/auto-code-manager.projects`.
 
 Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 
+## Logitech G512 RGB
+
+O auxiliar RGB do Logitech G512 agora pertence ao `dev-automation`, em
+`scripts/g512-rgb.sh`. Ao iniciar, o `dev-manager` garante esse helper de forma
+independente: uma falha do RGB não derruba nem bloqueia o monitor principal.
+
+Na primeira execução em uma máquina que ainda tenha `g512-rgb.service`, o helper
+interrompe a unit legada, lê o `ExecStart`, copia o script Python real e seus
+arquivos auxiliares para `scripts/g512/`, cria
+`dev-automation-g512-rgb.service` e remove a unit antiga depois de uma migração
+bem-sucedida. O serviço novo usa limite de reinícios para nunca repetir o loop
+de falha a cada poucos segundos que a unit antiga podia produzir.
+
+Comandos úteis:
+
+```bash
+g512-rgb status
+g512-rgb migrate
+g512-rgb restart
+g512-rgb stop
+```
+
+Depois que `g512-rgb status` mostrar o código incorporado em
+`dev-automation/scripts/g512/`, o projeto externo do G512 não é mais necessário.
+
 O ícone do `Dev Automation` na bandeja do Windows também aceita botão direito:
 
 - `Pausar dev-manager`: termina apenas a operação indivisível já em andamento e

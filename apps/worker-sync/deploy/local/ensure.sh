@@ -23,7 +23,7 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$USER_UNIT_DIR" /home/daniel/worker/to /home/daniel/worker/from/backup
+mkdir -p "$USER_UNIT_DIR" /home/daniel/worker/to /home/daniel/worker/from/backup /home/daniel/worker/from/.incoming
 
 render_matches() {
   local source="$1" target="$2" tmp
@@ -70,14 +70,16 @@ if ! systemctl --user is-active --quiet dev-automation-worker-to.service; then
   systemctl --user start dev-automation-worker-to.service || exit $?
 fi
 
+# Ordem intencional: backup-sync sobe PRIMEIRO, reconcilia claims/duplicatas e
+# cria o ready-file. O timer de download só entra depois.
+if ! systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
+  log 'iniciando worker FROM backup-sync/recovery...'
+  systemctl --user start dev-automation-worker-from-delete.service || exit $?
+fi
+
 if ! systemctl --user is-active --quiet dev-automation-worker-from.timer; then
   log 'iniciando worker FROM download...'
   systemctl --user start dev-automation-worker-from.timer || exit $?
-fi
-
-if ! systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
-  log 'iniciando worker FROM backup-sync...'
-  systemctl --user start dev-automation-worker-from-delete.service || exit $?
 fi
 
 if systemctl --user is-active --quiet dev-automation-worker-to.service && \

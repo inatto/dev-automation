@@ -24,7 +24,7 @@ if ! rclone listremotes 2>/dev/null | grep -qx "${REMOTE_NAME}:"; then
   fail "remote rclone '${REMOTE_NAME}:' não encontrado. Configure primeiro com: rclone config"
 fi
 
-mkdir -p /home/daniel/worker/to /home/daniel/worker/from/backup "$USER_UNIT_DIR"
+mkdir -p /home/daniel/worker/to /home/daniel/worker/from/backup /home/daniel/worker/from/.incoming "$USER_UNIT_DIR" "$STATE_DIR/from-pending"
 
 log 'parando configuração antiga/avulsa, se existir'
 systemctl --user disable --now rclone-worker-to.timer 2>/dev/null || true
@@ -59,11 +59,12 @@ install_unit "$APP_ROOT/systemd/user/dev-automation-worker-from-delete.service" 
 systemctl --user daemon-reload
 systemctl --user enable dev-automation-worker-to.service dev-automation-worker-from.timer dev-automation-worker-from-delete.service >/dev/null
 mkdir -p "$STATE_DIR"
+rm -f -- "$STATE_DIR/from-backup.ready"
 worker_source_fingerprint > "$FINGERPRINT_FILE"
 
 log 'instalado. Fluxo fixo:'
 log '  /home/daniel/worker/to -> danielmaiax:worker/to'
-log '  danielmaiax:worker/from -> /home/daniel/worker/from'
+log '  danielmaiax:worker/from -> claim remoto .processing -> /home/daniel/worker/from'
 log '  ZIP processado: /home/daniel/worker/from -> /home/daniel/worker/from/backup'
 log '  backup local <-> danielmaiax:worker/from/backup (histórico preservado nos dois lados)'
-log '  após confirmar backup remoto, a cópia da fila remota é removida.'
+log '  após confirmar backup remoto, somente o claim em .processing é removido; nova versão na raiz é preservada.'

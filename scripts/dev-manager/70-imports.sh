@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Contexto: importação transacional de ZIPs e worker/from
 
+WORKER_FROM_STATE_LIB="$PROJECT_ROOT/apps/worker-sync/scripts/from-state.sh"
+if [ -f "$WORKER_FROM_STATE_LIB" ]; then
+  # shellcheck source=/dev/null
+  source "$WORKER_FROM_STATE_LIB"
+fi
+
 archive_worker_from_zip() {
   local zip_file="$1"
   local status="${2:-PROCESSED}"
-  local downloads zip_parent downloads_real backup_dir base stem stamp archive_name archive_path seq=0
+  local downloads zip_parent downloads_real backup_dir base stem stamp archive_name archive_path seq=0 claim_path=""
 
   [ -f "$zip_file" ] || {
     log "ERRO: ZIP não existe para arquivamento: $zip_file"
@@ -50,7 +56,22 @@ archive_worker_from_zip() {
     archive_path="$backup_dir/$archive_name"
   done
 
+  # O downloader v2 cria o claim ANTES de retirar o arquivo da raiz remota.
+  # Aqui apenas anexamos o nome final do histórico ao mesmo claim, preservando
+  # o caminho remoto único em .processing. Para ZIPs locais/legados sem claim,
+  # a função cria um claim compatível antes do mv.
+  if declare -F worker_from_claim_attach_archive >/dev/null 2>&1; then
+    if ! claim_path="$(worker_from_claim_attach_archive "$base" "$archive_name" "$zip_file")"; then
+      log "ERRO: não foi possível atualizar claim transacional antes do arquivamento: $base"
+      return 1
+    fi
+    log "CLAIM FROM ATUALIZADO: $base -> $archive_name"
+  elif declare -F worker_from_claim_write >/dev/null 2>&1; then
+    claim_path="$(worker_from_claim_write "$base" "$archive_name" "$zip_file")" || return 1
+  fi
+
   if ! mv -- "$zip_file" "$archive_path"; then
+    [ -z "$claim_path" ] || rm -f -- "$claim_path"
     log "ERRO: não foi possível mover ZIP para o backup local: $zip_file"
     return 1
   fi

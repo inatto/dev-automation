@@ -1,33 +1,28 @@
 # worker-sync
 
-Sincronização fixa do dev-automation:
+Fila assíncrona entre a máquina local e Google Drive.
 
-- `~/worker/to` -> `danielmaiax:worker/to`: upload dos backups gerados localmente.
-- `danielmaiax:worker/from` -> `~/worker/from`: download da fila de entrada.
-- `~/worker/from/backup` <-> `danielmaiax:worker/from/backup`: histórico preservado nos dois lados.
+- `~/worker/to` -> `danielmaiax:worker/to`: snapshots enviados pela máquina.
+- `danielmaiax:worker/from` -> `~/worker/from`: fila de entrada.
+- `~/worker/from/backup` <-> `danielmaiax:worker/from/backup`: histórico.
 
-## Esteira FROM
+## FROM transacional
 
-O contrato é deliberadamente simples:
+O downloader não faz mais `rclone copy` da pasta inteira.
 
-1. ChatGPT/Drive coloca `<projeto>--<finalidade>.zip` apenas em `worker/from/`.
-2. O worker baixa o ZIP para `~/worker/from/`.
-3. O dev-manager importa e confere os arquivos no projeto local.
-4. Depois da confirmação, o ZIP **não é apagado**: ele é movido localmente para:
+1. Lista apenas os ZIPs da raiz remota.
+2. Antes de baixar, cria um claim local e move server-side o ZIP para
+   `worker/from/.processing/<token>/<nome>`.
+3. Baixa somente aquele arquivo para `~/worker/from/.incoming`.
+4. Confere MD5 quando disponível e publica em `~/worker/from` por `mv` atômico.
+5. O dev-manager importa o ZIP e move para `~/worker/from/backup/...--PROCESSED.zip`.
+6. O backup worker sobe o histórico e apaga somente o caminho único de
+   `.processing` guardado no claim.
+7. Uma versão nova com o mesmo nome pode chegar à raiz remota sem ser apagada
+   pelo cleanup da versão anterior.
 
-   `~/worker/from/backup/<nome>--AAAAMMDD-HHMMSS--PROCESSED.zip`
+Toda chamada de rede possui timeout. Se uma operação cair no meio, o claim e
+`.processing` permitem retomada idempotente no ciclo seguinte.
 
-5. O worker de backup sobe exatamente esse arquivo para:
-
-   `danielmaiax:worker/from/backup/<mesmo-nome>`
-
-6. Só depois de o backup remoto ser confirmado, o original é removido da raiz remota `worker/from/`.
-7. Ao iniciar, o worker de backup reconcilia o histórico remoto e local nos dois sentidos sem apagar histórico.
-
-Se uma importação falhar, o ZIP sai da fila para não entrar em loop, mas continua preservado como:
-
-`<nome>--AAAAMMDD-HHMMSS--FAILED.zip`
-
-Assim as duas raízes ficam limpas e os dois `backup/` convergem para o mesmo histórico. Nenhum ZIP processado depende de uma exclusão local para existir no backup.
-
-Ao executar `dev-manager`, `worker-sync ensure` verifica fingerprint dos scripts/units. Se esta lógica mudar, reinstala e reinicia os workers para a versão atual.
+A deduplicação automática do histórico atua somente em `*--PROCESSED.zip` e
+remove cópias com MD5 idêntico; SAFE/ROLLBACK/SUPERSEDED não entram na limpeza.

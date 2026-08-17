@@ -1,50 +1,85 @@
 #!/usr/bin/env bash
 # Backend Ubuntu/Linux do comando `pycharms`.
+# Mantido deliberadamente independente do GNOME Shell: abre projetos e não
+# instala extensões, não move janelas e não manipula workspaces/monitores.
 set -euo pipefail
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 CONFIG_FILE="${PYCHARMS_PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PYCHARMS_OPEN_DELAY_SECONDS:-1}"
-STARTUP_SETTLE_SECONDS="${PYCHARMS_STARTUP_SETTLE_SECONDS:-15}"
-GNOME_WAYLAND_HELPER="$SCRIPT_DIR/gnome-wayland.sh"
-DESKTOPS_SCRIPT="$PROJECT_ROOT/scripts/desktops.sh"
-STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
-WORKSPACE_MAP="$STATE_DIR/workspaces.tsv"
-BATCH_MARKER="$STATE_DIR/batch-opening"
-RECONCILE_REQUEST="$STATE_DIR/reconcile.request"
-CLOSE_REQUEST="$STATE_DIR/close.request"
-CLOSE_READY="$STATE_DIR/close.ready"
-CLOSE_RESULT="$STATE_DIR/close.result"
-OPEN_PROJECTS_SNAPSHOT="${PYCHARMS_OPEN_PROJECTS_FILE:-$STATE_DIR/open-projects.tsv}"
-OPEN_PROJECTS_REQUEST="$STATE_DIR/open-projects.request"
-OPEN_PROJECTS_READY="$STATE_DIR/open-projects.ready"
+
 log(){ printf '[pycharms] %s\n' "$*"; }
 warn(){ printf '[pycharms] AVISO: %s\n' "$*" >&2; }
 fail(){ printf '[pycharms] ERRO: %s\n' "$*" >&2; exit 1; }
 
+show_help() {
+  cat <<'EOF_HELP'
+Uso:
+  pycharms          Abre os projetos configurados no PyCharm
+  pycharms --list   Mostra as pastas que seriam abertas
+  pycharms --diagnose  Mostra como o PyCharm foi detectado
+  pycharms --help   Mostra esta ajuda
+
+Regra:
+  abre os projetos-raiz ativos de auto-code-manager.projects; ignora agregadores
+  *.zip, projetos ausentes e subprojetos apps/ quando o pai também está ativo.
+  No Ubuntu, o comando não integra com o GNOME Shell nem manipula janelas.
+EOF_HELP
+}
+
 find_pycharm_native() {
   local cmd candidate
   for cmd in pycharm pycharm-professional pycharm-community pycharm.sh; do
-    if command -v "$cmd" >/dev/null 2>&1; then command -v "$cmd"; return 0; fi
+    if command -v "$cmd" >/dev/null 2>&1; then
+      command -v "$cmd"
+      return 0
+    fi
   done
+
   while IFS= read -r candidate; do
-    [[ -x "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
-  done < <(find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) 2>/dev/null | sort -r)
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(
+    find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" \
+      -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) \
+      2>/dev/null | sort -r
+  )
   return 1
 }
 
 pycharm_mode() {
   local native
-  if native="$(find_pycharm_native 2>/dev/null)"; then printf 'native\t%s\n' "$native"; return 0; fi
+  if native="$(find_pycharm_native 2>/dev/null)"; then
+    printf 'native\t%s\n' "$native"
+    return 0
+  fi
+
   if command -v snap >/dev/null 2>&1; then
-    if snap list pycharm-professional >/dev/null 2>&1; then printf 'snap\tpycharm-professional\n'; return 0; fi
-    if snap list pycharm-community >/dev/null 2>&1; then printf 'snap\tpycharm-community\n'; return 0; fi
+    if snap list pycharm-professional >/dev/null 2>&1; then
+      printf 'snap\tpycharm-professional\n'
+      return 0
+    fi
+    if snap list pycharm-community >/dev/null 2>&1; then
+      printf 'snap\tpycharm-community\n'
+      return 0
+    fi
   fi
+
   if command -v flatpak >/dev/null 2>&1; then
-    if flatpak info com.jetbrains.PyCharm-Professional >/dev/null 2>&1; then printf 'flatpak\tcom.jetbrains.PyCharm-Professional\n'; return 0; fi
-    if flatpak info com.jetbrains.PyCharm-Community >/dev/null 2>&1; then printf 'flatpak\tcom.jetbrains.PyCharm-Community\n'; return 0; fi
+    if flatpak info com.jetbrains.PyCharm-Professional >/dev/null 2>&1; then
+      printf 'flatpak\tcom.jetbrains.PyCharm-Professional\n'
+      return 0
+    fi
+    if flatpak info com.jetbrains.PyCharm-Community >/dev/null 2>&1; then
+      printf 'flatpak\tcom.jetbrains.PyCharm-Community\n'
+      return 0
+    fi
   fi
+
   return 1
 }
 
@@ -54,245 +89,73 @@ show_diagnose() {
   printf 'pycharm-professional: '; command -v pycharm-professional || true
   printf 'pycharm-community: '; command -v pycharm-community || true
   printf '\nCandidatos locais:\n'
-  find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) -print 2>/dev/null | sort || true
-  printf '\nDetectado pelo comando:\n'; pycharm_mode || printf 'NÃO ENCONTRADO\n'
-  printf '\n=== GNOME / MONITOR ===\n'
-  [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" diagnose || true
-  printf '\n=== MAPA PROJETO -> WORKSPACE ===\n'
-  load_projects
-  write_workspace_map
-  cat "$WORKSPACE_MAP"
+  find /opt "$HOME/.local/share/JetBrains/Toolbox/apps" \
+    -maxdepth 8 -type f \( -name pycharm -o -name pycharm.sh \) \
+    -print 2>/dev/null | sort || true
+  printf '\nDetectado pelo comando:\n'
+  pycharm_mode || printf 'NÃO ENCONTRADO\n'
+  printf '\nIntegração gráfica: nenhuma. O backend Ubuntu não carrega código no GNOME Shell.\n'
 }
 
 load_projects() {
   [[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
-  resolved_projects=(); resolved_workspace_indexes=(); resolved_project_names=()
-  configured_projects=(); configured_workspace_indexes=(); effective_projects=()
-  declare -gA effective_set=(); declare -gA seen_projects=()
-  local raw line candidate parent path real skip workspace_index=2
+  [[ -d "$CODE_ROOT" ]] || fail "raiz de projetos não encontrada: $CODE_ROOT"
 
-  # Mesma ordem do comando desktops: Workspace 1 é LAZER; cada linha ativa
-  # cadastrada ocupa sua posição, mesmo que a pasta ainda não exista.
+  configured_projects=()
+  effective_projects=()
+  resolved_projects=()
+  declare -gA configured_set=()
+  declare -gA effective_set=()
+  declare -gA seen_projects=()
+
+  local raw line project_path candidate parent skip_nested_app project_real_path
+
   while IFS= read -r raw || [[ -n "$raw" ]]; do
-    raw="${raw%$'\r'}"; line="${raw%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"; line="${line#./}"; line="${line%/}"
-    [[ -n "$line" && "${line,,}" != *.zip ]] || continue
-    configured_projects+=("$line")
-    configured_workspace_indexes+=("$workspace_index")
-    ((workspace_index += 1))
+    raw="${raw%$'\r'}"
+    line="${raw%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    line="${line#./}"
+    line="${line%/}"
+    [[ -n "$line" ]] || continue
+    [[ "${line,,}" == *.zip ]] && continue
+
+    if [[ -z "${configured_set["$line"]:-}" ]]; then
+      configured_set["$line"]=1
+      configured_projects+=("$line")
+    fi
   done < "$CONFIG_FILE"
 
   for line in "${configured_projects[@]}"; do
-    path="$CODE_ROOT/$line"
-    if [[ ! -d "$path" ]]; then
-      warn "fora do grid; projeto ainda ausente: $path"
+    project_path="$CODE_ROOT/$line"
+    if [[ ! -d "$project_path" ]]; then
+      warn "fora do grid; projeto ainda ausente: $project_path"
       continue
     fi
-    effective_set[$line]=1
+    effective_set["$line"]=1
     effective_projects+=("$line")
   done
 
-  local idx
-  for ((idx=0; idx<${#configured_projects[@]}; idx++)); do
-    line="${configured_projects[$idx]}"
-    [[ -n "${effective_set[$line]:-}" ]] || continue
-    candidate="$line"; skip=0
+  for line in "${effective_projects[@]}"; do
+    candidate="$line"
+    skip_nested_app=0
     while [[ "$candidate" == */apps/* ]]; do
       parent="${candidate%/apps/*}"
-      if [[ -n "${effective_set[$parent]:-}" ]]; then skip=1; break; fi
+      if [[ -n "${effective_set["$parent"]:-}" ]]; then
+        skip_nested_app=1
+        break
+      fi
       candidate="$parent"
     done
-    ((skip==0)) || continue
+    ((skip_nested_app == 0)) || continue
 
-    path="$CODE_ROOT/$line"
-    real="$(cd -- "$path" && pwd -P)"
-    [[ -z "${seen_projects[$real]:-}" ]] || continue
-    seen_projects[$real]=1
-    resolved_projects+=("$real")
-    resolved_workspace_indexes+=("${configured_workspace_indexes[$idx]}")
-    resolved_project_names+=("$(basename -- "$line")")
-  done
-}
-
-write_workspace_map() {
-  mkdir -p "$STATE_DIR"
-  local tmp="$WORKSPACE_MAP.tmp.$$" i
-  : > "$tmp"
-  for ((i=0; i<${#resolved_projects[@]}; i++)); do
-    printf '%s\t%s\t%s\n' \
-      "${resolved_workspace_indexes[$i]}" \
-      "${resolved_project_names[$i]}" \
-      "${resolved_projects[$i]}" >> "$tmp"
-  done
-  mv -f "$tmp" "$WORKSPACE_MAP"
-}
-
-show_workspace_map() {
-  load_projects
-  write_workspace_map
-  cat "$WORKSPACE_MAP"
-}
-
-request_reconcile() {
-  mkdir -p "$STATE_DIR"
-  local tmp="$RECONCILE_REQUEST.tmp.$$"
-  printf '%s\n' "$(date +%s%N)" > "$tmp"
-  mv -f "$tmp" "$RECONCILE_REQUEST"
-}
-
-request_close_all() {
-  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || fail 'pycharms --close requer sessão GNOME/Wayland.'
-  [[ -x "$GNOME_WAYLAND_HELPER" ]] || fail "helper GNOME ausente: $GNOME_WAYLAND_HELPER"
-  "$GNOME_WAYLAND_HELPER" ensure >/dev/null || true
-
-  mkdir -p "$STATE_DIR"
-  local token tmp attempt ready result
-  token="$(date +%s%N)-$$-$RANDOM"
-  tmp="$CLOSE_REQUEST.tmp.$$"
-  rm -f -- "$BATCH_MARKER" "$CLOSE_READY" "$CLOSE_RESULT"
-  printf '%s\n' "$token" > "$tmp"
-  mv -f "$tmp" "$CLOSE_REQUEST"
-
-  for ((attempt=0; attempt<60; attempt++)); do
-    if [[ -f "$CLOSE_READY" ]]; then
-      ready="$(cat "$CLOSE_READY" 2>/dev/null || true)"
-      if [[ "$ready" == "$token" ]]; then
-        result="$(cat "$CLOSE_RESULT" 2>/dev/null || true)"
-        log "fechamento solicitado para todas as janelas PyCharm. ${result:-}"
-        return 0
-      fi
+    project_path="$CODE_ROOT/$line"
+    project_real_path="$(cd -- "$project_path" && pwd -P)"
+    if [[ -z "${seen_projects["$project_real_path"]:-}" ]]; then
+      seen_projects["$project_real_path"]=1
+      resolved_projects+=("$project_real_path")
     fi
-    sleep 0.1
   done
-  fail 'GNOME não confirmou pycharms --close; nenhum kill forçado foi executado.'
-}
-
-pycharm_process_running() {
-  pgrep -af 'pycharm64|pycharm\.sh|/pycharm([[:space:]]|$)|jetbrains.*pycharm|PyCharm' >/dev/null 2>&1
-}
-
-request_open_projects_snapshot() {
-  mkdir -p "$STATE_DIR"
-
-  # Testes/integrações podem fornecer um snapshot explícito. No uso normal em
-  # GNOME/Wayland, a extensão produz este arquivo a partir das janelas reais.
-  if [[ -n "${PYCHARMS_OPEN_PROJECTS_FILE:-}" ]]; then
-    [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || : > "$OPEN_PROJECTS_SNAPSHOT"
-    return 0
-  fi
-
-  if [[ "${XDG_SESSION_TYPE:-}" != wayland ]]; then
-    # Fora do Wayland não prometemos introspecção de janelas. Mantém o
-    # comportamento anterior sem inventar estado que não conseguimos provar.
-    : > "$OPEN_PROJECTS_SNAPSHOT"
-    return 0
-  fi
-
-  local token tmp attempt ready
-  token="$(date +%s%N)-$$-$RANDOM"
-  tmp="$OPEN_PROJECTS_REQUEST.tmp.$$"
-  rm -f -- "$OPEN_PROJECTS_READY"
-  printf '%s\n' "$token" > "$tmp"
-  mv -f "$tmp" "$OPEN_PROJECTS_REQUEST"
-
-  for ((attempt=0; attempt<50; attempt++)); do
-    if [[ -f "$OPEN_PROJECTS_READY" ]]; then
-      ready="$(cat "$OPEN_PROJECTS_READY" 2>/dev/null || true)"
-      if [[ "$ready" == "$token" ]]; then
-        [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || : > "$OPEN_PROJECTS_SNAPSHOT"
-        return 0
-      fi
-    fi
-    sleep 0.1
-  done
-
-  # Idempotência é mais importante que "tentar mesmo assim". Se já existe
-  # PyCharm rodando e não conseguimos enumerar as janelas, não abrimos nada.
-  if pycharm_process_running; then
-    fail 'não foi possível obter a lista de projetos PyCharm já abertos pelo GNOME; abortando para não duplicar janelas. Rode: pycharms --diagnose'
-  fi
-
-  warn 'snapshot de janelas GNOME indisponível, mas nenhum PyCharm está rodando; seguindo com lista vazia.'
-  : > "$OPEN_PROJECTS_SNAPSHOT"
-}
-
-load_open_project_set() {
-  declare -gA open_project_set=()
-  local a b c path
-  [[ -f "$OPEN_PROJECTS_SNAPSHOT" ]] || return 0
-  while IFS=$'\t' read -r a b c || [[ -n "${a:-}${b:-}${c:-}" ]]; do
-    path=''
-    if [[ -n "${c:-}" ]]; then
-      path="$c"
-    elif [[ -n "${b:-}" ]]; then
-      path="$b"
-    else
-      path="${a:-}"
-    fi
-    [[ -n "$path" ]] || continue
-    open_project_set["$path"]=1
-  done < "$OPEN_PROJECTS_SNAPSHOT"
-}
-
-refresh_open_projects() {
-  request_open_projects_snapshot
-  load_open_project_set
-}
-
-ensure_gnome_workspaces() {
-  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
-  if [[ -x "$DESKTOPS_SCRIPT" ]]; then
-    PROJECTS_FILE="$CONFIG_FILE" DESKTOPS_PLATFORM=gnome "$DESKTOPS_SCRIPT" >/dev/null || \
-      warn 'não foi possível sincronizar os workspaces antes de abrir o PyCharm'
-  fi
-  [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" ensure || true
-}
-
-batch_marker_active() {
-  [[ -f "$BATCH_MARKER" ]] || return 1
-  local expiry now
-  expiry="$(cat "$BATCH_MARKER" 2>/dev/null || true)"
-  [[ "$expiry" =~ ^[0-9]+$ ]] || { rm -f -- "$BATCH_MARKER"; return 1; }
-  now="$(date +%s)"
-  if (( now <= expiry )); then
-    return 0
-  fi
-  rm -f -- "$BATCH_MARKER"
-  return 1
-}
-
-wait_for_previous_batch() {
-  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
-  batch_marker_active || return 0
-
-  local max_wait="${PYCHARMS_BATCH_WAIT_SECONDS:-30}" attempt max_attempts
-  [[ "$max_wait" =~ ^[0-9]+$ ]] || max_wait=30
-  max_attempts=$((max_wait * 10))
-  log "lote anterior ainda está estabilizando; aguardando até ${max_wait}s para preservar idempotência..."
-  for ((attempt=0; attempt<max_attempts; attempt++)); do
-    batch_marker_active || return 0
-    sleep 0.1
-  done
-  fail 'lote PyCharm anterior ainda está em estabilização; abortando para não abrir projetos duplicados. Aguarde alguns segundos e rode pycharms novamente.'
-}
-
-begin_batch() {
-  mkdir -p "$STATE_DIR"
-  # Expiração de segurança: se o comando for interrompido, a extensão não fica
-  # bloqueada indefinidamente esperando o fim de um lote que morreu.
-  printf '%s\n' "$(( $(date +%s) + 180 ))" > "$BATCH_MARKER"
-}
-
-finish_batch_later() {
-  local settle="$STARTUP_SETTLE_SECONDS"
-  [[ "$settle" =~ ^[0-9]+$ ]] || settle=15
-  (
-    sleep "$settle"
-    rm -f -- "$BATCH_MARKER"
-    request_reconcile
-  ) >/dev/null 2>&1 &
-  disown 2>/dev/null || true
-  log "janelas serão reconciliadas após ${settle}s de estabilização (workspace + monitor + maximização)"
 }
 
 open_project() {
@@ -301,74 +164,44 @@ open_project() {
     native) nohup "$target" "$project" >/dev/null 2>&1 & ;;
     snap) nohup snap run "$target" "$project" >/dev/null 2>&1 & ;;
     flatpak) nohup flatpak run "$target" "$project" >/dev/null 2>&1 & ;;
+    *) fail "modo PyCharm inválido: $mode" ;;
   esac
 }
 
 case "${1:-}" in
-  --diagnose|diagnose) show_diagnose; exit 0 ;;
-  --workspace-map|workspace-map) show_workspace_map; exit 0 ;;
-  --close|close)
-    request_close_all
+  --help|-h|help)
+    show_help
     exit 0
     ;;
-  --reconcile|reconcile)
-    load_projects
-    write_workspace_map
-    ensure_gnome_workspaces
-    rm -f -- "$BATCH_MARKER"
-    request_reconcile
-    log 'reconciliação final solicitada.'
+  --diagnose|diagnose)
+    show_diagnose
     exit 0
     ;;
-  --help|-h|help) printf 'Uso: pycharms | pycharms --list | pycharms --workspace-map | pycharms --reconcile | pycharms --close | pycharms --diagnose\n'; exit 0 ;;
-  --list|list) list_only=1 ;;
-  "") list_only=0 ;;
-  *) fail "opção inválida: $1" ;;
+  --list|list)
+    list_only=1
+    ;;
+  "")
+    list_only=0
+    ;;
+  *)
+    fail "opção inválida: $1 (use --help)"
+    ;;
 esac
 
 load_projects
-write_workspace_map
-if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
-((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
-ensure_gnome_workspaces
-wait_for_previous_batch
-refresh_open_projects
+((${#resolved_projects[@]} > 0)) || fail 'nenhum projeto existente no grid efetivo.'
 
-projects_to_open=()
-workspaces_to_open=()
-for ((i=0; i<${#resolved_projects[@]}; i++)); do
-  project="${resolved_projects[$i]}"
-  workspace="${resolved_workspace_indexes[$i]}"
-  if [[ -n "${open_project_set[$project]:-}" ]]; then
-    log "já aberto; ignorando workspace $workspace: $project"
-    continue
-  fi
-  projects_to_open+=("$project")
-  workspaces_to_open+=("$workspace")
-done
-
-if ((${#projects_to_open[@]} == 0)); then
-  rm -f -- "$BATCH_MARKER"
-  request_reconcile
-  log 'todos os projetos já estão abertos; nenhuma nova janela criada. Reconciliação solicitada.'
+if ((list_only == 1)); then
+  printf '%s\n' "${resolved_projects[@]}"
   exit 0
 fi
 
 IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
-if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-  begin_batch
-fi
 log "Ubuntu backend: $mode -> $target"
-log "faltando abrir: ${#projects_to_open[@]} de ${#resolved_projects[@]} projeto(s)"
-for ((i=0; i<${#projects_to_open[@]}; i++)); do
-  project="${projects_to_open[$i]}"
-  workspace="${workspaces_to_open[$i]}"
-  log "abrindo workspace $workspace: $project"
+log "abrindo ${#resolved_projects[@]} projeto(s) sem integração com o GNOME Shell"
+
+for project in "${resolved_projects[@]}"; do
+  log "abrindo: $project"
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done
-if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-  finish_batch_later
-else
-  request_reconcile
-fi
