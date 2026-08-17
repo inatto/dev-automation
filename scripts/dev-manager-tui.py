@@ -18,6 +18,7 @@ locale.setlocale(locale.LC_ALL, "")
 REFRESH_SECONDS = 0.15
 CLOCK_SECONDS = 1.0
 METRIC_SECONDS = 5.0
+SYSTEM_METRIC_SECONDS = 1.0
 MAX_LOG_LINES = 4000
 THEMES = ("classic", "matrix")
 
@@ -169,6 +170,98 @@ def centered_label(win, label, attr):
         pass
 
 
+def human_bytes(value, per_second=False):
+    value = max(0.0, float(value or 0.0))
+    units = ("B", "K", "M", "G", "T")
+    unit = units[0]
+    for unit in units:
+        if value < 1024.0 or unit == units[-1]:
+            break
+        value /= 1024.0
+    if unit == "B":
+        text = f"{value:.0f}{unit}"
+    elif value >= 100:
+        text = f"{value:.0f}{unit}"
+    elif value >= 10:
+        text = f"{value:.1f}{unit}"
+    else:
+        text = f"{value:.2f}{unit}"
+    return text + ("/s" if per_second else "")
+
+
+def cpu_times():
+    try:
+        fields = Path("/proc/stat").read_text(encoding="ascii").splitlines()[0].split()[1:]
+        values = [int(value) for value in fields]
+    except (OSError, ValueError, IndexError):
+        return 0, 0
+    total = sum(values)
+    idle = (values[3] if len(values) > 3 else 0) + (values[4] if len(values) > 4 else 0)
+    return total, idle
+
+
+def memory_usage():
+    values = {}
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="ascii").splitlines():
+            key, rest = line.split(":", 1)
+            values[key] = int(rest.strip().split()[0]) * 1024
+    except (OSError, ValueError, IndexError):
+        return 0, 0
+    total = values.get("MemTotal", 0)
+    available = values.get("MemAvailable", values.get("MemFree", 0))
+    return max(0, total - available), total
+
+
+def disk_usage(path="/"):
+    try:
+        stat = os.statvfs(path)
+    except OSError:
+        return 0, 0
+    total = stat.f_blocks * stat.f_frsize
+    available = stat.f_bavail * stat.f_frsize
+    return max(0, total - available), total
+
+
+def default_network_interface():
+    try:
+        lines = Path("/proc/net/route").read_text(encoding="ascii").splitlines()[1:]
+    except OSError:
+        lines = []
+    for line in lines:
+        fields = line.split()
+        if len(fields) >= 4 and fields[1] == "00000000":
+            try:
+                flags = int(fields[3], 16)
+            except ValueError:
+                flags = 0
+            if flags & 0x2:
+                return fields[0]
+    try:
+        for entry in Path("/sys/class/net").iterdir():
+            if entry.name != "lo" and (entry / "operstate").read_text(encoding="ascii").strip() == "up":
+                return entry.name
+    except OSError:
+        pass
+    return ""
+
+
+def network_bytes(interface):
+    if not interface:
+        return 0, 0
+    base = Path("/sys/class/net") / interface / "statistics"
+    return read_int(base / "rx_bytes"), read_int(base / "tx_bytes")
+
+
+def network_speed_bps(interface):
+    if not interface:
+        return 0
+    speed_mbps = read_int(Path("/sys/class/net") / interface / "speed", 0)
+    if speed_mbps <= 0 or speed_mbps > 1_000_000:
+        return 0
+    return speed_mbps * 1_000_000
+
+
 class Dashboard:
     def __init__(self, stdscr, script, child_args):
         self.stdscr = stdscr
@@ -196,6 +289,22 @@ class Dashboard:
         self.worker_to_active = False
         self.worker_from_active = False
         self.last_metric_at = 0.0
+        self.last_system_metric_at = 0.0
+        self.cpu_percent = 0.0
+        self.cpu_prev_total = 0
+        self.cpu_prev_idle = 0
+        self.memory_used = 0
+        self.memory_total = 0
+        self.disk_used = 0
+        self.disk_total = 0
+        self.net_interface = default_network_interface()
+        self.net_rx_rate = 0.0
+        self.net_tx_rate = 0.0
+        self.net_bar_percent = 0.0
+        self.net_capacity_bps = network_speed_bps(self.net_interface)
+        self.net_prev_at = 0.0
+        self.net_prev_rx = 0
+        self.net_prev_tx = 0
         self.last_draw_at = 0.0
         self.exit_code = None
         self.child_exited = False
@@ -269,6 +378,10 @@ class Dashboard:
                 muted = self.color_number(22, curses.COLOR_GREEN)
                 download = self.color_number(51, curses.COLOR_CYAN)
                 warning = self.color_number(226, curses.COLOR_YELLOW)
+                metric_cpu = self.color_number(51, curses.COLOR_CYAN)
+                metric_memory = self.color_number(201, curses.COLOR_MAGENTA)
+                metric_disk = self.color_number(226, curses.COLOR_YELLOW)
+                metric_network = self.color_number(118, curses.COLOR_GREEN)
             else:
                 # BASIC/Clipper escurecido: navy profundo sem o azul estourado.
                 bg = self.color_number(17, curses.COLOR_BLUE)
@@ -281,6 +394,10 @@ class Dashboard:
                 muted = self.color_number(110, curses.COLOR_CYAN)
                 download = self.color_number(117, curses.COLOR_CYAN)
                 warning = self.color_number(220, curses.COLOR_YELLOW)
+                metric_cpu = self.color_number(51, curses.COLOR_CYAN)
+                metric_memory = self.color_number(213, curses.COLOR_MAGENTA)
+                metric_disk = self.color_number(220, curses.COLOR_YELLOW)
+                metric_network = self.color_number(84, curses.COLOR_GREEN)
 
             pairs = (
                 (1, base, bg),
@@ -292,6 +409,10 @@ class Dashboard:
                 (7, muted, bg),
                 (8, download, bg),
                 (9, warning, bg),
+                (10, metric_cpu, bg),
+                (11, metric_memory, bg),
+                (12, metric_disk, bg),
+                (13, metric_network, bg),
             )
             for pair, fg, bg_color in pairs:
                 try:
@@ -309,6 +430,10 @@ class Dashboard:
             "muted": curses.color_pair(7),
             "download": curses.color_pair(8) | curses.A_BOLD,
             "warning": curses.color_pair(9) | curses.A_BOLD,
+            "metric_cpu": curses.color_pair(10) | curses.A_BOLD,
+            "metric_memory": curses.color_pair(11) | curses.A_BOLD,
+            "metric_disk": curses.color_pair(12) | curses.A_BOLD,
+            "metric_network": curses.color_pair(13) | curses.A_BOLD,
         }
         self.stdscr.bkgd(" ", self.colors["base"])
         for win in self.windows.values():
@@ -486,6 +611,101 @@ class Dashboard:
             return True
         return False
 
+    def collect_system_metrics(self):
+        now = time.monotonic()
+        if now - self.last_system_metric_at < SYSTEM_METRIC_SECONDS:
+            return False
+        self.last_system_metric_at = now
+
+        before = (
+            round(self.cpu_percent, 1),
+            self.memory_used,
+            self.memory_total,
+            self.disk_used,
+            self.disk_total,
+            self.net_interface,
+            int(self.net_rx_rate),
+            int(self.net_tx_rate),
+            round(self.net_bar_percent, 1),
+        )
+
+        total, idle = cpu_times()
+        if self.cpu_prev_total and total > self.cpu_prev_total:
+            delta_total = total - self.cpu_prev_total
+            delta_idle = max(0, idle - self.cpu_prev_idle)
+            if delta_total > 0:
+                self.cpu_percent = clamp(100.0 * (delta_total - delta_idle) / delta_total, 0.0, 100.0)
+        self.cpu_prev_total, self.cpu_prev_idle = total, idle
+
+        self.memory_used, self.memory_total = memory_usage()
+        self.disk_used, self.disk_total = disk_usage("/")
+
+        interface = default_network_interface()
+        if interface != self.net_interface:
+            self.net_interface = interface
+            self.net_capacity_bps = network_speed_bps(interface)
+            self.net_prev_at = 0.0
+            self.net_prev_rx = 0
+            self.net_prev_tx = 0
+
+        rx, tx = network_bytes(self.net_interface)
+        if self.net_prev_at and now > self.net_prev_at:
+            elapsed = now - self.net_prev_at
+            self.net_rx_rate = max(0.0, (rx - self.net_prev_rx) / elapsed)
+            self.net_tx_rate = max(0.0, (tx - self.net_prev_tx) / elapsed)
+        self.net_prev_at = now
+        self.net_prev_rx = rx
+        self.net_prev_tx = tx
+
+        capacity = self.net_capacity_bps or 100_000_000
+        traffic_bps = (self.net_rx_rate + self.net_tx_rate) * 8.0
+        self.net_bar_percent = clamp((traffic_bps / capacity) * 100.0, 0.0, 100.0) if capacity else 0.0
+
+        after = (
+            round(self.cpu_percent, 1),
+            self.memory_used,
+            self.memory_total,
+            self.disk_used,
+            self.disk_total,
+            self.net_interface,
+            int(self.net_rx_rate),
+            int(self.net_tx_rate),
+            round(self.net_bar_percent, 1),
+        )
+        if after != before:
+            self.dirty = True
+            return True
+        return False
+
+    @staticmethod
+    def metric_text(label, detail, percent, width):
+        """Renderiza a telemetria como duas subcolunas alinhadas.
+
+        O rótulo fica à direita em uma largura fixa e a barra começa sempre
+        na mesma coluna, com o mesmo tamanho para CPU/RAM/DISK/NET. O detalhe
+        vem depois da barra e pode ser truncado sem deslocar o gráfico.
+        """
+        width = max(0, width)
+        label_width = 4
+        label_cell = str(label)[:label_width].rjust(label_width)
+
+        # A largura da barra depende apenas da largura da coluna, nunca do
+        # tamanho variável do detalhe. Assim todos os gráficos ficam alinhados.
+        if width >= 34:
+            bar_width = 14
+        elif width >= 28:
+            bar_width = 10
+        else:
+            bar_width = max(4, min(8, width - label_width - 4))
+
+        filled = clamp(int(round(bar_width * clamp(percent, 0.0, 100.0) / 100.0)), 0, bar_width)
+        bar = "█" * filled + "·" * (bar_width - filled)
+        graph = f"[{bar}]"
+        base = f"{label_cell}  {graph}"
+        if width <= len(base):
+            return fit(base, width)
+        return fit(f"{base}  {detail}", width)
+
     def make_box(self, top, left, height, width):
         if height < 3 or width < 4:
             return None
@@ -598,63 +818,107 @@ class Dashboard:
             self.prep_box(header, "DEV AUTOMATION :: CLIPPER / NCURSES")
             _, width = header.getmaxyx()
             inner = width - 4
-            half = max(20, inner // 2)
+            col = max(18, inner // 3)
+            col1_x = 2
+            col2_x = 2 + col
+            col3_x = 2 + (2 * col)
+            col1_w = max(1, col - 2)
+            col2_w = max(1, col - 2)
+            col3_w = max(1, width - col3_x - 2)
             now = time.strftime("%H:%M:%S")
             theme_label = "DARK / MATRIX" if self.theme == "matrix" else "DAY / BASIC"
-            safe_add(header, 1, 2, f"STATUS: {self.status}", self.status_attr(), half)
-            safe_add(header, 1, half + 2, f"HORA: {now}", self.colors["highlight"], inner - half)
-            safe_add(header, 2, 2, f"MODO: {self.mode}", self.colors["base"], half)
-            safe_add(header, 2, half + 2, f"TEMA: {theme_label}", self.colors["muted"], inner - half)
+
+            # Três colunas no mesmo header. As duas primeiras preservam o painel
+            # operacional existente; a terceira é telemetria do host em tempo real.
+            for sep_x in (col2_x - 1, col3_x - 1):
+                if 1 < sep_x < width - 1:
+                    for y in range(1, 6):
+                        try:
+                            header.addch(y, sep_x, curses.ACS_VLINE, self.colors["muted"])
+                        except curses.error:
+                            pass
+
+            safe_add(header, 1, col1_x, f"STATUS: {self.status}", self.status_attr(), col1_w)
+            safe_add(header, 1, col2_x, f"HORA: {now}", self.colors["highlight"], col2_w)
+            safe_add(header, 2, col1_x, f"MODO: {self.mode}", self.colors["base"], col1_w)
+            safe_add(header, 2, col2_x, f"TEMA: {theme_label}", self.colors["muted"], col2_w)
             safe_add(
                 header,
                 3,
-                2,
+                col1_x,
                 f"INOTIFY: {self.inotify_instances}/{self.max_instances} instâncias",
                 self.colors["border"],
-                half,
+                col1_w,
             )
             safe_add(
                 header,
                 3,
-                half + 2,
+                col2_x,
                 f"WATCHES: {self.inotify_watches}/{self.max_watches}",
                 self.colors["border"],
-                inner - half,
+                col2_w,
             )
             safe_add(
                 header,
                 4,
-                2,
+                col1_x,
                 f"FD DEV-MANAGER: {self.manager_fds}/{self.manager_fd_limit}",
                 self.colors["base"],
-                half,
+                col1_w,
             )
-            safe_add(
-                header,
-                4,
-                half + 2,
-                f"ZIPs FROM: {self.zip_count}",
-                self.colors["base"],
-                inner - half,
-            )
+            safe_add(header, 4, col2_x, f"ZIPs FROM: {self.zip_count}", self.colors["base"], col2_w)
             to_label = "OK" if self.worker_to_active else "PARADO"
             from_label = "OK" if self.worker_from_active else "PARADO"
             safe_add(
                 header,
                 5,
-                2,
+                col1_x,
                 f"WORKER TO: {to_label}",
                 self.colors["ok"] if self.worker_to_active else self.colors["error"],
-                half,
+                col1_w,
             )
             safe_add(
                 header,
                 5,
-                half + 2,
+                col2_x,
                 f"WORKER FROM: {from_label}",
                 self.colors["ok"] if self.worker_from_active else self.colors["error"],
-                inner - half,
+                col2_w,
             )
+
+            mem_percent = (100.0 * self.memory_used / self.memory_total) if self.memory_total else 0.0
+            disk_percent = (100.0 * self.disk_used / self.disk_total) if self.disk_total else 0.0
+            cpu_detail = f"{self.cpu_percent:4.1f}%"
+            mem_detail = f"{human_bytes(self.memory_used)}/{human_bytes(self.memory_total)} {mem_percent:3.0f}%"
+            disk_detail = f"{human_bytes(self.disk_used)}/{human_bytes(self.disk_total)} {disk_percent:3.0f}%"
+            net_detail = f"↓{human_bytes(self.net_rx_rate, True)} ↑{human_bytes(self.net_tx_rate, True)}"
+
+            safe_add(
+                header, 1, col3_x,
+                self.metric_text("CPU", cpu_detail, self.cpu_percent, col3_w),
+                self.colors["metric_cpu"], col3_w,
+            )
+            safe_add(
+                header, 2, col3_x,
+                self.metric_text("RAM", mem_detail, mem_percent, col3_w),
+                self.colors["metric_memory"], col3_w,
+            )
+            safe_add(
+                header, 3, col3_x,
+                self.metric_text("DISK", disk_detail, disk_percent, col3_w),
+                self.colors["metric_disk"], col3_w,
+            )
+            safe_add(
+                header, 4, col3_x,
+                self.metric_text("NET", net_detail, self.net_bar_percent, col3_w),
+                self.colors["metric_network"], col3_w,
+            )
+            speed_label = f"IFACE: {self.net_interface or '-'}"
+            if self.net_capacity_bps:
+                speed_label += f"  LINK {self.net_capacity_bps / 1_000_000:.0f}M"
+            else:
+                speed_label += "  escala 100M"
+            safe_add(header, 5, col3_x, fit(speed_label, col3_w), self.colors["muted"], col3_w)
             header.noutrefresh()
 
         if action:
@@ -773,6 +1037,7 @@ class Dashboard:
             while self.running:
                 self.drain_output()
                 self.collect_metrics()
+                self.collect_system_metrics()
                 if self.proc and self.proc.poll() is not None and not self.child_exited:
                     self.exit_code = self.proc.returncode
                     self.child_exited = True

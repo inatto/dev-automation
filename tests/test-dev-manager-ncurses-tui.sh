@@ -55,6 +55,11 @@ assert "F2/T: tema" in source, "atalho de tema não está documentado no rodapé
 assert "WORKER TO:" in source, "TUI não mostra worker TO"
 assert "WORKER FROM:" in source, "TUI não mostra worker FROM"
 assert "ZIPs FROM:" in source, "TUI ainda não usa worker/from"
+assert 'self.metric_text("CPU"' in source, "TUI não mostra barra de CPU"
+assert 'self.metric_text("RAM"' in source, "TUI não mostra barra de RAM"
+assert 'self.metric_text("DISK"' in source, "TUI não mostra barra de disco"
+assert 'self.metric_text("NET"' in source, "TUI não mostra barra de rede"
+assert 'SYSTEM_METRIC_SECONDS = 1.0' in source, "telemetria não atualiza em tempo real"
 assert "if self.full_redraw:" in source, "redesenho completo não está protegido por dirty/full redraw"
 PY
 

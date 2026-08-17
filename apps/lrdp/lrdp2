@@ -3,8 +3,8 @@ set -euo pipefail
 
 exec xfreerdp3 \
   /v:192.168.1.47 \
-  /u:daniel \
-  /p:20bqns_DL.. \
+  /u:govbr \
+  /p:20bqns_GR \
   /multimon \
   /cert:ignore \
   "$@"
