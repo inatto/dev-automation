@@ -30,9 +30,11 @@ DEV_MANAGER_MODULES=(
   30-sounds.sh
   40-files-safety.sh
   50-project-registry.sh
+  60-project-runtime.sh
+  70-imports.sh
   80-backup-filters.sh
   90-sql-zip.sh
-  100-protected-config.sh
+  110-removal-markers.sh
   130-backups.sh
   140-light-monitor.sh
   150-inotify-plan.sh

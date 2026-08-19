@@ -292,6 +292,7 @@ class Dashboard:
         self.version = read_build_version()
         self.mode = "INOTIFY"
         self.output_dir = os.environ.get("CODE_ROOT", "/home/daniel/Code")
+        self.downloads = str(Path.home() / "Downloads")
         self.inotify_instances = 0
         self.inotify_watches = 0
         self.max_instances = 0
@@ -299,6 +300,7 @@ class Dashboard:
         self.manager_fds = 0
         self.manager_fd_limit = 0
         self.zip_count = 0
+        self.download_zip_count = 0
         self.last_metric_at = 0.0
         self.last_system_metric_at = 0.0
         self.cpu_percent = 0.0
@@ -529,6 +531,8 @@ class Dashboard:
 
         if clean.startswith("Auto Code Manager - "):
             self.status_detail = clean
+        elif clean.startswith("Downloads:"):
+            self.downloads = clean.split(":", 1)[1].strip()
         elif clean.startswith("ZIP_DIR:"):
             self.output_dir = clean.split(":", 1)[1].strip()
         elif clean.startswith("Modo:"):
@@ -589,6 +593,7 @@ class Dashboard:
             self.manager_fds,
             self.manager_fd_limit,
             self.zip_count,
+            self.download_zip_count,
         )
         self.max_instances = read_int("/proc/sys/fs/inotify/max_user_instances")
         self.max_watches = read_int("/proc/sys/fs/inotify/max_user_watches")
@@ -596,6 +601,7 @@ class Dashboard:
         pid = self.proc.pid if self.proc else None
         self.manager_fds, self.manager_fd_limit = process_fd_metrics(pid)
         self.zip_count = count_zip_files(self.output_dir)
+        self.download_zip_count = count_zip_files(self.downloads)
         after = (
             self.max_instances,
             self.max_watches,
@@ -604,6 +610,7 @@ class Dashboard:
             self.manager_fds,
             self.manager_fd_limit,
             self.zip_count,
+            self.download_zip_count,
         )
         if after != before:
             self.dirty = True
@@ -865,8 +872,8 @@ class Dashboard:
                 self.colors["base"],
                 col1_w,
             )
-            safe_add(header, 4, col2_x, f"ZIPs CODE: {self.zip_count}", self.colors["base"], col2_w)
-            safe_add(header, 5, col1_x, f"SAÍDA ZIP: {self.output_dir}", self.colors["ok"], col1_w + col2_w)
+            safe_add(header, 4, col2_x, f"DOWNLOADS ZIPs: {self.download_zip_count}", self.colors["base"], col2_w)
+            safe_add(header, 5, col1_x, f"DOWNLOADS: {self.downloads} · ZIPs CODE: {self.zip_count}", self.colors["ok"], col1_w + col2_w)
 
             mem_percent = (100.0 * self.memory_used / self.memory_total) if self.memory_total else 0.0
             disk_percent = (100.0 * self.disk_used / self.disk_total) if self.disk_total else 0.0

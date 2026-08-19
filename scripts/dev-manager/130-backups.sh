@@ -5,7 +5,6 @@ backup_project() {
   local project="$1"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
   local child child_name child_zip child_count
-  local sanitize_result sanitized_files sanitized_values
   local -a children=()
 
   project_dir="$(project_path "$project")"
@@ -18,8 +17,8 @@ backup_project() {
   fi
 
   if ! target_is_aggregate "$project"; then
-    # Segurança desacoplada: audita/aplica git-crypt antes do backup, mas nunca
-    # derruba a esteira. Falha vira alerta crítico vermelho + som pelo módulo 190.
+    # Segurança desacoplada: SOMENTE AUDITA git-crypt antes do backup.
+    # O guard chamado pelo dev-manager usa --check e não altera repo/índice.
     gitcrypt_guard_project "$project" || true
   fi
 
@@ -77,23 +76,7 @@ backup_project() {
       return 1
     fi
 
-    if ! sanitize_result="$(sanitize_backup_config_passwords "$temp_dir")"; then
-      log "ERRO ao sanitizar senhas dos configs no backup: $project"
-      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
-      return 1
-    fi
-    sanitized_files="${sanitize_result%%:*}"
-    sanitized_values="${sanitize_result##*:}"
-    if [ "${sanitized_values:-0}" -gt 0 ]; then
-      log "Configs sanitizados no ZIP: ${sanitized_values} senha(s) em ${sanitized_files} arquivo(s)."
-    fi
 
-    if ! save_protected_config_baseline "$project" "$temp_dir"; then
-      log "ERRO ao salvar referência sanitizada dos configs protegidos: $project"
-      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
-      return 1
-    fi
-    log "Referência sanitizada dos configs protegidos atualizada."
   fi
 
   if ! (cd "$temp_dir" && zip -qry "$temp_zip" .); then

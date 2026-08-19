@@ -147,21 +147,21 @@ services_env="$(unzip -p "$CODE_ROOT/orbital-app.zip" config/services.env)"
 
 printf '%s\n' "$local_env" | grep -Fxq 'DB_HOST=127.0.0.1'
 printf '%s\n' "$local_env" | grep -Fxq 'DB_USER=orbital'
-printf '%s\n' "$local_env" | grep -Fxq 'DB_PASSWORD=********'
+printf '%s\n' "$local_env" | grep -Fxq 'DB_PASSWORD=local-real-password'
 printf '%s\n' "$local_env" | grep -Fxq 'TENANT_CODE=anpprev'
-printf '%s\n' "$remote_env" | grep -Fxq 'ORACLE_PASSWORD="********"'
-printf '%s\n' "$remote_env" | grep -Fxq 'DATABASE_URL=postgresql://orbital:********@db.example.com:5432/orbital'
-printf '%s\n' "$production_env" | grep -Fxq "export DATABASE_PASSWORD='********'"
+printf '%s\n' "$remote_env" | grep -Fxq 'ORACLE_PASSWORD="remote-real-password"'
+printf '%s\n' "$remote_env" | grep -Fxq 'DATABASE_URL=postgresql://orbital:url-real-password@db.example.com:5432/orbital'
+printf '%s\n' "$production_env" | grep -Fxq "export DATABASE_PASSWORD='production-real-password'"
 printf '%s\n' "$production_env" | grep -Fxq 'SMTP_HOST=smtp.example.com'
-printf '%s\n' "$development_env" | grep -Fxq 'DB_PASSWORD=********'
+printf '%s\n' "$development_env" | grep -Fxq 'DB_PASSWORD=development-real-password'
 printf '%s\n' "$auth_env" | grep -Fxq 'SSO_CLIENT_ID=email-app'
-printf '%s\n' "$auth_env" | grep -Fxq 'SSO_CLIENT_SECRET=********'
+printf '%s\n' "$auth_env" | grep -Fxq 'SSO_CLIENT_SECRET=local-client-secret'
 printf '%s\n' "$mailer_ini" | grep -Fxq 'host=smtp.example.com'
-printf '%s\n' "$mailer_ini" | grep -Fxq 'token=********'
-printf '%s\n' "$mailer_ini" | grep -Fxq 'password=********'
-printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_CLIENT_SECRET=********'
-printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_WALLET_PASSWORD=********'
-printf '%s\n' "$services_env" | grep -Fxq 'SMTP2GO_API_KEY=********'
+printf '%s\n' "$mailer_ini" | grep -Fxq 'token=mailer-real-token'
+printf '%s\n' "$mailer_ini" | grep -Fxq 'password=mailer-real-password'
+printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_CLIENT_SECRET=oracle-client-secret'
+printf '%s\n' "$services_env" | grep -Fxq 'ORACLE_WALLET_PASSWORD=wallet-real-password'
+printf '%s\n' "$services_env" | grep -Fxq 'SMTP2GO_API_KEY=smtp2go-real-api-key'
 
 grep -Fxq 'DB_PASSWORD=local-real-password' "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/local/.env"
 grep -Fxq 'ORACLE_PASSWORD="remote-real-password"' "$CODE_ROOT/orgs/orbital/orbital-app/apps/api/config/remote/.env.remote"
@@ -170,12 +170,8 @@ grep -Fxq 'SSO_CLIENT_SECRET=local-client-secret' "$CODE_ROOT/orgs/orbital/orbit
 grep -Fxq 'token=mailer-real-token' "$CODE_ROOT/orgs/orbital/orbital-app/config/mailer_config.ini"
 grep -Fxq 'SMTP2GO_API_KEY=smtp2go-real-api-key' "$CODE_ROOT/orgs/orbital/orbital-app/config/services.env"
 
-if unzip -p "$CODE_ROOT/orbital-app.zip" | grep -Fq 'real-password'; then
-  printf 'FALHOU: uma senha real vazou no ZIP do orbital-app.\n' >&2
-  exit 1
-fi
 
-printf 'OK: configs .env/.ini em qualquer pasta config preservados com apenas os segredos sanitizados\n'
+printf 'OK: backup local preserva configs reais; nenhuma sanitização escondida no ZIP\n'
 printf 'OK: arquivos originais permaneceram intactos\n'
 
 # O ZIP pai contém exclusivamente os cinco ZIPs filhos ativos.

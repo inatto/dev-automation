@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Protege qualquer pasta "config" dos projetos ativos com git-crypt.
-# Engine independente: não inicia TUI, não faz commit/push e nunca adiciona
-# arquivo não rastreado. O dev-manager apenas consome os resultados deste script.
+# Audita configs sensíveis dos projetos ativos com git-crypt.
+# O dev-manager usa SOMENTE --check: não cria .gitattributes, não faz git add,
+# não reescreve índice, não desbloqueia repo e não toca em arquivo do projeto.
 
 set -uo pipefail
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 PROJECTS_FILE="${DEV_MANAGER_PROJECTS_FILE:-}"
 KEY_FILE="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/git-reverse-crypt-2.key}"
-MODE="fix"
+MODE="check"
 ONLY_PROJECT=""
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
@@ -25,8 +25,8 @@ Uso:
   config-gitcrypt-guard.sh [--fix|--check] [--project REL] [--code-root DIR]
                            [--projects-file FILE] [--key FILE]
 
-Padrão: --fix usando /home/daniel/static/git-reverse-crypt-2.key.
---fix não faz commit/push e não adiciona arquivos não rastreados.
+Padrão: --check usando /home/daniel/static/git-reverse-crypt-2.key.
+O dev-manager nunca chama --fix automaticamente.
 EOF_HELP
 }
 
@@ -53,6 +53,10 @@ ok() {
   out OK "$*"
 }
 
+detail() {
+  out DETALHE "$*"
+}
+
 trim_line() {
   local line="$1"
   line="${line%$'\r'}"
@@ -73,14 +77,37 @@ project_selected() {
 
 find_config_dirs() {
   local root="$1"
-  find "$root" \
+  local dir
+
+  # Nunca tratar "src/config" de frontend/backend como segredo só por se chamar
+  # config. Isso foi a origem de api-url.ts entrar indevidamente no git-crypt.
+  # Auditamos apenas configs com forte sinal de configuração operacional:
+  #   1) config/ na raiz do projeto;
+  #   2) config contendo local/, remote/ ou production/;
+  #   3) config com arquivo de ambiente/credencial imediatamente dentro.
+  while IFS= read -r -d '' dir; do
+    if [ "$dir" = "$root/config" ]; then
+      printf '%s\n' "$dir"
+      continue
+    fi
+    if [ -d "$dir/local" ] || [ -d "$dir/remote" ] || [ -d "$dir/production" ]; then
+      printf '%s\n' "$dir"
+      continue
+    fi
+    if find "$dir" -maxdepth 1 -type f \
+      \( -name '.env' -o -name '.env.*' -o -iname '*.ini' -o -iname '*.conf' -o \
+         -iname '*.cfg' -o -iname '*.properties' -o -iname 'credentials*' -o -iname 'secrets*' \) \
+      -print -quit 2>/dev/null | grep -q .; then
+      printf '%s\n' "$dir"
+    fi
+  done < <(find "$root" \
     \( -type d \( \
       -name .git -o -name node_modules -o -name .venv -o -name venv -o \
       -name __pycache__ -o -name .pytest_cache -o -name .cache -o \
       -name dist -o -name build -o -name target -o -name vendor -o \
       -name .idea -o -name .astro \
     \) -prune \) -o \
-    \( -type d -iname config -print \) 2>/dev/null
+    \( -type d -iname config -print0 \) 2>/dev/null)
 }
 
 repo_relative_path() {
@@ -309,6 +336,9 @@ verify_repo_configs() {
   local -a rels=("$@")
   local rel path attr_out filter diff mode
   local plain_index=0 plain_head=0 attr_bad=0 tracked=0
+  declare -A attr_bad_paths=()
+  declare -A plain_index_paths=()
+  declare -A plain_head_paths=()
 
   for rel in "${rels[@]}"; do
     while IFS= read -r -d '' path; do
@@ -321,21 +351,73 @@ verify_repo_configs() {
       filter="$(printf '%s\n' "$attr_out" | awk -F': ' '$2=="filter"{print $3; exit}')"
       diff="$(printf '%s\n' "$attr_out" | awk -F': ' '$2=="diff"{print $3; exit}')"
       if [ "$filter" != git-crypt ] || [ "$diff" != git-crypt ]; then
-        attr_bad=$((attr_bad + 1))
+        if [ -z "${attr_bad_paths[$path]+x}" ]; then
+          attr_bad=$((attr_bad + 1))
+          attr_bad_paths["$path"]="$rel|${filter:-não-definido}|${diff:-não-definido}"
+        fi
         continue
       fi
-      index_blob_is_encrypted "$repo" "$path" || plain_index=$((plain_index + 1))
-      head_blob_is_encrypted "$repo" "$path" || plain_head=$((plain_head + 1))
+      if ! index_blob_is_encrypted "$repo" "$path"; then
+        if [ -z "${plain_index_paths[$path]+x}" ]; then
+          plain_index=$((plain_index + 1))
+          plain_index_paths["$path"]="$rel"
+        fi
+      fi
+      if ! head_blob_is_encrypted "$repo" "$path"; then
+        if [ -z "${plain_head_paths[$path]+x}" ]; then
+          plain_head=$((plain_head + 1))
+          plain_head_paths["$path"]="$rel"
+        fi
+      fi
     done < <(git -C "$repo" ls-files -z -- "$rel" 2>/dev/null)
   done
 
-  [ "$attr_bad" -eq 0 ] || critical "$repo: $attr_bad arquivo(s) rastreado(s) em config sem atributos git-crypt corretos"
-  [ "$plain_index" -eq 0 ] || critical "$repo: $plain_index arquivo(s) de config ainda estão plaintext no índice Git"
+  emit_grouped_gitcrypt_details() {
+    local title="$1" map_name="$2" show_attrs="${3:-false}"
+    local -n issue_map="$map_name"
+    local config_rel issue_path metadata owner filter_value diff_value
+    local found=false
+
+    [ "${#issue_map[@]}" -gt 0 ] || return 0
+    detail "$title"
+    for config_rel in "${rels[@]}"; do
+      found=false
+      while IFS= read -r issue_path; do
+        [ -n "$issue_path" ] || continue
+        metadata="${issue_map[$issue_path]}"
+        owner="${metadata%%|*}"
+        [ "$owner" = "$config_rel" ] || continue
+        if [ "$found" = false ]; then
+          detail "  pasta config: $repo/$config_rel"
+          found=true
+        fi
+        if [ "$show_attrs" = true ]; then
+          filter_value="${metadata#*|}"
+          diff_value="${filter_value#*|}"
+          filter_value="${filter_value%%|*}"
+          detail "    - $repo/$issue_path [filter=$filter_value, diff=$diff_value]"
+        else
+          detail "    - $repo/$issue_path"
+        fi
+      done < <(printf '%s\n' "${!issue_map[@]}" | sort)
+    done
+  }
+
+  if [ "$attr_bad" -gt 0 ]; then
+    critical "$repo: $attr_bad arquivo(s) rastreado(s) em config sem atributos git-crypt corretos"
+    emit_grouped_gitcrypt_details "arquivos sem atributos git-crypt:" attr_bad_paths true
+  fi
+  if [ "$plain_index" -gt 0 ]; then
+    critical "$repo: $plain_index arquivo(s) de config ainda estão plaintext no índice Git"
+    emit_grouped_gitcrypt_details "arquivos plaintext no índice Git:" plain_index_paths
+  fi
   if [ "$plain_head" -gt 0 ]; then
     if [ "$plain_index" -eq 0 ] && [ "$attr_bad" -eq 0 ]; then
       warn "$repo: $plain_head arquivo(s) ainda estão plaintext no HEAD antigo; índice já está criptografado. Um próximo commit grava a proteção; histórico anterior só some com rewrite explícito"
+      emit_grouped_gitcrypt_details "arquivos plaintext somente no HEAD antigo:" plain_head_paths
     else
       critical "$repo: $plain_head arquivo(s) de config estão plaintext no HEAD e a migração atual ainda não ficou comprovada"
+      emit_grouped_gitcrypt_details "arquivos plaintext no HEAD:" plain_head_paths
     fi
   fi
   if [ "$attr_bad" -eq 0 ] && [ "$plain_index" -eq 0 ]; then
@@ -350,6 +432,15 @@ protect_repo() {
   local attrs="$repo/.gitattributes"
   local block rendered rel
   local need_write=false
+
+  # Modo usado pelo dev-manager: somente leitura. Confere a chave efetiva,
+  # os atributos realmente aplicados aos arquivos e blobs plaintext. Não exige
+  # bloco/marker gerenciado e não prepara qualquer escrita em .gitattributes.
+  if [ "$MODE" = check ]; then
+    ensure_repo_key "$repo" || true
+    verify_repo_configs "$repo" "${rels[@]}"
+    return 0
+  fi
 
   block="$(mktemp)" || return 1
   rendered="$(mktemp)" || { rm -f -- "$block"; return 1; }
@@ -366,13 +457,6 @@ protect_repo() {
 
   if [ ! -f "$attrs" ] || ! cmp -s -- "$attrs" "$rendered"; then
     need_write=true
-  fi
-
-  if [ "$MODE" = check ]; then
-    [ "$need_write" = false ] || critical "pasta config sem regra gerenciada git-crypt em .gitattributes: $repo"
-    rm -f -- "$block" "$rendered"
-    verify_repo_configs "$repo" "${rels[@]}"
-    return 0
   fi
 
   if ! ensure_repo_key "$repo"; then

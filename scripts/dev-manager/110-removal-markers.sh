@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Contexto: marcadores .remover, validação, quarentena e rollback
 
+valid_import_relative_path() {
+  local rel="$1"
+  case "$rel" in
+    ""|/*|..|../*|*/../*|*/..) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+
 prepare_removal_markers() {
   local source_root="$1"
   local project_dir="$2"

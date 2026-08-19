@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contexto: auditoria/fix desacoplado de git-crypt para qualquer pasta config.
+# Contexto: auditoria SOMENTE LEITURA de git-crypt para configs sensíveis.
 
 GITCRYPT_GUARD_SCRIPT="${DEV_MANAGER_GITCRYPT_GUARD_SCRIPT:-$PROJECT_ROOT/scripts/config-gitcrypt-guard.sh}"
 GITCRYPT_GUARD_KEY="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/git-reverse-crypt-2.key}"
@@ -12,8 +12,9 @@ emit_gitcrypt_guard_output() {
     [ -n "$line" ] || continue
     case "$line" in
       CRITICAL:*) LOG_CONTEXT=error log "ERRO: ${line#CRITICAL: }" ;;
-      FIX:*) LOG_CONTEXT=warning log "CORREÇÃO SEGURANÇA: ${line#FIX: }" ;;
+      FIX:*) LOG_CONTEXT=warning log "GIT-CRYPT: ${line#FIX: }" ;;
       AVISO:*) LOG_CONTEXT=warning log "$line" ;;
+      DETALHE:*) LOG_CONTEXT=error log "${line#DETALHE: }" ;;
       OK:*) LOG_CONTEXT=ok log "$line" ;;
       INSTALAR:*) LOG_CONTEXT=error log "INSTALAR GIT-CRYPT: ${line#INSTALAR: }" ;;
       RESUMO:*) LOG_CONTEXT=wait log "GIT-CRYPT: ${line#RESUMO: }" ;;
@@ -41,7 +42,7 @@ gitcrypt_guard_alert_if_needed() {
 
 gitcrypt_guard_run() {
   local output_file rc=0
-  local -a args=(--fix --code-root "$CODE_ROOT" --projects-file "$PROJECTS_FILE" --key "$GITCRYPT_GUARD_KEY")
+  local -a args=(--check --code-root "$CODE_ROOT" --projects-file "$PROJECTS_FILE" --key "$GITCRYPT_GUARD_KEY")
   [ "$#" -eq 0 ] || args+=(--project "$1")
 
   if [ ! -f "$GITCRYPT_GUARD_SCRIPT" ]; then

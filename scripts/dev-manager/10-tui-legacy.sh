@@ -94,7 +94,7 @@ tui_state_label() {
 }
 
 tui_collect_metrics() {
-  local now info watches
+  local now downloads info watches
   local -a inotify_fds=()
   local -a fdinfo_files=()
 
@@ -130,6 +130,12 @@ tui_collect_metrics() {
 
   TUI_PROJECT_COUNT="$(backup_targets 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
   TUI_ZIP_COUNT="$(find "$(archive_output_dir)" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+  downloads="$(download_inbox_dir 2>/dev/null || true)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ]; then
+    TUI_DOWNLOAD_ZIPS="$(find "$downloads" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
+  else
+    TUI_DOWNLOAD_ZIPS=0
+  fi
 
 }
 
@@ -147,9 +153,9 @@ tui_draw_static() {
   printf '\0337'
   tui_write_row 1 '44;96;1' "$(tui_border_text '╔' '╗' 'DEV AUTOMATION :: CLIPPER')"
   tui_write_split_row 2 "STATUS: $TUI_STATUS_STATE  $TUI_STATUS_DETAIL" "HORA: $now" '44;93;1'
-  tui_write_split_row 3 "MODO: ${mode^^} · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty · ZIPs CODE: $TUI_ZIP_COUNT" '44;97'
+  tui_write_split_row 3 "MODO: ${mode^^} · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty · DL ZIPs: $TUI_DOWNLOAD_ZIPS" '44;97'
   tui_write_split_row 4 "INOTIFY INST: $TUI_INOTIFY_INSTANCES/$TUI_INOTIFY_MAX_INSTANCES" "WATCHES: $TUI_INOTIFY_WATCHES/$TUI_INOTIFY_MAX_WATCHES" '44;96;1'
-  tui_write_split_row 5 "SAÍDA ZIP: $(archive_output_dir)" "DEBOUNCE: ${BACKUP_EVERY}s" '44;97;1'
+  tui_write_split_row 5 "DOWNLOADS: $(download_inbox_dir)" "ZIPs CODE: $TUI_ZIP_COUNT · debounce ${BACKUP_EVERY}s" '44;97;1'
   tui_write_row 6 '44;96;1' "$(tui_border_text '╠' '╣' 'ÚLTIMA AÇÃO')"
   tui_write_box_row 7 "$TUI_LAST_ACTION" '44;93;1'
   tui_write_row 8 '44;96;1' "$(tui_border_text '╠' '╣' 'LOG · área rolável')"

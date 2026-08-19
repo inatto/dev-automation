@@ -273,36 +273,21 @@ O instalador cria ou atualiza `auto-code-manager`, `dev-manager`, `chromes`,
 Projeto isolado em `apps/oracle-monitor`, instalado como comando global
 `oracle-monitor`. Consulte `apps/oracle-monitor/README.md`.
 
-#### ZIP automático de arquivos SQL
+#### SQL
 
-O arquivo `config/auto-code-manager.folder-sql-zip` informa as pastas que o
-monitor deve observar, uma por linha. São aceitos caminhos absolutos, caminhos
-com `~/` e caminhos relativos a `/home/daniel/Code`.
+O `dev-manager` **não compacta nem apaga SQL automaticamente**. Um arquivo
+`*.sql` dentro de um projeto é tratado como qualquer outro arquivo: a mudança
+apenas dispara o ZIP normal do projeto.
 
-Exemplo:
-
-```text
-~/Code/orgs/asaclub-app/exports/ddl/
-~/Code/infra/oracle-infra/exports/ddl/
-```
-
-Em cada ciclo, todos os arquivos `*.sql` estáveis encontrados diretamente em
-cada pasta são agrupados em um ZIP com a data e hora de criação:
-
-```text
-20260728-1729.zip
-```
-
-O nome original do SQL não interfere no nome do ZIP. Se novos SQLs chegarem no
-mesmo minuto, eles são adicionados ao ZIP daquele minuto. O ZIP é validado antes
-da instalação e os SQLs incluídos só são apagados depois da validação. Em caso
-de falha, os SQLs permanecem na pasta.
-
-Para executar somente essa tarefa uma vez:
+A rotina antiga ainda existe somente como comando manual explícito, para quem
+realmente quiser executá-la:
 
 ```bash
 auto-code-manager --sql-zip-once
 ```
+
+Ela usa `config/auto-code-manager.folder-sql-zip`, mas esse arquivo não é criado
+nem observado automaticamente pelo `dev-manager`.
 
 
 ## Chave lógica global de projeto
@@ -310,3 +295,54 @@ auto-code-manager --sql-zip-once
 O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
 Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
+
+### Efeitos colaterais permitidos do dev-manager (v39)
+
+O comando `dev-manager` também não reinstala comandos globais, não recompila
+`dev-status` e não garante/inicia G512 automaticamente ao subir. Essas ações só
+acontecem quando chamadas explicitamente pelos comandos próprios.
+
+No diretório dos projetos, o monitor só pode fazer o seguinte:
+
+- copiar arquivos vindos de um ZIP reconhecido em `~/Downloads`;
+- remover o alvo correspondente a um marcador `arquivo.remover` recebido nesse ZIP;
+- nunca deixar o próprio `.remover` dentro do projeto;
+- auditar git-crypt em **somente leitura** (`--check`), sem criar/editar `.gitattributes`, sem `git add`, sem reescrever índice e sem `git-crypt unlock`.
+
+Fora da árvore do projeto, ele gera o backup local `/home/daniel/Code/<projeto>.zip`
+como cópia real do projeto após aplicar apenas os ignores de backup, e mantém
+apenas arquivos temporários/estado do próprio manager. Não mascara/sanitiza
+config no ZIP, não cria baseline de config e não existe mais materialização/merge
+automático de `.external`, compactação automática de SQL, restart/sinal automático
+de processos após importação, worker, rclone ou Drive.
+
+Pastas de código como `apps/web/src/config` não são consideradas secretas apenas
+por se chamarem `config`; por exemplo, `apps/web/src/config/api-url.ts` não entra
+no git-crypt automaticamente.
+
+Quando a auditoria git-crypt encontra problema, o log mostra o repositório, cada
+pasta `config` afetada e cada arquivo problemático. Para erro de atributos, mostra
+também os valores efetivos de `filter` e `diff`; para plaintext, lista os caminhos
+exatos no índice e/ou no HEAD.
+
+## Importação automática local por Downloads
+
+O `auto-code-manager` observa `/home/daniel/Downloads` por `inotify`, sem Google Drive, rclone ou worker.
+
+- Só processa `.zip` cujo nome resolva para um alvo cadastrado em `config/auto-code-manager.projects` **e cuja pasta já exista** em `/home/daniel/Code`.
+- Aceita `projeto.zip` e complementos iniciados por separador, por exemplo `orbital-legal--ajuste-importador.zip`, `orbital-legal-fix.zip` ou `orbital-legal(2).zip`.
+- ZIP desconhecido fica intocado em Downloads.
+- Aguarda o fim da gravação (`CLOSE_WRITE`/`MOVED_TO`), valida integridade e recusa caminhos absolutos, `..`, symlinks e tipos especiais.
+- Antes de aplicar, gera/valida o backup atual do projeto em `/home/daniel/Code/<projeto>.zip`.
+- Extrai em staging temporário, aplica `config/auto-code-manager.ignore-unzip`, preserva `config/local`, `config/remote` e `config/production` sem gerar `.external`, e valida marcadores `.remover`.
+- Copia e confere arquivo a arquivo. O ZIP de entrada é apagado **somente depois** de tudo ser confirmado.
+- Se houver qualquer falha, o ZIP permanece em Downloads.
+- Depois da importação, alterações do projeto passam pelo mesmo debounce normal e o ZIP local do projeto é atualizado.
+
+Comandos úteis:
+
+```bash
+auto-code-manager --identify-zip ~/Downloads/orbital-legal--fix.zip
+auto-code-manager --import-downloads-once
+auto-code-manager --import-one ~/Downloads/orbital-legal--fix.zip
+```

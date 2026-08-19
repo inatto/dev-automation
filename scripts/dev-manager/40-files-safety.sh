@@ -1,5 +1,23 @@
 #!/usr/bin/env bash
-# Contexto: saída local dos ZIPs, estabilidade, arquivos de configuração e segurança
+# Contexto: Downloads local, saída de ZIPs, estabilidade, configuração e segurança
+
+
+download_inbox_dir() {
+  printf '%s\n' "${DOWNLOADS_DIR:-$HOME/Downloads}"
+}
+
+ensure_download_inbox() {
+  local downloads
+  downloads="$(download_inbox_dir)"
+  [ -n "$downloads" ] || {
+    echo "ERRO: pasta Downloads não pôde ser determinada." >&2
+    return 1
+  }
+  mkdir -p -- "$downloads" || {
+    echo "ERRO: não foi possível preparar Downloads: $downloads" >&2
+    return 1
+  }
+}
 
 archive_output_dir() {
   printf '%s\n' "$CODE_ROOT"
@@ -47,7 +65,6 @@ clean_file() {
 }
 
 ensure_files() {
-  [ -f "$FOLDER_SQL_ZIP_FILE" ] || touch "$FOLDER_SQL_ZIP_FILE"
   [ -f "$IGNORE_UNZIP_FILE" ] || touch "$IGNORE_UNZIP_FILE"
 
   if [ ! -f "$PROJECTS_FILE" ]; then

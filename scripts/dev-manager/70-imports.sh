@@ -1,97 +1,11 @@
 #!/usr/bin/env bash
-# Contexto: importação transacional de ZIPs e worker/from
-
-archive_worker_from_zip() {
-  local zip_file="$1"
-  local status="${2:-PROCESSED}"
-  local downloads zip_parent downloads_real backup_dir base archive_path source_md5 backup_md5
-
-  [ -f "$zip_file" ] || {
-    log "ERRO: ZIP não existe para arquivamento: $zip_file"
-    return 1
-  }
-
-  case "$status" in
-    PROCESSED|FAILED) ;;
-    *)
-      log "ERRO: status de arquivamento inválido: $status"
-      return 1
-      ;;
-  esac
-
-  downloads="$(worker_from_dir)"
-  zip_parent="$(cd -- "$(dirname -- "$zip_file")" && pwd -P)" || return 1
-  downloads_real="$(cd -- "$downloads" 2>/dev/null && pwd -P || printf '%s' "$downloads")"
-
-  # Só a fila worker/from vira histórico. ZIP temporário/invocado fora da fila
-  # continua sendo removido após a importação, como antes.
-  if [ "$zip_parent" != "$downloads_real" ]; then
-    if rm -f -- "$zip_file" && [ ! -e "$zip_file" ]; then
-      return 0
-    fi
-    log "ERRO: ZIP importado, mas não pôde ser removido: $zip_file"
-    return 1
-  fi
-
-  backup_dir="$downloads_real/backup"
-  mkdir -p -- "$backup_dir" || {
-    log "ERRO: não foi possível criar backup local de worker/from: $backup_dir"
-    return 1
-  }
-
-  base="$(basename -- "$zip_file")"
-  archive_path="$backup_dir/$base"
-
-  # Regra do worker: o nome é imutável da entrada ao backup. Codinome diferente
-  # significa versão diferente. Nunca cria --PROCESSED, timestamp, (1), -2 etc.
-  if [ -e "$archive_path" ]; then
-    if [ -f "$archive_path" ]; then
-      source_md5="$(md5sum -- "$zip_file" | awk '{print tolower($1)}')"
-      backup_md5="$(md5sum -- "$archive_path" | awk '{print tolower($1)}')"
-      if [ "$source_md5" = "$backup_md5" ]; then
-        rm -f -- "$zip_file"
-        log "ZIP JÁ ESTAVA NO BACKUP COM O MESMO NOME/CONTEÚDO: $base"
-        return 0
-      fi
-    fi
-    log "ERRO: colisão de codinome em worker/from/backup: $base"
-    log "Use outro codinome; o worker não renomeia arquivos automaticamente."
-    return 1
-  fi
-
-  if ! mv -- "$zip_file" "$archive_path"; then
-    log "ERRO: não foi possível mover ZIP para o backup local: $zip_file"
-    return 1
-  fi
-
-  log "ZIP ARQUIVADO LOCALMENTE SEM RENOMEAR [$status]: $base -> backup/$base"
-  return 0
-}
-
-refresh_worker_sync_after_self_update() {
-  local project_dir="$1"
-  local ensure_script="$PROJECT_ROOT/apps/worker-sync/deploy/local/ensure.sh"
-  local project_real root_real
-
-  project_real="$(cd -- "$project_dir" 2>/dev/null && pwd -P || true)"
-  root_real="$(cd -- "$PROJECT_ROOT" 2>/dev/null && pwd -P || true)"
-  [ -n "$project_real" ] && [ "$project_real" = "$root_real" ] || return 0
-  [ -f "$ensure_script" ] || return 0
-
-  chmod +x "$ensure_script" 2>/dev/null || true
-  log "SELF-UPDATE: recarregando worker-sync após atualizar dev-automation..."
-  if "$ensure_script"; then
-    log "SELF-UPDATE: worker-sync recarregado e backup reconciliado."
-  else
-    log "AVISO: self-update aplicado, mas worker-sync não pôde ser recarregado agora."
-  fi
-}
+# Contexto: importação transacional de ZIPs recebidos em ~/Downloads
 
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
   local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest
-  local total_files checked_files rel destination update_scope="none" removal_count=0
+  local total_files checked_files rel destination removal_count=0
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
   local -A nested_seen=() expected_targets=()
@@ -127,6 +41,11 @@ import_one_zip() {
 
   if ! unzip -tq "$zip_file" >/dev/null 2>&1; then
     log "ERRO: ZIP inválido ou corrompido. O ZIP foi mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+  if ! validate_zip_entries_safe "$zip_file"; then
+    log "ERRO: ZIP contém caminho/symlink/tipo inseguro. O ZIP foi mantido."
     rm -rf -- "$temp_dir"
     return 1
   fi
@@ -219,16 +138,31 @@ import_one_zip() {
     done
 
     rm -rf -- "$temp_dir"
-    if ! archive_worker_from_zip "$zip_file" PROCESSED; then
-      log "ERRO: filhos importados, mas o ZIP agregador não pôde ser arquivado/removido: $zip_file"
+    if ! finalize_import_zip "$zip_file"; then
+      log "ERRO: filhos importados, mas o ZIP agregador não pôde ser removido: $zip_file"
       return 1
     fi
     log "$nested_count ZIP(s) filho(s) importado(s) e confirmado(s)."
     log "IMPORTAÇÃO DE AGREGADOR CONCLUÍDA: $project"
-    refresh_worker_sync_after_self_update "$project_dir"
     soft_beep
     line
     return 0
+  fi
+
+  [ -d "$project_dir" ] || {
+    log "ERRO: projeto reconhecido, mas o diretório local não existe: $project_dir"
+    log "ZIP mantido em Downloads."
+    rm -rf -- "$temp_dir"
+    return 1
+  }
+
+  # O ZIP em /home/daniel/Code é o ponto de retorno imediatamente anterior à
+  # importação. Só tocamos no projeto se esse backup pré-importação validar.
+  log "Gerando backup pré-importação do estado atual..."
+  if ! backup_project "$project"; then
+    log "ERRO: backup pré-importação falhou. Projeto não foi alterado; ZIP mantido."
+    rm -rf -- "$temp_dir"
+    return 1
   fi
 
   filtered_dir="$(mktemp -d "/tmp/auto-code-unzip-filtered-${archive_name}-XXXXXX")"
@@ -254,19 +188,9 @@ import_one_zip() {
     return 1
   fi
 
-  if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
-    log "ERRO: falha ao comparar configs protegidos. O ZIP foi mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
-    return 1
-  fi
-
-  # Reconstitui configs protegidos no staging antes de tocar no projeto. Onde o
-  # backup trouxe ********, conserva o segredo real que já existe localmente.
-  if ! merge_import_external_configs "$project_dir" "$filtered_dir"; then
-    log "ERRO: merge de .external falhou. O ZIP foi mantido e o destino não recebeu o staging."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
-    return 1
-  fi
+  # Configs local/remote/production são simplesmente preservados no destino.
+  # O manager NÃO cria .external, NÃO materializa par e NÃO faz merge secreto.
+  # Se um config precisar mudar, isso deve vir por ação explícita fora do watcher.
 
   removal_count="$(find "$filtered_dir" -type f -name '*.remover' -printf '.' 2>/dev/null | wc -c)"
   if ! prepare_removal_markers "$filtered_dir" "$project_dir" "$removal_manifest"; then
@@ -326,47 +250,38 @@ import_one_zip() {
     return 1
   fi
 
-  update_scope="$(project_update_scope "$source_dir")"
-  # Remoção pode atingir API/Web sem haver arquivo correspondente no staging;
-  # por segurança, qualquer .remover concluído sinaliza ambos os runtimes.
-  if [ "$removal_count" -gt 0 ]; then
-    update_scope="both"
-  fi
-  log "Escopo de runtime detectado: $update_scope"
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
-  log "Arquivando ZIP original somente após todas as confirmações..."
-  if ! archive_worker_from_zip "$zip_file" PROCESSED; then
-    log "ERRO: arquivos importados, mas o ZIP não pôde ser arquivado/removido: $zip_file"
+  log "Removendo ZIP original somente após todas as confirmações..."
+  if ! finalize_import_zip "$zip_file"; then
+    log "ERRO: arquivos importados, mas o ZIP não pôde ser removido: $zip_file"
     return 1
   fi
 
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
-  refresh_worker_sync_after_self_update "$project_dir"
-  notify_running_project_update "$project_dir" "$update_scope"
   soft_beep
   line
 }
 
-import_worker_from() {
+import_downloads() {
   local downloads zip_file
   local total index imported=0 failed=0
   local -a zip_files=()
 
-  downloads="$(worker_from_dir)"
+  downloads="$(download_inbox_dir)"
 
   if [ -z "$downloads" ] || [ ! -d "$downloads" ]; then
-    log "worker/from não encontrado."
+    log "Downloads não encontrado."
     return 0
   fi
 
-  log "Verificando worker/from: $downloads"
+  log "Verificando Downloads: $downloads"
 
   # A fila de importação é EXCLUSIVAMENTE o que está cadastrado no .projects.
-  # ZIP aleatório em worker/from (ROM, instalador, pacote etc.) é invisível para
+  # ZIP aleatório em Downloads (ROM, instalador, pacote etc.) é invisível para
   # o manager: não entra no lote, não é apagado e não mantém o monitor em loop.
   while IFS= read -r -d '' zip_file; do
-    worker_from_zip_is_configured "$zip_file" || continue
+    download_zip_is_configured "$zip_file" || continue
     zip_files+=("$zip_file")
   done < <(
     find "$downloads" \
@@ -378,18 +293,18 @@ import_worker_from() {
 
   total="${#zip_files[@]}"
   if [ "$total" -eq 0 ]; then
-    log "Nenhum ZIP configurado no .projects encontrado em worker/from nesta rodada."
+    log "Nenhum ZIP de projeto existente/configurado encontrado em Downloads nesta rodada."
     return 0
   fi
 
-  log "LOTE DE WORKER/FROM: $total ZIP(s) serão processados em sequência antes de continuar o ciclo."
+  log "LOTE DE DOWNLOADS: $total ZIP(s) reconhecido(s) serão processados em sequência."
 
   for ((index = 0; index < total; index++)); do
     wait_if_paused
     zip_file="${zip_files[$index]}"
     log "LOTE [$((index + 1))/$total]: $(basename -- "$zip_file")"
 
-    if ! worker_from_zip_has_purpose "$(basename -- "$zip_file")"; then
+    if ! download_zip_has_purpose "$(basename -- "$zip_file")"; then
       log "AVISO PADRÃO DE NOME: use <projeto>--<o-que-faz>.zip; pacote atual não descreve a finalidade."
     fi
 
@@ -398,15 +313,13 @@ import_worker_from() {
     else
       failed=$((failed + 1))
       log "ERRO: falha ao importar: $(basename -- "$zip_file")"
-      # Falha de ZIP reconhecido é terminal para esta entrada da fila. Sai da
-      # raiz, mas é preservado em backup/ com status FAILED para auditoria.
-      if ! archive_worker_from_zip "$zip_file" FAILED; then
-        log "ERRO: ZIP com falha não pôde ser arquivado: $zip_file"
-      fi
+      # Falha é conservadora: mantém o ZIP original em Downloads para
+      # inspeção/correção. Nada é renomeado, arquivado ou apagado.
+      log "ZIP COM FALHA MANTIDO EM DOWNLOADS: $zip_file"
     fi
   done
 
-  LOG_CONTEXT=download_done log "LOTE DE WORKER/FROM CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
+  LOG_CONTEXT=download_done log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
   [ "$failed" -eq 0 ]
 }
 

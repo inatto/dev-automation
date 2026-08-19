@@ -7,6 +7,7 @@ trap tui_on_resize WINCH
 
 ensure_files
 load_env
+ensure_download_inbox
 validate_timers
 
 if [ "${1:-}" = "--test-sound" ]; then
@@ -36,6 +37,60 @@ if [ "${1:-}" = "--git-crypt-audit" ] || [ "${1:-}" = "--gitcrypt-audit" ]; then
   fi
   taskbar_status error "CRÍTICO: config sem git-crypt"
   exit 3
+fi
+
+if [ "${1:-}" = "--identify-zip" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "Uso: auto-code-manager --identify-zip <arquivo.zip>" >&2
+    exit 2
+  fi
+  identified_project="$(project_for_zip "$(basename -- "$2")")"
+  if [ -z "$identified_project" ]; then
+    echo "NÃO RECONHECIDO OU PROJETO LOCAL AUSENTE: $(basename -- "$2")" >&2
+    exit 1
+  fi
+  echo "$identified_project"
+  exit 0
+fi
+
+if [ "${1:-}" = "--import-downloads-once" ]; then
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+  if ! validate_projects; then
+    echo "ERRO: corrija $PROJECTS_FILE antes de importar." >&2
+    exit 1
+  fi
+  if import_downloads; then
+    taskbar_status done "Downloads processado"
+    exit 0
+  fi
+  taskbar_status error "Falha na importação de Downloads"
+  exit 1
+fi
+
+if [ "${1:-}" = "--import-one" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "Uso: auto-code-manager --import-one <arquivo.zip>" >&2
+    exit 2
+  fi
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+  if ! validate_projects; then
+    echo "ERRO: corrija $PROJECTS_FILE antes de importar." >&2
+    exit 1
+  fi
+  taskbar_status unzip "Importando $(basename -- "$2")"
+  if import_one_zip "$2"; then
+    taskbar_status done "Importação concluída"
+    exit 0
+  fi
+  taskbar_status error "Falha na importação"
+  error_beep
+  exit 1
 fi
 
 if [ "${1:-}" = "--sql-zip-once" ]; then
@@ -68,7 +123,7 @@ if [ "${1:-}" = "--backup-once" ]; then
     exit 1
   fi
   taskbar_status backup "Backup manual"
-  if zip_configured_sql_folders && clean_unmanaged_backup_zips && backup_all; then
+  if clean_unmanaged_backup_zips && backup_all; then
     taskbar_status done "Backup concluído"
     exit 0
   fi
@@ -93,15 +148,15 @@ if [ "$TUI_ACTIVE" = true ]; then
   TUI_LAST_ACTION="Auto Code Manager $SCRIPT_VERSION"
   tui_refresh
   LOG_CONTEXT=wait log "Auto Code Manager $SCRIPT_VERSION iniciado."
-  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
+  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(download_inbox_dir) · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
 else
   line
   echo "Auto Code Manager - $SCRIPT_VERSION"
   line
   echo "CODE_ROOT:     $CODE_ROOT"
+  echo "Downloads:     $(download_inbox_dir)"
   echo "ZIP_DIR:       $(archive_output_dir)"
   echo "ENV:           $ENV_FILE"
-  echo "SQL ZIP:       $FOLDER_SQL_ZIP_FILE"
   echo "Modo:          ${AUTO_CODE_MONITOR_MODE:-inotify} (eventos do filesystem)"
   echo "Backup:        ${BACKUP_EVERY}s de silêncio após a última alteração"
   echo "Estável por:   ${STABLE_WAIT}s apenas em processamento manual/baseline"
@@ -139,13 +194,13 @@ fi
 if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
 fi
-run_stage sql "SQLs INICIAIS" "Compacta somente SQLs que já existiam antes do watcher iniciar; depois cada pasta é acionada por evento." zip_configured_sql_folders || true
+run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
 
 taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
   LOG_CONTEXT=wait log "IDLE leve: sem inotify; somente metadados dos projetos configurados a cada ${LIGHT_SCAN_INTERVAL}s."
 else
-  LOG_CONTEXT=wait log "IDLE event-driven: aguardando inotify; mudanças geram ZIP local do projeto em $CODE_ROOT."
+  LOG_CONTEXT=wait log "IDLE event-driven: projetos geram ZIP local em $CODE_ROOT; ZIP reconhecido que chega em $(download_inbox_dir) é importado e removido após confirmação."
 fi
 
 while true; do

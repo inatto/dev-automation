@@ -9,9 +9,10 @@ PROJECTS_FILE="$PROJECT_ROOT/config/auto-code-manager.projects"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
-PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
+RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
+DOWNLOADS_DIR="${DOWNLOADS_DIR:-$HOME/Downloads}"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 # Backup local direto em /home/daniel/Code. O modo padrão é inotify para
@@ -80,6 +81,7 @@ TUI_INOTIFY_MAX_WATCHES=0
 TUI_MANAGER_FDS=0
 TUI_MANAGER_FD_LIMIT=0
 TUI_PROJECT_COUNT=0
+TUI_DOWNLOAD_ZIPS=0
 TUI_LOG_FILE="$STATE_DIR/dev-manager.log"
 
 

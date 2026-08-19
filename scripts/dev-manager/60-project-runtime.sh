@@ -22,6 +22,11 @@ project_for_zip() {
 
   while IFS= read -r project || [ -n "$project" ]; do
     [ -n "$project" ] || continue
+    # Downloads só atualiza projeto que já existe localmente. Cadastro sem clone
+    # continua válido para backup futuro, mas não autoriza criar projeto por ZIP.
+    if ! target_is_code_aggregate "$project" && [ ! -d "$(project_path "$project")" ]; then
+      continue
+    fi
 
     while IFS= read -r alias || [ -n "$alias" ]; do
       [ -n "$alias" ] || continue
@@ -53,7 +58,7 @@ project_for_zip() {
   echo "$best"
 }
 
-worker_from_zip_is_configured() {
+download_zip_is_configured() {
   local zip_file="$1"
   local zip_name project
 
@@ -63,7 +68,7 @@ worker_from_zip_is_configured() {
   [ -n "$project" ]
 }
 
-worker_from_zip_purpose() {
+download_zip_purpose() {
   local zip_name="$1" project="$2" stem stem_lower alias alias_lower suffix best_alias=""
   [[ "${zip_name,,}" == *.zip ]] || return 1
   stem="${zip_name:0:${#zip_name}-4}"
@@ -85,21 +90,21 @@ worker_from_zip_purpose() {
   printf '%s\n' "$suffix"
 }
 
-worker_from_zip_has_purpose() {
+download_zip_has_purpose() {
   local zip_name="$1" project
   project="$(project_for_zip "$zip_name")"
   [ -n "$project" ] || return 1
-  worker_from_zip_purpose "$zip_name" "$project" >/dev/null
+  download_zip_purpose "$zip_name" "$project" >/dev/null
 }
 
-configured_worker_from_zip_exists() {
+configured_download_zip_exists() {
   local downloads zip_file
 
-  downloads="$(worker_from_dir)"
+  downloads="$(download_inbox_dir)"
   [ -n "$downloads" ] && [ -d "$downloads" ] || return 1
 
   while IFS= read -r -d '' zip_file; do
-    if worker_from_zip_is_configured "$zip_file"; then
+    if download_zip_is_configured "$zip_file"; then
       return 0
     fi
   done < <(find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)
@@ -107,104 +112,64 @@ configured_worker_from_zip_exists() {
   return 1
 }
 
-project_update_scope() {
-  local source_dir="$1"
-  local rel
-  local api=false web=false shared=false runtime=false
+# Importação não reinicia nem sinaliza processos automaticamente.
+# Reinício/deploy é responsabilidade dos comandos explícitos do projeto.
 
-  while IFS= read -r -d '' rel; do
-    case "$rel" in
-      apps/api/tests/*|apps/api/.env.example|apps/web/tests/*|apps/web/.env.example)
-        ;;
-      apps/api/*)
-        api=true; runtime=true ;;
-      apps/web/*)
-        web=true; runtime=true ;;
-      deploy/local/*api*.sh)
-        api=true; runtime=true ;;
-      deploy/local/*web*.sh)
-        web=true; runtime=true ;;
-      deploy/local/setup.sh|deploy/local/start.sh|config/*|scripts/*)
-        shared=true; runtime=true ;;
-      deploy/remote/*|tests/*|docs/*|README|README.*|CHANGELOG|CHANGELOG.*|*.md|.gitignore|.gitattributes)
-        ;;
-      *)
-        # Arquivo de runtime fora das árvores canônicas: por segurança trata
-        # como compartilhado. Não reinicia por documentação/testes.
-        shared=true; runtime=true ;;
-    esac
-  done < <(find "$source_dir" -type f -printf '%P\0' 2>/dev/null)
+finalize_import_zip() {
+  local zip_file="$1"
+  local downloads zip_parent downloads_real
 
-  if [ "$runtime" = false ]; then
-    printf 'none\n'
-  elif [ "$shared" = true ] || { [ "$api" = true ] && [ "$web" = true ]; }; then
-    printf 'both\n'
-  elif [ "$api" = true ]; then
-    printf 'api\n'
-  elif [ "$web" = true ]; then
-    printf 'web\n'
-  else
-    printf 'both\n'
+  [ -f "$zip_file" ] || return 0
+  downloads="$(download_inbox_dir)"
+  zip_parent="$(cd -- "$(dirname -- "$zip_file")" && pwd -P)" || return 1
+  downloads_real="$(cd -- "$downloads" 2>/dev/null && pwd -P || printf '%s' "$downloads")"
+
+  # Regra local: ZIP reconhecido só some depois da importação inteira ter sido
+  # confirmada. Falha nunca chama esta função, portanto o arquivo fica em
+  # Downloads para inspeção/correção. ZIP desconhecido nem entra no pipeline.
+  if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
+    log "ERRO: importação foi aplicada, mas o ZIP não pôde ser removido: $zip_file"
+    return 1
   fi
-}
 
-action_matches_update_scope() {
-  local action="$1" scope="$2"
-  case "$scope" in
-    api)
-      [[ "$action" == *api* || "$action" == "setup" || "$action" == "start" || "$action" == "run" ]] ;;
-    web)
-      [[ "$action" == *web* || "$action" == "setup" || "$action" == "start" || "$action" == "run" ]] ;;
-    both)
-      return 0 ;;
-    *)
-      return 1 ;;
-  esac
-}
-
-notify_running_project_update() {
-  local project_dir="$1" scope="$2"
-  local state_file request_file request_temp pid state_project_dir action signaled=0 stale=0
-
-  [ "$scope" != "none" ] || {
-    log "ATUALIZAÇÃO: somente arquivos sem efeito de runtime; nenhum restart necessário."
-    return 0
-  }
-  [ -d "$RUNNING_PROJECTS_DIR" ] || {
-    log "ATUALIZAÇÃO: $scope; nenhum comando local ativo registrado para reiniciar."
-    return 0
-  }
-
-  while IFS= read -r -d '' state_file; do
-    pid="$(awk -F= '$1=="PID" {print substr($0,5); exit}' "$state_file" 2>/dev/null || true)"
-    state_project_dir="$(awk -F= '$1=="PROJECT_DIR" {print substr($0,13); exit}' "$state_file" 2>/dev/null || true)"
-    action="$(awk -F= '$1=="ACTION" {print substr($0,8); exit}' "$state_file" 2>/dev/null || true)"
-
-    if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
-      rm -f -- "$state_file" 2>/dev/null || true
-      stale=$((stale + 1))
-      continue
-    fi
-    [ "$state_project_dir" = "$project_dir" ] || continue
-    action_matches_update_scope "$action" "$scope" || continue
-
-    request_file="$state_file.request"
-    request_temp="$request_file.tmp.$$"
-    printf '%s\n' "$scope" > "$request_temp"
-    mv -f -- "$request_temp" "$request_file"
-    if kill -USR1 "$pid" 2>/dev/null; then
-      signaled=$((signaled + 1))
-      log "RESTART SOLICITADO: escopo=$scope ação=$action PID=$pid"
-    else
-      rm -f -- "$request_file" 2>/dev/null || true
-    fi
-  done < <(find "$RUNNING_PROJECTS_DIR" -maxdepth 1 -type f -name '*.state' -print0 2>/dev/null)
-
-  if [ "$signaled" -eq 0 ]; then
-    log "ATUALIZAÇÃO: $scope; projeto não estava rodando por comando global supervisionado. Nada foi iniciado à força."
+  if [ "$zip_parent" = "$downloads_real" ]; then
+    log "ZIP PROCESSADO E REMOVIDO DE DOWNLOADS: $(basename -- "$zip_file")"
   else
-    log "ATUALIZAÇÃO: $scope; $signaled comando(s) ativo(s) sinalizado(s) após a importação completa."
+    log "ZIP PROCESSADO E REMOVIDO: $zip_file"
   fi
-  [ "$stale" -eq 0 ] || log "RUNTIME: removido(s) $stale registro(s) obsoleto(s)."
+  return 0
 }
 
+validate_zip_entries_safe() {
+  local zip_file="$1"
+  python3 - "$zip_file" <<'PY_ZIP_SAFE'
+import re
+import stat
+import sys
+import zipfile
+from pathlib import PurePosixPath
+
+path = sys.argv[1]
+try:
+    with zipfile.ZipFile(path) as zf:
+        for info in zf.infolist():
+            name = info.filename
+            if not name or "\x00" in name:
+                raise ValueError("nome vazio/NUL")
+            normalized = name.replace("\\", "/")
+            if normalized.startswith(("/", "//")) or re.match(r"^[A-Za-z]:/", normalized):
+                raise ValueError(f"caminho absoluto: {name}")
+            parts = PurePosixPath(normalized).parts
+            if any(part == ".." for part in parts):
+                raise ValueError(f"travessia de diretório: {name}")
+            mode = (info.external_attr >> 16) & 0xFFFF
+            kind = stat.S_IFMT(mode)
+            if kind == stat.S_IFLNK:
+                raise ValueError(f"symlink recusado: {name}")
+            if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError(f"tipo especial recusado: {name}")
+except Exception as exc:
+    print(f"ZIP inseguro: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+PY_ZIP_SAFE
+}

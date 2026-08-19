@@ -6,11 +6,9 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SCRIPT="$PROJECT_ROOT/scripts/auto-code-manager.sh"
 SOURCES=("$SCRIPT" "$PROJECT_ROOT"/scripts/dev-manager/*.sh)
 
-grep -Fq 'run_stage sql "SQLs INICIAIS"' "${SOURCES[@]}"
 grep -Fq 'if is_wsl_runtime; then' "${SOURCES[@]}"
 grep -Fq 'run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL"' "${SOURCES[@]}"
 grep -Fq 'stage backup start "BACKUP INTELIGENTE — INÍCIO"' "${SOURCES[@]}"
-grep -Fq 'run_stage sql "SQL → ZIP"' "${SOURCES[@]}"
 grep -Fq '[ "${NO_COLOR:-}" = "" ]' "${SOURCES[@]}"
 
 # O ciclo de polling antigo deve ter desaparecido.
@@ -19,9 +17,9 @@ grep -Fq '[ "${NO_COLOR:-}" = "" ]' "${SOURCES[@]}"
 ! grep -Fq 'INTERVAL=' "${SOURCES[@]}"
 ! grep -Fq 'ZONE_EVERY=' "${SOURCES[@]}"
 
-grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "${SOURCES[@]}"
-grep -Fq 'IDLE event-driven: aguardando inotify' "${SOURCES[@]}"
+grep -Fq 'IDLE event-driven:' "${SOURCES[@]}"
 grep -Fq 'Estado ocioso real: este read não tem timeout e não consome CPU enquanto' "${SOURCES[@]}"
 grep -Fq 'Compacta somente projetos alterados e agregadores dependentes.' "${SOURCES[@]}"
 
-printf 'OK: estados coloridos permanecem e o polling antigo foi substituído por espera event-driven\n'
+! grep -Fq 'SQL detectado no monitor leve' "${SOURCES[@]}"
+printf 'OK: estados coloridos permanecem, sem SQL automático e sem polling antigo\n'

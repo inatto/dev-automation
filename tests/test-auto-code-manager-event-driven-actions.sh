@@ -74,18 +74,22 @@ wait_until() {
   exit 1
 }
 
-sql_gone() { [ ! -e "$SQL_DIR/event.sql" ]; }
-sql_zip_exists() { find "$SQL_DIR" -maxdepth 1 -type f -name '????????-????.zip' -print -quit | grep -q .; }
 zone_present() { [ -e "$PROJECT_DIR/test.txt:Zone.Identifier" ]; }
 
 wait_until 'baseline alpha.zip' test -s "$CODE_ROOT/alpha-app.zip"
 wait_until 'watcher event-driven ativo' grep -Fq 'IDLE event-driven' "$LOG"
 
-# SQL: evento na pasta configurada compacta somente essa pasta e remove o SQL.
+# SQL não tem mais automação destrutiva. Ele permanece no projeto e apenas
+# dispara o backup normal do projeto como qualquer outro arquivo.
+before_sql_zip_mtime="$(stat -c %Y "$CODE_ROOT/alpha-app.zip")"
 printf 'select 1 from dual;\n' > "$TEMP/event.sql"
 mv "$TEMP/event.sql" "$SQL_DIR/event.sql"
-wait_until 'SQL removido após ZIP validado' sql_gone
-wait_until 'ZIP SQL gerado por evento' sql_zip_exists
+wait_until 'SQL preservado no projeto' test -f "$SQL_DIR/event.sql"
+wait_until 'backup normal atualizado após SQL' bash -c '[ "$(stat -c %Y "$1")" -gt "$2" ]' _ "$CODE_ROOT/alpha-app.zip" "$before_sql_zip_mtime"
+[ -z "$(find "$SQL_DIR" -maxdepth 1 -type f -name '????????-????.zip' -print -quit)" ] || {
+  printf 'FALHOU: manager gerou ZIP SQL automático\n' >&2
+  exit 1
+}
 
 # Linux nativo: Zone.Identifier não recebe tratamento especial.
 printf 'zone\n' > "$PROJECT_DIR/test.txt:Zone.Identifier"
@@ -101,7 +105,7 @@ zone_scans_after="$(grep -Fc 'Limpando Zone.Identifier em' "$LOG" || true)"
   exit 1
 }
 
-grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "$LOG"
-grep -Fq 'mudanças geram ZIP local do projeto' "$LOG"
+! grep -Fq 'SQL detectado pelo filesystem' "$LOG"
+grep -Fq 'projetos geram ZIP local' "$LOG"
 
-printf 'OK: backup local e SQL são event-driven; Linux nativo ignora Zone.Identifier\n'
+printf 'OK: SQL é preservado e só dispara backup normal; Linux nativo ignora Zone.Identifier\n'

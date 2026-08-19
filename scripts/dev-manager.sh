@@ -37,7 +37,7 @@ Uso:
   dev-manager --test-backup-sound Testa o aviso sutil de backup
   dev-manager commands     Atualiza todos os comandos globais
   dev-manager desktops     Cria/nomeia desktops pelos projetos ativos
-  dev-manager git-crypt    Audita/corrige git-crypt de toda pasta config ativa
+  dev-manager git-crypt    Audita git-crypt (somente leitura; não corrige arquivos)
   dev-manager g512         Mostra/controla o auxiliar RGB do Logitech G512
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
@@ -130,10 +130,10 @@ action="${1:-start}"
 case "$action" in
   start|run)
     shift || true
-    refresh_global_commands
-    ensure_dev_status
-    ensure_g512_rgb
-    printf '[dev-manager] executando em primeiro plano; para parar, pressione Ctrl+C.\n'
+    # Inicialização deliberadamente mínima: não reinstala comandos, não compila
+    # dev-status e não inicia/garante RGB. Esses recursos ficam nos comandos
+    # explícitos próprios; o start apenas executa o monitor.
+    printf '[dev-manager] executando monitor mínimo em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"
     ;;
   --test-sound|test-sound)

@@ -52,7 +52,7 @@ append_nonrecursive_watch_root() {
 }
 
 start_backup_watcher() {
-  local exclude_regex root excluded sql_folder bootstrap_fd read_fd
+  local exclude_regex root excluded downloads sql_folder bootstrap_fd read_fd
   local watched_aux=0
   local -a roots=()
   local -a command=()
@@ -86,17 +86,17 @@ start_backup_watcher() {
     done < <(watch_excluded_directories "$root")
   done
 
-  # Pastas SQL: normalmente já estão dentro de projetos. Só adiciona um root
-  # auxiliar quando a pasta configurada estiver fora de todos eles.
-  while IFS= read -r sql_folder || [ -n "$sql_folder" ]; do
-    [ -n "$sql_folder" ] || continue
-    [ -d "$sql_folder" ] || continue
-    if ! path_is_covered_by_roots "$sql_folder" "${roots[@]}"; then
-      append_nonrecursive_watch_root "$sql_folder"
-      roots+=("$sql_folder")
-      watched_aux=$((watched_aux + 1))
-    fi
-  done < <(configured_sql_zip_folders)
+  # Downloads: observado somente no primeiro nível. Subpastas não entram na
+  # fila; só ZIPs fechados/renomeados diretamente em ~/Downloads interessam.
+  downloads="$(download_inbox_dir)"
+  if [ -n "$downloads" ] && [ -d "$downloads" ] && ! path_is_covered_by_roots "$downloads" "${roots[@]}"; then
+    append_nonrecursive_watch_root "$downloads"
+    roots+=("$downloads")
+    watched_aux=$((watched_aux + 1))
+  fi
+
+  # SQL não possui mais automação implícita. Arquivos .sql são tratados como
+  # qualquer outro arquivo do projeto e apenas sujam o backup normal.
 
   # Bootstrap do FIFO: abre R/W só durante a partida para evitar deadlock.
   # Depois trocamos por um FD somente-leitura; assim, se o inotify morrer, o
@@ -143,16 +143,14 @@ event_finished_write() {
   event_has "$events" CLOSE_WRITE || event_has "$events" MOVED_TO
 }
 
-sql_folder_for_event() {
+path_is_download_zip() {
   local event_path="$1"
-  local folder
-  while IFS= read -r folder || [ -n "$folder" ]; do
-    [ -n "$folder" ] || continue
-    [ "$(dirname -- "$event_path")" = "$folder" ] || continue
-    printf '%s\n' "$folder"
-    return 0
-  done < <(configured_sql_zip_folders)
-  return 1
+  local downloads
+  downloads="$(download_inbox_dir)"
+  [ -n "$downloads" ] || return 1
+  path_is_within_absolute "$event_path" "$downloads" || return 1
+  [ "$(dirname -- "$event_path")" = "$downloads" ] || return 1
+  [[ "${event_path,,}" == *.zip ]]
 }
 
 mark_all_projects_dirty() {
@@ -174,7 +172,7 @@ mark_all_projects_dirty() {
 handle_watch_event() {
   local events="$1"
   local event_path="$2"
-  local owner sql_folder=""
+  local owner
 
   [ -n "$event_path" ] || return 0
 
@@ -197,18 +195,20 @@ handle_watch_event() {
     elif [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
       WATCH_RELOAD_REQUESTED=true
       FORCE_FULL_BACKUP_AFTER_RELOAD=true
-    elif [ "$event_path" = "$FOLDER_SQL_ZIP_FILE" ]; then
-      WATCH_RELOAD_REQUESTED=true
     fi
   fi
 
-  # SQL novo: compacta somente a pasta que recebeu o arquivo.
-  if event_finished_write "$events" && [[ "${event_path,,}" == *.sql ]] && [ -f "$event_path" ]; then
-    sql_folder="$(sql_folder_for_event "$event_path" || true)"
-    if [ -n "$sql_folder" ]; then
-      run_stage sql "SQL → ZIP" "SQL detectado pelo filesystem; compacta somente a pasta afetada." \
-        zip_sql_folder "$sql_folder" || true
+  # ZIP novo em Downloads: só nomes resolvidos para projeto cadastrado E
+  # existente entram. Desconhecidos ficam intocados. CLOSE_WRITE/MOVED_TO
+  # garante que o produtor terminou de gravar antes da validação do ZIP.
+  if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
+    if download_zip_is_configured "$event_path"; then
+      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; valida, faz backup pré-importação, aplica e remove somente após confirmação." \
+        import_one_zip "$event_path" true; then
+        LOG_CONTEXT=error log "ERRO: importação falhou; ZIP mantido em Downloads: $event_path"
+      fi
     fi
+    return 0
   fi
 
   if [ -n "${INOTIFY_DIR_EXCLUDE_REGEX:-}" ] && [[ "$event_path" =~ $INOTIFY_DIR_EXCLUDE_REGEX ]]; then
@@ -261,8 +261,6 @@ reload_backup_watcher_if_needed() {
     mark_all_projects_dirty
   fi
 
-  # Uma nova pasta SQL configurada pode já conter SQLs anteriores à inclusão.
-  zip_configured_sql_folders || true
   return 0
 }
 

@@ -26,7 +26,7 @@ watch_root_projects() {
 
 light_config_signature() {
   local path
-  for path in "$ENV_FILE" "$PROJECTS_FILE" "$IGNORE_ZIP_FILE" "$FOLDER_SQL_ZIP_FILE"; do
+  for path in "$ENV_FILE" "$PROJECTS_FILE" "$IGNORE_ZIP_FILE"; do
     if [ -e "$path" ]; then
       stat -c '%n\t%Y\t%s' -- "$path" 2>/dev/null || true
     else
@@ -239,21 +239,7 @@ light_refresh_if_config_changed() {
   clean_unmanaged_backup_zips || true
   initialize_light_monitor
   mark_all_projects_dirty
-  zip_configured_sql_folders || true
   return 0
-}
-
-light_process_sql() {
-  local folder
-
-  while IFS= read -r folder || [ -n "$folder" ]; do
-    [ -n "$folder" ] || continue
-    [ -d "$folder" ] || continue
-    if find "$folder" -maxdepth 1 -type f -iname '*.sql' ! -name '*:Zone.Identifier' -print -quit 2>/dev/null | grep -q .; then
-      run_stage sql "SQL → ZIP" "SQL detectado no monitor leve; compacta somente a pasta afetada." \
-        zip_sql_folder "$folder" || true
-    fi
-  done < <(configured_sql_zip_folders)
 }
 
 light_scan_cycle() {
@@ -261,7 +247,6 @@ light_scan_cycle() {
   local plan_changed=false
 
   light_refresh_if_config_changed || return 1
-  light_process_sql
 
   scan_file="$(mktemp "$STATE_DIR/light-scan-XXXXXX")" || return 1
   if ! light_scan_states > "$scan_file"; then
