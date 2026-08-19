@@ -17,8 +17,8 @@ backup_project() {
   fi
 
   if ! target_is_aggregate "$project"; then
-    # Segurança desacoplada: SOMENTE AUDITA git-crypt antes do backup.
-    # O guard chamado pelo dev-manager usa --check e não altera repo/índice.
+    # Antes do backup: valida git-crypt; se detectar problema nas configs
+    # sensíveis, tenta corrigir com a chave padrão e verifica novamente.
     gitcrypt_guard_project "$project" || true
   fi
 

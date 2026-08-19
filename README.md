@@ -296,7 +296,7 @@ O nome da última pasta de cada projeto normal é sua chave lógica global. Dois
 
 Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
 
-### Efeitos colaterais permitidos do dev-manager (v39)
+### Efeitos colaterais permitidos do dev-manager (v40)
 
 O comando `dev-manager` também não reinstala comandos globais, não recompila
 `dev-status` e não garante/inicia G512 automaticamente ao subir. Essas ações só
@@ -307,7 +307,7 @@ No diretório dos projetos, o monitor só pode fazer o seguinte:
 - copiar arquivos vindos de um ZIP reconhecido em `~/Downloads`;
 - remover o alvo correspondente a um marcador `arquivo.remover` recebido nesse ZIP;
 - nunca deixar o próprio `.remover` dentro do projeto;
-- auditar git-crypt em **somente leitura** (`--check`), sem criar/editar `.gitattributes`, sem `git add`, sem reescrever índice e sem `git-crypt unlock`.
+- verificar git-crypt primeiro em `--check`; se detectar problema em config sensível, executar `--fix` com `/home/daniel/static/git-reverse-crypt-2.key` e verificar novamente. O fix pode criar/normalizar apenas as regras gerenciadas de `.gitattributes`, desbloquear com a chave padrão e migrar blobs plaintext do índice para git-crypt.
 
 Fora da árvore do projeto, ele gera o backup local `/home/daniel/Code/<projeto>.zip`
 como cópia real do projeto após aplicar apenas os ignores de backup, e mantém
@@ -320,8 +320,9 @@ Pastas de código como `apps/web/src/config` não são consideradas secretas ape
 por se chamarem `config`; por exemplo, `apps/web/src/config/api-url.ts` não entra
 no git-crypt automaticamente.
 
-Quando a auditoria git-crypt encontra problema, o log mostra o repositório, cada
-pasta `config` afetada e cada arquivo problemático. Para erro de atributos, mostra
+Quando a verificação git-crypt encontra problema, o log mostra o repositório, cada
+pasta `config` afetada e cada arquivo problemático, tenta corrigir automaticamente
+e então executa uma segunda verificação. Para erro de atributos, mostra
 também os valores efetivos de `filter` e `diff`; para plaintext, lista os caminhos
 exatos no índice e/ou no HEAD.
 

@@ -165,9 +165,9 @@ fi
 
 initialize_pause_control
 
-# Segurança de configuração é verificada imediatamente ao abrir o dev-manager,
-# além da checagem antes de cada backup. Falha não derruba a TUI: mantém o
-# status CRÍTICO visível, toca o alerta e deixa o monitor iniciar normalmente.
+# Segurança de configuração é verificada imediatamente ao abrir o dev-manager.
+# Se houver problema, tenta autocorrigir com a chave padrão e verifica de novo.
+# Só o que continuar quebrado após a correção fica como CRÍTICO.
 gitcrypt_guard_all || true
 
 if ! start_change_monitor; then

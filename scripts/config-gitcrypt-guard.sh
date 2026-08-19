@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Audita configs sensíveis dos projetos ativos com git-crypt.
-# O dev-manager usa SOMENTE --check: não cria .gitattributes, não faz git add,
-# não reescreve índice, não desbloqueia repo e não toca em arquivo do projeto.
+# Audita e, quando chamado com --fix, corrige configs sensíveis com git-crypt.
+# O dev-manager faz check -> fix somente se necessário -> check final, usando
+# /home/daniel/static/git-reverse-crypt-2.key por padrão.
 
 set -uo pipefail
 
@@ -25,8 +25,8 @@ Uso:
   config-gitcrypt-guard.sh [--fix|--check] [--project REL] [--code-root DIR]
                            [--projects-file FILE] [--key FILE]
 
-Padrão: --check usando /home/daniel/static/git-reverse-crypt-2.key.
-O dev-manager nunca chama --fix automaticamente.
+Padrão deste script: --check usando /home/daniel/static/git-reverse-crypt-2.key.
+O dev-manager chama --fix automaticamente somente quando o --check detecta problema.
 EOF_HELP
 }
 
@@ -433,9 +433,8 @@ protect_repo() {
   local block rendered rel
   local need_write=false
 
-  # Modo usado pelo dev-manager: somente leitura. Confere a chave efetiva,
-  # os atributos realmente aplicados aos arquivos e blobs plaintext. Não exige
-  # bloco/marker gerenciado e não prepara qualquer escrita em .gitattributes.
+  # Passagem --check: somente leitura. O dev-manager usa esta passagem antes
+  # de decidir se precisa chamar --fix e novamente após a autocorreção.
   if [ "$MODE" = check ]; then
     ensure_repo_key "$repo" || true
     verify_repo_configs "$repo" "${rels[@]}"
