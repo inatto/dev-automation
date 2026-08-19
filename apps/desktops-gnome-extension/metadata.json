@@ -1,7 +1,7 @@
 {
   "uuid": "workspace-name-osd@dev-automation",
   "name": "Dev Automation Workspace Names",
-  "description": "Mostra o workspace atual no painel, no Overview e em OSD; exibe todos os nomes no Overview.",
+  "description": "Mostra somente o workspace atual, de forma discreta, no canto inferior direito do monitor principal.",
   "shell-version": ["50"],
-  "version": 3
+  "version": 4
 }

@@ -25,21 +25,13 @@ export default class PyCharmsMonitorExtension extends Extension {
         this._lastRequestToken = this._readRequestToken();
         this._lastOpenProjectsRequestToken = this._readOpenProjectsRequestToken();
         this._lastCloseRequestToken = this._readCloseRequestToken();
-        this._batchWasActive = this._batchActive();
-
-        this._signalIds.push([
-            global.display,
-            global.display.connect('window-created', (_display, window) => {
-                this._schedulePlacement(window);
-            }),
-        ]);
-
-        // Controle leve: detecta fim do lote e pedidos explícitos de revisão.
+        // Movimento de janelas é exclusivamente explícito. A extensão NÃO
+        // reage a window-created e NÃO reorganiza ao ser habilitada. Isso evita
+        // disputar com o startup assíncrono do JetBrains. O backend só envia
+        // reconcile.request quando uma nova chamada de `pycharms` confirma que
+        // todos os projetos já estão carregados.
         this._controlTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
             const batchActive = this._batchActive();
-            if (this._batchWasActive && !batchActive)
-                this._startReconcile(45);
-            this._batchWasActive = batchActive;
 
             const token = this._readRequestToken();
             if (token && token !== this._lastRequestToken) {
@@ -65,11 +57,6 @@ export default class PyCharmsMonitorExtension extends Extension {
             }
             return GLib.SOURCE_CONTINUE;
         });
-
-        // Corrige janelas que já existiam quando a extensão entrou na sessão,
-        // mas só se não houver um lote de abertura em andamento.
-        if (!this._batchWasActive)
-            this._startReconcile(12);
     }
 
     disable() {
@@ -215,58 +202,6 @@ export default class PyCharmsMonitorExtension extends Extension {
             if (target)
                 this._place(window, target);
         }
-    }
-
-    _schedulePlacement(window) {
-        let attempts = 0;
-        let stableTarget = '';
-        let stableHits = 0;
-        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-            attempts++;
-            if (!window || window.get_window_type() !== Meta.WindowType.NORMAL) {
-                this._timeouts.delete(id);
-                return GLib.SOURCE_REMOVE;
-            }
-
-            // Durante a abertura em lote não encostamos nas janelas. JetBrains
-            // ainda pode estar trocando splash, título, tamanho e sessão nesse ponto.
-            if (this._batchActive()) {
-                if (attempts >= 360) {
-                    this._timeouts.delete(id);
-                    return GLib.SOURCE_REMOVE;
-                }
-                return GLib.SOURCE_CONTINUE;
-            }
-
-            if (this._isPyCharm(window)) {
-                const target = this._projectTarget(window);
-                if (target) {
-                    if (stableTarget === target.name)
-                        stableHits++;
-                    else {
-                        stableTarget = target.name;
-                        stableHits = 1;
-                    }
-                    // Exige o mesmo projeto por 2 s antes de mover uma janela
-                    // criada fora do lote normal do comando pycharms.
-                    if (stableHits >= 4) {
-                        this._place(window, target);
-                        this._timeouts.delete(id);
-                        return GLib.SOURCE_REMOVE;
-                    }
-                } else {
-                    stableTarget = '';
-                    stableHits = 0;
-                }
-            }
-
-            if (attempts >= 180) {
-                this._timeouts.delete(id);
-                return GLib.SOURCE_REMOVE;
-            }
-            return GLib.SOURCE_CONTINUE;
-        });
-        this._timeouts.add(id);
     }
 
     _isPyCharm(window) {

@@ -20,10 +20,8 @@ cat > "$TMP/bin/gnome-extensions" <<'EOF'
 if [[ "${1:-}" == "enable" ]]; then
   mkdir -p "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
   cat > "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/ui.ready" <<'READY'
-version=3
-panel=1
-overview=1
-osd=1
+version=4
+corner=1
 READY
 fi
 exit 0

@@ -26,5 +26,5 @@ out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" DESKTOPS_PLATFORM=gnome PROJECTS_F
 rc=$?
 set -e
 [[ "$rc" -ne 0 ]]
-grep -Fq 'não confirmou painel + Overview + OSD' <<<"$out"
+grep -Fq 'não confirmou o indicador único no canto inferior direito' <<<"$out"
 echo 'OK: desktops falha explicitamente se o GNOME não confirmar a UI visual.'

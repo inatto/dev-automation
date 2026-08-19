@@ -50,6 +50,7 @@ mapfile -t opened < "$LOG"
   exit 1
 }
 grep -Fq 'já aberto; ignorando workspace 2' <<<"$out1" || { echo 'FALHOU: não informou que proj-a já estava aberto' >&2; exit 1; }
+! grep -Fq 'Reconciliação solicitada' <<<"$out1" || { echo 'FALHOU: primeira fase tentou reconciliar enquanto ainda abria projeto' >&2; exit 1; }
 
 out2="$(run_pycharms)"
 sleep 0.3

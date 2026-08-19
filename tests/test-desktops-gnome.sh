@@ -23,10 +23,8 @@ case "${1:-}" in
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
     cat > "$HOME/.local/state/dev-automation/desktops/ui.ready" <<'READY'
-version=3
-panel=1
-overview=1
-osd=1
+version=4
+corner=1
 READY
     exit 0
     ;;
@@ -41,14 +39,15 @@ grep -Fq 'org.gnome.desktop.wm.preferences num-workspaces 5' "$GSETTINGS_LOG"
 grep -Fq "workspace-names ['LAZER', 'dev-automation', 'orbital-app', 'lrdp1', 'lrdp2']" "$GSETTINGS_LOG"
 test -f "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/extension.js"
 grep -q "active-workspace-changed" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "PanelMenu.Button" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "Main.panel.addToStatusArea" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "Main.overview.connect('showing'" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "dev-automation-workspace-overview-button" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "panel=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "overview=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "dev-automation-workspace-corner" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "getWorkAreaForMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "corner=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "PanelMenu.Button" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "Main.panel.addToStatusArea" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "Main.overview.connect" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "workspace-overview" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'UI de workspaces confirmada pelo GNOME: painel + Overview + OSD ativos.' "$TMP/out"
-echo 'OK: GNOME usa workspaces fixos nomeados, painel persistente, nomes no Overview, OSD e fechamento preservando LAZER.'
+grep -Fq 'UI de workspaces confirmada pelo GNOME: indicador único no canto inferior direito ativo.' "$TMP/out"
+echo 'OK: GNOME usa workspaces fixos nomeados, indicador único no canto inferior direito e fechamento preservando LAZER.'

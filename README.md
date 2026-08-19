@@ -222,7 +222,7 @@ Para criar os desktops que faltam e aplicar os nomes:
 desktops
 ```
 
-No Ubuntu/GNOME, `desktops` usa workspaces fixos, mostra o nome ao alternar e reserva `lrdp1` e `lrdp2` como os dois últimos workspaces. O comando não abre aplicativos.
+No Ubuntu/GNOME, `desktops` usa workspaces fixos, mostra somente o nome do workspace atual no canto inferior direito do monitor principal e reserva `lrdp1` e `lrdp2` como os dois últimos workspaces. O comando não abre aplicativos.
 
 O mesmo pode ser executado pelo comando geral:
 

@@ -7,7 +7,7 @@ UBUNTU="$ROOT/scripts/pycharms/ubuntu.sh"
 
 [[ -f "$EXT" ]] || { echo 'FALHOU: extension.js ausente' >&2; exit 1; }
 [[ -x "$HELPER" ]] || { echo 'FALHOU: helper GNOME ausente/não executável' >&2; exit 1; }
-grep -q "window-created" "$EXT" || { echo 'FALHOU: extensão não observa novas janelas' >&2; exit 1; }
+! grep -q "connect('window-created'" "$EXT" || { echo 'FALHOU: extensão ainda move automaticamente durante criação de janela' >&2; exit 1; }
 grep -q "change_workspace_by_index" "$EXT" || { echo 'FALHOU: extensão não move para workspace' >&2; exit 1; }
 grep -q "move_to_monitor" "$EXT" || { echo 'FALHOU: extensão não move janela entre monitores' >&2; exit 1; }
 grep -q 'window.maximize()' "$EXT" || { echo 'FALHOU: extensão não maximiza com API Mutter atual' >&2; exit 1; }
@@ -24,10 +24,11 @@ grep -q -- "--close|close" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não exp�
 grep -q "já aberto; ignorando workspace" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não ignora projeto já aberto' >&2; exit 1; }
 grep -q "PYCHARMS_STARTUP_SETTLE_SECONDS" "$UBUNTU" || { echo 'FALHOU: backend não possui janela de estabilização configurável' >&2; exit 1; }
 grep -q "DESKTOPS_SCRIPT" "$UBUNTU" || { echo 'FALHOU: backend não garante workspaces antes de abrir' >&2; exit 1; }
-grep -q "finish_batch_later" "$UBUNTU" || { echo 'FALHOU: backend não dispara reconciliação final após o lote' >&2; exit 1; }
+grep -q "finish_batch_later" "$UBUNTU" || { echo 'FALHOU: backend não controla estabilização da primeira fase' >&2; exit 1; }
+grep -q "Rode pycharms novamente para organizar" "$UBUNTU" || { echo 'FALHOU: backend não implementa fluxo explícito em duas chamadas' >&2; exit 1; }
 grep -q 'gnome-extensions disable "$UUID"' "$HELPER" || { echo 'FALHOU: helper não recarrega extensão atualizada' >&2; exit 1; }
 grep -q "gnome-wayland.sh" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não integra helper GNOME' >&2; exit 1; }
 grep -q "XDG_SESSION_TYPE" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não detecta Wayland' >&2; exit 1; }
 ! grep -q "window.activate(global.get_current_time())" "$EXT" || { echo 'FALHOU: extensão ainda ativa janela e muda contexto do usuário' >&2; exit 1; }
 
-echo 'OK: PyCharm Ubuntu/Wayland usa extensão GNOME separada, workspace por projeto, maior monitor 4K e maximização sem ativar a janela.'
+echo 'OK: PyCharm Ubuntu/Wayland usa duas fases: primeira chamada só abre; segunda reconcilia workspace, maior monitor 4K e maximização.'

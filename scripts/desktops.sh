@@ -96,7 +96,7 @@ Uso:
 
 Ubuntu/GNOME:
   usa quantidade fixa de workspaces, nomeia todos e instala uma extensão que mostra
-  o nome atual sempre no painel, todos os nomes no Overview e OSD ao alternar.
+  somente o nome atual no canto inferior direito do monitor principal.
   lrdp1 e lrdp2 ficam sempre por último.
 
 WSL/Windows:
@@ -132,9 +132,9 @@ install_gnome_osd() {
 {
   "uuid": "$GNOME_OSD_UUID",
   "name": "Dev Automation Workspace Names",
-  "description": "Mostra o workspace atual no painel, no Overview e em OSD; exibe todos os nomes no Overview.",
+  "description": "Mostra somente o workspace atual, de forma discreta, no canto inferior direito do monitor principal.",
   "shell-version": ["$major"],
-  "version": 3
+  "version": 4
 }
 JSON
 
@@ -149,17 +149,15 @@ JSON
     for ((attempt=0; attempt<50; attempt++)); do
       if [[ -s "$DESKTOPS_UI_READY" ]]; then
         ready="$(cat "$DESKTOPS_UI_READY" 2>/dev/null || true)"
-        if grep -Fqx 'version=3' <<<"$ready" && \
-           grep -Fqx 'panel=1' <<<"$ready" && \
-           grep -Fqx 'overview=1' <<<"$ready" && \
-           grep -Fqx 'osd=1' <<<"$ready"; then
-          log 'UI de workspaces confirmada pelo GNOME: painel + Overview + OSD ativos.'
+        if grep -Fqx 'version=4' <<<"$ready" && \
+           grep -Fqx 'corner=1' <<<"$ready"; then
+          log 'UI de workspaces confirmada pelo GNOME: indicador único no canto inferior direito ativo.'
           return 0
         fi
       fi
       sleep 0.1
     done
-    fail 'a extensão foi habilitada, mas não confirmou painel + Overview + OSD; veja journalctl --user -b | grep workspace-name-osd.'
+    fail 'a extensão foi habilitada, mas não confirmou o indicador único no canto inferior direito; veja journalctl --user -b | grep workspace-name-osd.'
   else
     fail 'extensão visual instalada, mas o GNOME Shell ainda não a registrou; faça logout/login uma vez e rode desktops novamente.'
   fi
