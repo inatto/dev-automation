@@ -21,5 +21,5 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `160-dirty-backups.sh`: debounce/alvos sujos
 - `170-inotify-runtime.sh`: watcher/eventos
 - `180-lifecycle.sh`: encerramento
-- `190-config-gitcrypt-guard.sh`: check git-crypt, autocorreção com chave padrão quando necessário e check final
+- `190-config-gitcrypt-guard.sh`: somente git-crypt unlock com a chave padrão; sem alterar atributos/índice
 - `900-main.sh`: execução principal

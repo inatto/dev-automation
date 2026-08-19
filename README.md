@@ -295,55 +295,13 @@ nem observado automaticamente pelo `dev-manager`.
 O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
 Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
+### Git-crypt no dev-manager (v41)
 
-### Efeitos colaterais permitidos do dev-manager (v40)
 
-O comando `dev-manager` também não reinstala comandos globais, não recompila
-`dev-status` e não garante/inicia G512 automaticamente ao subir. Essas ações só
-acontecem quando chamadas explicitamente pelos comandos próprios.
-
-No diretório dos projetos, o monitor só pode fazer o seguinte:
-
-- copiar arquivos vindos de um ZIP reconhecido em `~/Downloads`;
-- remover o alvo correspondente a um marcador `arquivo.remover` recebido nesse ZIP;
-- nunca deixar o próprio `.remover` dentro do projeto;
-- verificar git-crypt primeiro em `--check`; se detectar problema em config sensível, executar `--fix` com `/home/daniel/static/git-reverse-crypt-2.key` e verificar novamente. O fix pode criar/normalizar apenas as regras gerenciadas de `.gitattributes`, desbloquear com a chave padrão e migrar blobs plaintext do índice para git-crypt.
-
-Fora da árvore do projeto, ele gera o backup local `/home/daniel/Code/<projeto>.zip`
-como cópia real do projeto após aplicar apenas os ignores de backup, e mantém
-apenas arquivos temporários/estado do próprio manager. Não mascara/sanitiza
-config no ZIP, não cria baseline de config e não existe mais materialização/merge
-automático de `.external`, compactação automática de SQL, restart/sinal automático
-de processos após importação, worker, rclone ou Drive.
-
-Pastas de código como `apps/web/src/config` não são consideradas secretas apenas
-por se chamarem `config`; por exemplo, `apps/web/src/config/api-url.ts` não entra
-no git-crypt automaticamente.
-
-Quando a verificação git-crypt encontra problema, o log mostra o repositório, cada
-pasta `config` afetada e cada arquivo problemático, tenta corrigir automaticamente
-e então executa uma segunda verificação. Para erro de atributos, mostra
-também os valores efetivos de `filter` e `diff`; para plaintext, lista os caminhos
-exatos no índice e/ou no HEAD.
-
-## Importação automática local por Downloads
-
-O `auto-code-manager` observa `/home/daniel/Downloads` por `inotify`, sem Google Drive, rclone ou worker.
-
-- Só processa `.zip` cujo nome resolva para um alvo cadastrado em `config/auto-code-manager.projects` **e cuja pasta já exista** em `/home/daniel/Code`.
-- Aceita `projeto.zip` e complementos iniciados por separador, por exemplo `orbital-legal--ajuste-importador.zip`, `orbital-legal-fix.zip` ou `orbital-legal(2).zip`.
-- ZIP desconhecido fica intocado em Downloads.
-- Aguarda o fim da gravação (`CLOSE_WRITE`/`MOVED_TO`), valida integridade e recusa caminhos absolutos, `..`, symlinks e tipos especiais.
-- Antes de aplicar, gera/valida o backup atual do projeto em `/home/daniel/Code/<projeto>.zip`.
-- Extrai em staging temporário, aplica `config/auto-code-manager.ignore-unzip`, preserva `config/local`, `config/remote` e `config/production` sem gerar `.external`, e valida marcadores `.remover`.
-- Copia e confere arquivo a arquivo. O ZIP de entrada é apagado **somente depois** de tudo ser confirmado.
-- Se houver qualquer falha, o ZIP permanece em Downloads.
-- Depois da importação, alterações do projeto passam pelo mesmo debounce normal e o ZIP local do projeto é atualizado.
-
-Comandos úteis:
+O dev-manager não cria nem altera regras de atributos Git. Para projetos com pastas config reconhecidas, a única ação automática é tentar:
 
 ```bash
-auto-code-manager --identify-zip ~/Downloads/orbital-legal--fix.zip
-auto-code-manager --import-downloads-once
-auto-code-manager --import-one ~/Downloads/orbital-legal--fix.zip
+git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key
 ```
+
+Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração. Se o unlock falhar, apenas registra o erro e as pastas config encontradas.

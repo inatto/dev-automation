@@ -17,8 +17,8 @@ backup_project() {
   fi
 
   if ! target_is_aggregate "$project"; then
-    # Antes do backup: valida git-crypt; se detectar problema nas configs
-    # sensíveis, tenta corrigir com a chave padrão e verifica novamente.
+    # Antes do backup: apenas garante git-crypt desbloqueado com a chave padrão.
+    # Não cria/edita atributos Git nem altera o índice.
     gitcrypt_guard_project "$project" || true
   fi
 

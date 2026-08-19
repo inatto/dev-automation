@@ -32,10 +32,10 @@ fi
 
 if [ "${1:-}" = "--git-crypt-audit" ] || [ "${1:-}" = "--gitcrypt-audit" ]; then
   if gitcrypt_guard_all; then
-    taskbar_status done "Git-crypt config OK"
+    taskbar_status done "Git-crypt desbloqueado"
     exit 0
   fi
-  taskbar_status error "CRÍTICO: config sem git-crypt"
+  taskbar_status error "CRÍTICO: git-crypt unlock falhou"
   exit 3
 fi
 
@@ -165,9 +165,8 @@ fi
 
 initialize_pause_control
 
-# Segurança de configuração é verificada imediatamente ao abrir o dev-manager.
-# Se houver problema, tenta autocorrigir com a chave padrão e verifica de novo.
-# Só o que continuar quebrado após a correção fica como CRÍTICO.
+# Ao iniciar, apenas tenta desbloquear git-crypt com a chave padrão.
+# Nenhum atributo Git ou arquivo do projeto é criado/alterado.
 gitcrypt_guard_all || true
 
 if ! start_change_monitor; then
