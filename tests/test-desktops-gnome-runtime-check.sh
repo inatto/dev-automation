@@ -17,14 +17,18 @@ printf 'GNOME Shell 50.1\n'
 FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
-# Simula enable aceito pelo CLI, mas extensão quebrada sem extension.ready.
+case "${1:-}" in
+  info) printf '  Version: 4\n  State: ACTIVE\n'; exit 0 ;;
+  enable) exit 0 ;;
+esac
 exit 0
 FAKE
 chmod +x "$TMP/bin/"*
 set +e
-out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops.sh" 2>&1)"
+out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" XDG_SESSION_TYPE=wayland DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops.sh" 2>&1)"
 rc=$?
 set -e
-[[ "$rc" -ne 0 ]]
-grep -Fq 'não confirmou o modo sem indicador flutuante' <<<"$out"
-echo 'OK: desktops falha explicitamente se o GNOME não confirmar o controlador sem UI própria.'
+[[ "$rc" -eq 0 ]]
+grep -Fq 'sessão Wayland ainda usa a versão anterior' <<<"$out"
+grep -Fq 'falta apenas UM logout/login' <<<"$out"
+echo 'OK: desktops prepara a atualização, sincroniza e pede um único novo login sem tratar a transição como erro.'

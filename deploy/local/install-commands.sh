@@ -13,6 +13,7 @@ PROJECT_RUNNER="$PROJECT_ROOT/scripts/project-command.sh"
 PROJECT_ALL_RUNNER="$PROJECT_ROOT/scripts/project-all-command.sh"
 ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
+TERMINALS_SOURCE="$PROJECT_ROOT/scripts/terminals.sh"
 CHATGPTS_SOURCE="$PROJECT_ROOT/scripts/chatgpts.sh"
 PHPSTORMS_SOURCE="$PROJECT_ROOT/scripts/phpstorms.sh"
 PYCHARMS_SOURCE="$PROJECT_ROOT/scripts/pycharms.sh"
@@ -94,6 +95,7 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$PROJECT_ALL_RUNNER" ]] || fail "executor geral de projetos não encontrado: $PROJECT_ALL_RUNNER"
 [[ -d "$ORACLE_MONITOR_DIR" ]] || fail "aplicação não encontrada: $ORACLE_MONITOR_DIR"
 [[ -f "$CHROMES_SOURCE" ]] || fail "script não encontrado: $CHROMES_SOURCE"
+[[ -f "$TERMINALS_SOURCE" ]] || fail "script não encontrado: $TERMINALS_SOURCE"
 [[ -f "$CHATGPTS_SOURCE" ]] || fail "script não encontrado: $CHATGPTS_SOURCE"
 [[ -f "$PHPSTORMS_SOURCE" ]] || fail "script não encontrado: $PHPSTORMS_SOURCE"
 [[ -f "$PYCHARMS_SOURCE" ]] || fail "script não encontrado: $PYCHARMS_SOURCE"
@@ -110,7 +112,7 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -138,9 +140,10 @@ EOF_WRAPPER
 chmod +x "$DEV_GITSETUP_TARGET"
 log "criado: dev-gitsetup -> $DEV_GITSETUP_SOURCE"
 
-for command_name in chromes chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb; do
+for command_name in chromes terminals chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb; do
   case "$command_name" in
     chromes) source_file="$CHROMES_SOURCE" ;;
+    terminals) source_file="$TERMINALS_SOURCE" ;;
     chatgpts) source_file="$CHATGPTS_SOURCE" ;;
     phpstorms) source_file="$PHPSTORMS_SOURCE" ;;
     pycharms) source_file="$PYCHARMS_SOURCE" ;;
@@ -207,4 +210,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v oracle-monitor\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v terminals\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v oracle-monitor\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'

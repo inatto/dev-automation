@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Backend Ubuntu/Linux do comando `chromes`.
 set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
+PLACEMENT_LIB="$PROJECT_ROOT/scripts/gnome-window-placement.sh"
+[[ -f "$PLACEMENT_LIB" ]] && source "$PLACEMENT_LIB"
 log(){ printf '[chromes] %s\n' "$*"; }
 fail(){ printf '[chromes] ERRO: %s\n' "$*" >&2; exit 1; }
 
@@ -219,6 +224,15 @@ log "Ubuntu backend: $mode -> $chrome"
 user_data_dir="$(chrome_user_data_dir "$mode" "$chrome")"
 sindicatto_profile="$(resolve_sindicatto_profile "$user_data_dir")"
 
+placement_active=0
+if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null 2>&1; then
+  declare -F gnome_placement_prepare >/dev/null 2>&1 || fail "biblioteca GNOME de posicionamento ausente: $PLACEMENT_LIB"
+  gnome_placement_prepare chromes || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
+  placement_active=1
+  target_workspace="$(gnome_placement_ready_field workspace 2>/dev/null || printf '?')"
+  log "Destino: workspace atual $target_workspace, monitor mais à esquerda (DP-1 no layout diagnosticado)."
+fi
+
 common=(--no-first-run)
 log 'Abrindo Chrome Daniel (Default) -> ChatGPT...'
 run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory=Default --new-window 'https://chatgpt.com/'
@@ -230,5 +244,13 @@ run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_pro
 if command -v nautilus >/dev/null 2>&1 && [[ -d /home/daniel/Code ]]; then
   log 'Abrindo Arquivos em /home/daniel/Code...'
   nohup nautilus --new-window /home/daniel/Code >/dev/null 2>&1 &
+fi
+
+if (( placement_active )); then
+  if gnome_placement_wait_min chromes browsers 2 120; then
+    log 'Chrome confirmado no workspace atual / monitor esquerdo.'
+  else
+    fail 'o GNOME não confirmou as duas novas janelas Chrome no monitor esquerdo.'
+  fi
 fi
 log 'Concluído.'

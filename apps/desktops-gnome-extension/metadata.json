@@ -1,7 +1,7 @@
 {
   "uuid": "workspace-name-osd@dev-automation",
   "name": "Dev Automation Workspace Controller",
-  "description": "Mantém o suporte ao desktops --close sem criar indicador visual duplicado; o nome do workspace fica somente na taskbar.",
+  "description": "Controla workspaces e posicionamento explícito de janelas sem criar indicador visual duplicado.",
   "shell-version": ["50"],
-  "version": 5
+  "version": 8
 }

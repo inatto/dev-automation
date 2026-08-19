@@ -17,14 +17,27 @@ printf 'GNOME Shell 50.1\n'
 EOF
 cat > "$TMP/bin/gnome-extensions" <<'EOF'
 #!/usr/bin/env bash
-if [[ "${1:-}" == "enable" ]]; then
-  mkdir -p "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
-  cat > "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/extension.ready" <<'READY'
-version=5
+case "${1:-}" in
+  info)
+    dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
+    if [[ -s "$dir/extension.ready" ]]; then
+      printf '  Version: 8\n  State: ACTIVE\n'
+    else
+      printf '  Version: 8\n  State: INACTIVE\n'
+    fi
+    exit 0
+    ;;
+  enable)
+    mkdir -p "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
+    cat > "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/extension.ready" <<'READY'
+version=8
 controller=1
 floating-label=0
+window-placement=1
 READY
-fi
+    exit 0
+    ;;
+esac
 exit 0
 EOF
 chmod +x "$TMP/bin/"*

@@ -19,13 +19,22 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) exit 0 ;;
+  info)
+    dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
+    if [[ -s "$dir/extension.ready" ]]; then
+      printf '  Version: 8\n  State: ACTIVE\n'
+    else
+      printf '  Version: 8\n  State: INACTIVE\n'
+    fi
+    exit 0
+    ;;
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
     cat > "$HOME/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=5
+version=8
 controller=1
 floating-label=0
+window-placement=1
 READY
     exit 0
     ;;
@@ -42,6 +51,9 @@ test -f "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-au
 ! grep -q "dev-automation-workspace-corner" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "getWorkAreaForMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "floating-label=0" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "window-placement=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "_leftmostMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "_rightmostMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "PanelMenu.Button" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "Main.panel.addToStatusArea" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "Main.overview.connect" "$ROOT/apps/desktops-gnome-extension/extension.js"
@@ -49,5 +61,5 @@ grep -q "floating-label=0" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'Extensão GNOME confirmada: sem indicador flutuante; nome do workspace permanece somente na taskbar.' "$TMP/out"
+grep -Fq '"version": 8' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
 echo 'OK: GNOME usa workspaces fixos nomeados, sem indicador flutuante, e fechamento preservando LAZER.'
