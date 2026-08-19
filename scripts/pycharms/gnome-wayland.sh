@@ -34,7 +34,7 @@ install_extension() {
   "name": "PyCharms Monitor",
   "description": "Reconcilia janelas PyCharm por projeto, workspace e maior monitor no GNOME/Wayland.",
   "shell-version": ["$major"],
-  "version": 3
+  "version": 34
 }
 JSON
 
@@ -56,15 +56,29 @@ extension_state() {
   gnome-extensions info "$UUID" 2>/dev/null || return 1
 }
 
+extension_active() {
+  local info
+  info="$(gnome-extensions info "$UUID" 2>/dev/null || true)"
+  [[ -n "$info" ]] || return 1
+  grep -qiE '^[[:space:]]*State:[[:space:]]*ACTIVE[[:space:]]*$' <<<"$info"
+}
+
 ensure_extension() {
   [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
-  install_extension || return 0
-  if gnome-extensions info "$UUID" >/dev/null 2>&1; then
-    gnome-extensions enable "$UUID" >/dev/null 2>&1 || true
-    log 'extensão GNOME de posicionamento instalada/habilitada.'
-  else
-    warn 'extensão instalada, mas o GNOME Shell ainda não a registrou; faça logout/login uma vez. PyCharm será aberto mesmo assim.'
-  fi
+  install_extension || return 1
+
+  local attempt
+  for ((attempt=0; attempt<30; attempt++)); do
+    if extension_active; then
+      log 'extensão GNOME de posicionamento: ACTIVE.'
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  warn 'extensão GNOME instalada, mas NÃO está ACTIVE nesta sessão.'
+  warn 'A movimentação não será fingida: pycharms mostrará falha/diagnóstico em vez de dizer que moveu.'
+  return 1
 }
 
 show_monitor_diagnose() {

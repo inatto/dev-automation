@@ -77,8 +77,8 @@ grep -Fxq 'alpha novo' "$CODE_ROOT/orgs/alpha-app/value.txt"
 grep -Fxq 'beta novo' "$CODE_ROOT/orgs/beta-app/value.txt"
 [ ! -e "$WORKER_FROM_DIR/alpha-app(2).zip" ]
 [ ! -e "$WORKER_FROM_DIR/beta-app%2323.zip" ]
-find "$WORKER_FROM_DIR/backup" -maxdepth 1 -type f -name 'alpha-app(2)--*--PROCESSED.zip' -print -quit | grep -q .
-find "$WORKER_FROM_DIR/backup" -maxdepth 1 -type f -name 'beta-app%2323--*--PROCESSED.zip' -print -quit | grep -q .
+[ -f "$WORKER_FROM_DIR/backup/alpha-app(2).zip" ]
+[ -f "$WORKER_FROM_DIR/backup/beta-app%2323.zip" ]
 [ -e "$WORKER_FROM_DIR/The Goonies (1986) Konami [MSX].zip" ]
 
 grep -Fq 'LOTE DE WORKER/FROM: 2 ZIP(s)' "$LOG_FILE"
@@ -99,7 +99,7 @@ WORKER_FROM_DIR="$WORKER_FROM_DIR" \
 fi
 [ ! -e "$WORKER_FROM_DIR/alpha-app-corrompido.zip" ]
 grep -Fq 'ERRO: ZIP inválido ou corrompido. O ZIP foi mantido.' "$LOG_FILE"
-find "$WORKER_FROM_DIR/backup" -maxdepth 1 -type f -name 'alpha-app-corrompido--*--FAILED.zip' -print -quit | grep -q .
-grep -Fq 'ZIP ARQUIVADO LOCALMENTE:' "$LOG_FILE"
+[ -f "$WORKER_FROM_DIR/backup/alpha-app-corrompido.zip" ]
+grep -Fq 'ZIP ARQUIVADO LOCALMENTE SEM RENOMEAR' "$LOG_FILE"
 
 printf 'OK: todos os ZIPs de worker/from são processados em sequência e falhas saem da fila sem loop\n'

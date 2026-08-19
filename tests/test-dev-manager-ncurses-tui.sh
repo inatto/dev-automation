@@ -47,7 +47,7 @@ source = Path(sys.argv[3]).read_text(encoding="utf-8")
 
 assert b"Traceback" not in b, "ncurses gerou traceback"
 assert b"\x1b(0" in b, "ACS/line-drawing nativo não foi ativado"
-assert b"DEV AUTOMATION :: CLIPPER / NCURSES" in b, "painel principal não foi desenhado"
+assert b"DEV AUTOMATION ::" in b and b"CLIPPER / NCURSES" in b, "painel principal não foi desenhado"
 assert b"DAY / BASIC" in b, "tema BASIC não foi desenhado"
 assert b"DARK / MATRIX" in b, "atalho T não alternou para MATRIX"
 assert theme == "matrix", "tema selecionado não foi persistido"

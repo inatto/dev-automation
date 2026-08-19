@@ -1,28 +1,27 @@
 # worker-sync
 
-Fila assíncrona entre a máquina local e Google Drive.
+Fila simples entre a máquina local e o Google Drive.
 
 - `~/worker/to` -> `danielmaiax:worker/to`: snapshots enviados pela máquina.
 - `danielmaiax:worker/from` -> `~/worker/from`: fila de entrada.
-- `~/worker/from/backup` <-> `danielmaiax:worker/from/backup`: histórico.
+- `~/worker/from/backup` -> `danielmaiax:worker/from/backup`: histórico processado.
 
-## FROM transacional
+## FROM: uma regra, um nome
 
-O downloader não faz mais `rclone copy` da pasta inteira.
+O nome do ZIP não muda em nenhuma etapa. Use sempre um codinome único, por
+exemplo `dev-automation-worker-nome-unico.zip`.
 
-1. Lista apenas os ZIPs da raiz remota.
-2. Antes de baixar, cria um claim local e move server-side o ZIP para
-   `worker/from/.processing/<token>/<nome>`.
-3. Baixa somente aquele arquivo para `~/worker/from/.incoming`.
-4. Confere MD5 quando disponível e publica em `~/worker/from` por `mv` atômico.
-5. O dev-manager importa o ZIP e move para `~/worker/from/backup/...--PROCESSED.zip`.
-6. O backup worker sobe o histórico e apaga somente o caminho único de
-   `.processing` guardado no claim.
-7. Uma versão nova com o mesmo nome pode chegar à raiz remota sem ser apagada
-   pelo cleanup da versão anterior.
+1. Drive: `worker/from/dev-automation-worker-nome-unico.zip`.
+2. Downloader copia para `~/worker/from/dev-automation-worker-nome-unico.zip`.
+3. O dev-manager extrai/importa o ZIP.
+4. O mesmo arquivo é movido localmente para
+   `~/worker/from/backup/dev-automation-worker-nome-unico.zip`.
+5. O worker de backup sobe o mesmo arquivo para
+   `worker/from/backup/dev-automation-worker-nome-unico.zip`.
+6. Depois de confirmar o backup remoto, remove da raiz remota
+   `worker/from/dev-automation-worker-nome-unico.zip`.
 
-Toda chamada de rede possui timeout. Se uma operação cair no meio, o claim e
-`.processing` permitem retomada idempotente no ciclo seguinte.
-
-A deduplicação automática do histórico atua somente em `*--PROCESSED.zip` e
-remove cópias com MD5 idêntico; SAFE/ROLLBACK/SUPERSEDED não entram na limpeza.
+Não existe `.processing`, claim remoto, timestamp no nome, `--PROCESSED`,
+`--FAILED`, dedupe com renomeação nem criação automática de nome alternativo.
+Se um nome já existir no backup com conteúdo diferente, isso é colisão de
+codinome e o worker para naquele arquivo em vez de inventar outro nome.

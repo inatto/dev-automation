@@ -10,6 +10,8 @@ const STATE_DIR = GLib.build_filenamev([
 const MAP_PATH = GLib.build_filenamev([STATE_DIR, 'workspaces.tsv']);
 const BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'batch-opening']);
 const RECONCILE_PATH = GLib.build_filenamev([STATE_DIR, 'reconcile.request']);
+const RECONCILE_READY_PATH = GLib.build_filenamev([STATE_DIR, 'reconcile.ready']);
+const RECONCILE_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'reconcile.result']);
 const OPEN_PROJECTS_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.tsv']);
 const OPEN_PROJECTS_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.request']);
 const OPEN_PROJECTS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'open-projects.ready']);
@@ -36,7 +38,12 @@ export default class PyCharmsMonitorExtension extends Extension {
             const token = this._readRequestToken();
             if (token && token !== this._lastRequestToken) {
                 this._lastRequestToken = token;
-                this._startReconcile(45);
+                const result = this._reconcileAll();
+                this._writeReconcileResult(token, result);
+                // Algumas janelas JetBrains ainda podem atualizar título/estado logo
+                // após o pedido. Repetimos poucas vezes, mas somente porque houve
+                // uma solicitação explícita do backend.
+                this._startReconcile(8);
             }
 
             const openProjectsToken = this._readOpenProjectsRequestToken();
@@ -192,15 +199,55 @@ export default class PyCharmsMonitorExtension extends Extension {
     }
 
     _reconcileAll() {
+        let pycharmWindows = 0;
+        let matched = 0;
+        let changed = 0;
+        let alreadyCorrect = 0;
+        let unmatched = 0;
+        let errors = 0;
+
         for (const actor of global.get_window_actors()) {
             const window = actor.meta_window;
             if (!window || window.get_window_type() !== Meta.WindowType.NORMAL)
                 continue;
             if (!this._isPyCharm(window))
                 continue;
+
+            pycharmWindows++;
             const target = this._projectTarget(window);
-            if (target)
-                this._place(window, target);
+            if (!target) {
+                unmatched++;
+                continue;
+            }
+
+            matched++;
+            const placement = this._place(window, target);
+            if (placement?.error)
+                errors++;
+            else if (placement?.changed)
+                changed++;
+            else
+                alreadyCorrect++;
+        }
+
+        return {pycharmWindows, matched, changed, alreadyCorrect, unmatched, errors};
+    }
+
+    _writeReconcileResult(token, result) {
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const summary = [
+                `janelas=${result?.pycharmWindows ?? 0}`,
+                `mapeadas=${result?.matched ?? 0}`,
+                `alteradas=${result?.changed ?? 0}`,
+                `já_corretas=${result?.alreadyCorrect ?? 0}`,
+                `sem_mapa=${result?.unmatched ?? 0}`,
+                `erros=${result?.errors ?? 0}`,
+            ].join(' ');
+            GLib.file_set_contents(RECONCILE_RESULT_PATH, `${summary}\n`);
+            GLib.file_set_contents(RECONCILE_READY_PATH, `${token}\n`);
+        } catch (error) {
+            console.error(`[pycharms-monitor] falha ao confirmar reconciliação: ${error}`);
         }
     }
 
@@ -286,23 +333,32 @@ export default class PyCharmsMonitorExtension extends Extension {
     }
 
     _place(window, target) {
+        let changed = false;
         try {
             // Workspaces são garantidos pelo comando desktops antes do lote.
             // Não ativamos a janela, então o usuário permanece onde está.
             const workspaceIndex = target.workspace - 1;
             const currentWorkspace = window.get_workspace?.();
-            if (!currentWorkspace || currentWorkspace.index() !== workspaceIndex)
+            if (!currentWorkspace || currentWorkspace.index() !== workspaceIndex) {
                 window.change_workspace_by_index(workspaceIndex, false);
+                changed = true;
+            }
 
             const monitor = this._targetMonitor();
-            if (window.get_monitor() !== monitor)
+            if (window.get_monitor() !== monitor) {
                 window.move_to_monitor(monitor);
+                changed = true;
+            }
 
             // GNOME/Mutter 49+ removeu MaximizeFlags do argumento de maximize().
-            if (!window.is_maximized?.())
+            if (!window.is_maximized?.()) {
                 window.maximize();
+                changed = true;
+            }
+            return {changed};
         } catch (error) {
             console.error(`[pycharms-monitor] falha ao posicionar ${target.name}: ${error}`);
+            return {changed, error: String(error)};
         }
     }
 }

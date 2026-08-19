@@ -1,5 +1,5 @@
 [Unit]
-Description=Dev Automation Worker FROM - espelha backup local no Google Drive
+Description=Dev Automation Worker FROM - sobe backup com o mesmo nome e limpa a fila remota
 After=network-online.target
 Wants=network-online.target
 

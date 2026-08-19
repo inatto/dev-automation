@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 # Contexto: importação transacional de ZIPs e worker/from
 
-WORKER_FROM_STATE_LIB="$PROJECT_ROOT/apps/worker-sync/scripts/from-state.sh"
-if [ -f "$WORKER_FROM_STATE_LIB" ]; then
-  # shellcheck source=/dev/null
-  source "$WORKER_FROM_STATE_LIB"
-fi
-
 archive_worker_from_zip() {
   local zip_file="$1"
   local status="${2:-PROCESSED}"
-  local downloads zip_parent downloads_real backup_dir base stem stamp archive_name archive_path seq=0 claim_path=""
+  local downloads zip_parent downloads_real backup_dir base archive_path source_md5 backup_md5
 
   [ -f "$zip_file" ] || {
     log "ERRO: ZIP não existe para arquivamento: $zip_file"
@@ -46,37 +40,31 @@ archive_worker_from_zip() {
   }
 
   base="$(basename -- "$zip_file")"
-  stem="${base%.*}"
-  stamp="${WORKER_ARCHIVE_STAMP:-$(date '+%Y%m%d-%H%M%S')}"
-  archive_name="${stem}--${stamp}--${status}.zip"
-  archive_path="$backup_dir/$archive_name"
-  while [ -e "$archive_path" ]; do
-    seq=$((seq + 1))
-    archive_name="${stem}--${stamp}-${seq}--${status}.zip"
-    archive_path="$backup_dir/$archive_name"
-  done
+  archive_path="$backup_dir/$base"
 
-  # O downloader v2 cria o claim ANTES de retirar o arquivo da raiz remota.
-  # Aqui apenas anexamos o nome final do histórico ao mesmo claim, preservando
-  # o caminho remoto único em .processing. Para ZIPs locais/legados sem claim,
-  # a função cria um claim compatível antes do mv.
-  if declare -F worker_from_claim_attach_archive >/dev/null 2>&1; then
-    if ! claim_path="$(worker_from_claim_attach_archive "$base" "$archive_name" "$zip_file")"; then
-      log "ERRO: não foi possível atualizar claim transacional antes do arquivamento: $base"
-      return 1
+  # Regra do worker: o nome é imutável da entrada ao backup. Codinome diferente
+  # significa versão diferente. Nunca cria --PROCESSED, timestamp, (1), -2 etc.
+  if [ -e "$archive_path" ]; then
+    if [ -f "$archive_path" ]; then
+      source_md5="$(md5sum -- "$zip_file" | awk '{print tolower($1)}')"
+      backup_md5="$(md5sum -- "$archive_path" | awk '{print tolower($1)}')"
+      if [ "$source_md5" = "$backup_md5" ]; then
+        rm -f -- "$zip_file"
+        log "ZIP JÁ ESTAVA NO BACKUP COM O MESMO NOME/CONTEÚDO: $base"
+        return 0
+      fi
     fi
-    log "CLAIM FROM ATUALIZADO: $base -> $archive_name"
-  elif declare -F worker_from_claim_write >/dev/null 2>&1; then
-    claim_path="$(worker_from_claim_write "$base" "$archive_name" "$zip_file")" || return 1
+    log "ERRO: colisão de codinome em worker/from/backup: $base"
+    log "Use outro codinome; o worker não renomeia arquivos automaticamente."
+    return 1
   fi
 
   if ! mv -- "$zip_file" "$archive_path"; then
-    [ -z "$claim_path" ] || rm -f -- "$claim_path"
     log "ERRO: não foi possível mover ZIP para o backup local: $zip_file"
     return 1
   fi
 
-  log "ZIP ARQUIVADO LOCALMENTE: $base -> backup/$archive_name"
+  log "ZIP ARQUIVADO LOCALMENTE SEM RENOMEAR [$status]: $base -> backup/$base"
   return 0
 }
 

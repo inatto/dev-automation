@@ -24,7 +24,11 @@ if ! rclone listremotes 2>/dev/null | grep -qx "${REMOTE_NAME}:"; then
   fail "remote rclone '${REMOTE_NAME}:' não encontrado. Configure primeiro com: rclone config"
 fi
 
-mkdir -p /home/daniel/worker/to /home/daniel/worker/from/backup /home/daniel/worker/from/.incoming "$USER_UNIT_DIR" "$STATE_DIR/from-pending"
+mkdir -p /home/daniel/worker/to /home/daniel/worker/from/backup /home/daniel/worker/from/.incoming "$USER_UNIT_DIR" "$STATE_DIR"
+
+log 'limpando arquitetura antiga do FROM (.processing/claims)'
+rm -rf -- "$STATE_DIR/from-pending" "$STATE_DIR/from-backup.ready" 2>/dev/null || true
+rclone purge "${REMOTE_NAME}:worker/from/.processing" --log-level ERROR >/dev/null 2>&1 || true
 
 log 'parando configuração antiga/avulsa, se existir'
 systemctl --user disable --now rclone-worker-to.timer 2>/dev/null || true
@@ -64,7 +68,7 @@ worker_source_fingerprint > "$FINGERPRINT_FILE"
 
 log 'instalado. Fluxo fixo:'
 log '  /home/daniel/worker/to -> danielmaiax:worker/to'
-log '  danielmaiax:worker/from -> claim remoto .processing -> /home/daniel/worker/from'
-log '  ZIP processado: /home/daniel/worker/from -> /home/daniel/worker/from/backup'
-log '  backup local <-> danielmaiax:worker/from/backup (histórico preservado nos dois lados)'
-log '  após confirmar backup remoto, somente o claim em .processing é removido; nova versão na raiz é preservada.'
+log '  danielmaiax:worker/from/<nome>.zip -> /home/daniel/worker/from/<mesmo-nome>.zip'
+log '  ZIP usado -> /home/daniel/worker/from/backup/<mesmo-nome>.zip'
+log '  backup local -> danielmaiax:worker/from/backup/<mesmo-nome>.zip'
+log '  após confirmar backup remoto, remove danielmaiax:worker/from/<mesmo-nome>.zip'

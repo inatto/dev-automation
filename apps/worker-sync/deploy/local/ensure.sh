@@ -70,8 +70,8 @@ if ! systemctl --user is-active --quiet dev-automation-worker-to.service; then
   systemctl --user start dev-automation-worker-to.service || exit $?
 fi
 
-# Ordem intencional: backup-sync sobe PRIMEIRO, reconcilia claims/duplicatas e
-# cria o ready-file. O timer de download só entra depois.
+# O backup watcher sobe primeiro para limpar qualquer item já processado antes
+# do downloader verificar novamente a raiz remota.
 if ! systemctl --user is-active --quiet dev-automation-worker-from-delete.service; then
   log 'iniciando worker FROM backup-sync/recovery...'
   systemctl --user start dev-automation-worker-from-delete.service || exit $?

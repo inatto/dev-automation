@@ -5,7 +5,7 @@ set -uo pipefail
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT_VERSION="2026-08-12-light-monitor-v32-modular"
+SCRIPT_VERSION="$(cat "$PROJECT_ROOT/VERSION" 2>/dev/null || printf 'v34 | 20260818 21:52')"
 DEV_MANAGER_MODULE_DIR="$SCRIPT_DIR/dev-manager"
 
 # TUI principal: ncurses real (ACS/terminfo). O Bash continua sendo o motor.

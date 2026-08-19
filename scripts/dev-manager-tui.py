@@ -22,6 +22,19 @@ SYSTEM_METRIC_SECONDS = 1.0
 MAX_LOG_LINES = 4000
 THEMES = ("classic", "matrix")
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+BUILD_VERSION_FILE = PROJECT_ROOT / "VERSION"
+
+
+def read_build_version():
+    try:
+        value = BUILD_VERSION_FILE.read_text(encoding="utf-8").strip()
+        if value:
+            return value
+    except OSError:
+        pass
+    return "versão-desconhecida"
+
 
 def clamp(value, low, high):
     return max(low, min(high, value))
@@ -276,7 +289,7 @@ class Dashboard:
         self.status = "INICIANDO"
         self.status_detail = "Preparando monitor"
         self.last_action = "Inicialização"
-        self.version = "dev-manager"
+        self.version = read_build_version()
         self.mode = "LIGHT"
         self.downloads = str(Path.home() / "worker" / "from")
         self.inotify_instances = 0
@@ -517,7 +530,7 @@ class Dashboard:
         upper = clean.upper()
 
         if clean.startswith("Auto Code Manager - "):
-            self.version = clean.split(" - ", 1)[1].strip()
+            self.status_detail = clean
         elif clean.startswith("worker/from:"):
             self.downloads = clean.split(":", 1)[1].strip()
         elif clean.startswith("Downloads:"):
@@ -815,7 +828,7 @@ class Dashboard:
         logwin = self.windows.get("log")
 
         if header:
-            self.prep_box(header, "DEV AUTOMATION :: CLIPPER / NCURSES")
+            self.prep_box(header, f"DEV AUTOMATION :: {self.version} :: CLIPPER / NCURSES")
             _, width = header.getmaxyx()
             inner = width - 4
             col = max(18, inner // 3)

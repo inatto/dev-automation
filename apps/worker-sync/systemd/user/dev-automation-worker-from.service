@@ -1,5 +1,5 @@
 [Unit]
-Description=Dev Automation Worker FROM - fila transacional Google Drive para local
+Description=Dev Automation Worker FROM - baixa ZIPs do Google Drive sem renomear
 After=network-online.target dev-automation-worker-from-delete.service
 Wants=network-online.target
 

@@ -72,7 +72,7 @@ wait_until() {
   exit 1
 }
 
-wait_until 'backup baseline' test -s "$CODE_ROOT/alpha-app.zip"
+wait_until 'backup baseline' test -s "$HOME_DIR/worker/to/alpha-app.zip"
 wait_until 'modo light ativo' grep -Fq 'IDLE leve' "$LOG"
 
 # ZIP alheio ao .projects fica em Downloads sem disparar/importar em loop.
@@ -89,11 +89,11 @@ sleep 3
   exit 1
 }
 
-before="$(sha256sum "$CODE_ROOT/alpha-app.zip" | awk '{print $1}')"
+before="$(sha256sum "$HOME_DIR/worker/to/alpha-app.zip" | awk '{print $1}')"
 printf 'v2\n' > "$PROJECT/app.txt"
 changed="$before"
 for _i in $(seq 1 80); do
-  changed="$(sha256sum "$CODE_ROOT/alpha-app.zip" | awk '{print $1}')"
+  changed="$(sha256sum "$HOME_DIR/worker/to/alpha-app.zip" | awk '{print $1}')"
   [ "$changed" != "$before" ] && break
   sleep 0.2
 done
@@ -103,7 +103,7 @@ done
 mkdir -p "$PROJECT/node_modules/pkg"
 printf cache > "$PROJECT/node_modules/pkg/cache.txt"
 sleep 3
-[ "$(sha256sum "$CODE_ROOT/alpha-app.zip" | awk '{print $1}')" = "$changed" ] || {
+[ "$(sha256sum "$HOME_DIR/worker/to/alpha-app.zip" | awk '{print $1}')" = "$changed" ] || {
   echo 'FALHOU: node_modules disparou backup no modo light' >&2
   exit 1
 }
@@ -112,19 +112,19 @@ sleep 3
 mkdir -p "$PROJECT/ignored-by-git/sub"
 printf cache > "$PROJECT/ignored-by-git/sub/cache.txt"
 sleep 3
-[ "$(sha256sum "$CODE_ROOT/alpha-app.zip" | awk '{print $1}')" = "$changed" ] || {
+[ "$(sha256sum "$HOME_DIR/worker/to/alpha-app.zip" | awk '{print $1}')" = "$changed" ] || {
   echo 'FALHOU: diretório do .gitignore disparou backup no modo light' >&2
   exit 1
 }
 
-# Downloads continua automático no mesmo loop leve.
+# worker/from continua automático no mesmo loop leve.
 pkg="$TEMP/pkg"
-mkdir -p "$pkg"
+mkdir -p "$pkg" "$HOME_DIR/worker/from"
 printf 'fromzip\n' > "$pkg/app.txt"
-(cd "$pkg" && zip -q "$DOWNLOADS/alpha-app.zip" app.txt)
+(cd "$pkg" && zip -q "$HOME_DIR/worker/from/alpha-app-light-test.zip" app.txt)
 wait_until 'ZIP importado' grep -Fxq fromzip "$PROJECT/app.txt"
-wait_until 'ZIP saiu da fila' test ! -e "$DOWNLOADS/alpha-app.zip"
-wait_until 'ZIP arquivado' bash -lc "find '$DOWNLOADS/backup' -maxdepth 1 -type f -name 'alpha-app--*--PROCESSED.zip' -print -quit | grep -q ."
+wait_until 'ZIP saiu da fila' test ! -e "$HOME_DIR/worker/from/alpha-app-light-test.zip"
+wait_until 'ZIP arquivado' test -f "$HOME_DIR/worker/from/backup/alpha-app-light-test.zip"
 
 # O processo do manager não pode consumir instância inotify no modo light.
 for fd in /proc/$PID/fd/*; do
@@ -134,4 +134,4 @@ for fd in /proc/$PID/fd/*; do
   }
 done
 
-printf 'OK: modo light detecta mudança real, poda ignores dinâmicos, importa Downloads e usa zero inotify\n'
+printf 'OK: modo light detecta mudança real, poda ignores dinâmicos, importa worker/from e usa zero inotify\n'

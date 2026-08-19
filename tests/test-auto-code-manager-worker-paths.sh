@@ -58,7 +58,7 @@ HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" \
 [ -e "$DOWNLOADS_DIR/sample-app.zip" ]
 grep -Fxq 'original' "$CODE_ROOT/orgs/sample-app/value.txt"
 
-# 3) ZIP em $HOME/worker/from é importado e removido após sucesso.
+# 3) ZIP em $HOME/worker/from é importado e movido para backup com o MESMO nome.
 mkdir -p "$WORKER_FROM_DIR"
 PKG2="$TMP/pkg-from"
 mkdir -p "$PKG2"
@@ -68,6 +68,7 @@ HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-worker-from-once >"$TMP/from.log" 2>&1
 grep -Fxq 'IMPORTADO DO FROM' "$CODE_ROOT/orgs/sample-app/value.txt"
 [ ! -e "$WORKER_FROM_DIR/sample-app.zip" ]
+[ -f "$WORKER_FROM_DIR/backup/sample-app.zip" ]
 grep -Fq "Verificando worker/from: $WORKER_FROM_DIR" "$TMP/from.log"
 
 echo 'OK: backup -> ~/worker/to; import <- ~/worker/from; Downloads ignorado'

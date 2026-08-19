@@ -15,12 +15,16 @@ STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
 WORKSPACE_MAP="$STATE_DIR/workspaces.tsv"
 BATCH_MARKER="$STATE_DIR/batch-opening"
 RECONCILE_REQUEST="$STATE_DIR/reconcile.request"
+RECONCILE_READY="$STATE_DIR/reconcile.ready"
+RECONCILE_RESULT="$STATE_DIR/reconcile.result"
 CLOSE_REQUEST="$STATE_DIR/close.request"
 CLOSE_READY="$STATE_DIR/close.ready"
 CLOSE_RESULT="$STATE_DIR/close.result"
 OPEN_PROJECTS_SNAPSHOT="${PYCHARMS_OPEN_PROJECTS_FILE:-$STATE_DIR/open-projects.tsv}"
 OPEN_PROJECTS_REQUEST="$STATE_DIR/open-projects.request"
 OPEN_PROJECTS_READY="$STATE_DIR/open-projects.ready"
+VERSION_FILE="$PROJECT_ROOT/VERSION"
+BUILD_VERSION="$(cat "$VERSION_FILE" 2>/dev/null || printf 'versão-desconhecida')"
 log(){ printf '[pycharms] %s\n' "$*"; }
 warn(){ printf '[pycharms] AVISO: %s\n' "$*" >&2; }
 fail(){ printf '[pycharms] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -52,6 +56,7 @@ pycharm_mode() {
 
 show_diagnose() {
   printf '=== PYCHARM / UBUNTU ===\n'
+  printf 'VERSÃO=%s\n' "$BUILD_VERSION"
   printf 'PATH command: '; command -v pycharm || true
   printf 'pycharm-professional: '; command -v pycharm-professional || true
   printf 'pycharm-community: '; command -v pycharm-community || true
@@ -137,9 +142,33 @@ show_workspace_map() {
 
 request_reconcile() {
   mkdir -p "$STATE_DIR"
-  local tmp="$RECONCILE_REQUEST.tmp.$$"
-  printf '%s\n' "$(date +%s%N)" > "$tmp"
+  local token tmp attempt ready result
+  token="$(date +%s%N)-$$-$RANDOM"
+  tmp="$RECONCILE_REQUEST.tmp.$$"
+  rm -f -- "$RECONCILE_READY" "$RECONCILE_RESULT"
+  printf '%s\n' "$token" > "$tmp"
   mv -f "$tmp" "$RECONCILE_REQUEST"
+
+  log "MOVIMENTAÇÃO: pedido enviado ao GNOME; tentando posicionar as janelas nos workspaces configurados."
+  if [[ "${XDG_SESSION_TYPE:-}" != wayland ]]; then
+    log "MOVIMENTAÇÃO: sessão não-Wayland; pedido gravado, sem confirmação do GNOME."
+    return 0
+  fi
+
+  for ((attempt=0; attempt<100; attempt++)); do
+    if [[ -f "$RECONCILE_READY" ]]; then
+      ready="$(cat "$RECONCILE_READY" 2>/dev/null || true)"
+      if [[ "$ready" == "$token" ]]; then
+        result="$(cat "$RECONCILE_RESULT" 2>/dev/null || true)"
+        log "MOVIMENTAÇÃO CONFIRMADA PELO GNOME: ${result:-sem detalhes}"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+
+  warn 'MOVIMENTAÇÃO SOLICITADA, mas o GNOME não confirmou em 10s. Rode: pycharms --diagnose'
+  return 1
 }
 
 request_close_all() {
@@ -247,7 +276,9 @@ ensure_gnome_workspaces() {
     PROJECTS_FILE="$CONFIG_FILE" DESKTOPS_PLATFORM=gnome "$DESKTOPS_SCRIPT" >/dev/null || \
       warn 'não foi possível sincronizar os workspaces antes de abrir o PyCharm'
   fi
-  [[ -x "$GNOME_WAYLAND_HELPER" ]] && "$GNOME_WAYLAND_HELPER" ensure || true
+  if [[ -x "$GNOME_WAYLAND_HELPER" ]]; then
+    "$GNOME_WAYLAND_HELPER" ensure || warn 'extensão GNOME não está ACTIVE; abertura pode prosseguir, mas MOVIMENTAÇÃO não será confirmada.'
+  fi
 }
 
 batch_marker_active() {
@@ -293,7 +324,8 @@ finish_batch_later() {
     rm -f -- "$BATCH_MARKER"
   ) >/dev/null 2>&1 &
   disown 2>/dev/null || true
-  log "primeira fase concluída: aguardando ${settle}s para as janelas estabilizarem. Rode pycharms novamente para organizar nos workspaces."
+  log "FASE ABERTURA CONCLUÍDA: aguardando ${settle}s para as janelas estabilizarem."
+  log 'PRÓXIMA CHAMADA: pycharms entrará em FASE MOVIMENTAÇÃO se todas as janelas forem detectadas como abertas.'
 }
 
 open_project() {
@@ -309,10 +341,13 @@ case "${1:-}" in
   --diagnose|diagnose) show_diagnose; exit 0 ;;
   --workspace-map|workspace-map) show_workspace_map; exit 0 ;;
   --close|close)
+    log "VERSÃO: $BUILD_VERSION"
     request_close_all
     exit 0
     ;;
   --reconcile|reconcile)
+    log "VERSÃO: $BUILD_VERSION"
+    log 'FASE: MOVIMENTAÇÃO FORÇADA'
     load_projects
     write_workspace_map
     ensure_gnome_workspaces
@@ -330,6 +365,7 @@ esac
 load_projects
 write_workspace_map
 if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
+log "VERSÃO: $BUILD_VERSION"
 ((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
 ensure_gnome_workspaces
 wait_for_previous_batch
@@ -350,21 +386,26 @@ done
 
 if ((${#projects_to_open[@]} == 0)); then
   rm -f -- "$BATCH_MARKER"
-  request_reconcile
-  log 'todos os projetos já estão abertos; nenhuma nova janela criada. Reconciliação solicitada.'
-  exit 0
+  log 'FASE: MOVIMENTAÇÃO'
+  log "ABERTURA: 0 projeto(s). Todos os ${#resolved_projects[@]} projeto(s) foram detectados como já abertos."
+  if request_reconcile; then
+    log 'todos os projetos já estão abertos; nenhuma nova janela criada. Reconciliação solicitada.'
+    exit 0
+  fi
+  fail 'GNOME não confirmou a tentativa de movimentação das janelas.'
 fi
 
 IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
   begin_batch
 fi
+log 'FASE: ABERTURA'
 log "Ubuntu backend: $mode -> $target"
-log "faltando abrir: ${#projects_to_open[@]} de ${#resolved_projects[@]} projeto(s)"
+log "ABERTURA: ${#projects_to_open[@]} projeto(s) faltando de ${#resolved_projects[@]} configurado(s). Nesta chamada NÃO haverá movimentação."
 for ((i=0; i<${#projects_to_open[@]}; i++)); do
   project="${projects_to_open[$i]}"
   workspace="${workspaces_to_open[$i]}"
-  log "abrindo workspace $workspace: $project"
+  log "ABRINDO AGORA workspace $workspace: $project"
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done
