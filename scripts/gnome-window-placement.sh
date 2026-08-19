@@ -8,7 +8,7 @@ GNOME_PLACEMENT_STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automa
 GNOME_PLACEMENT_STATE_DIR="$GNOME_PLACEMENT_STATE_ROOT/desktops"
 GNOME_PLACEMENT_TOKEN=''
 GNOME_PLACEMENT_READY_LINE=''
-GNOME_PLACEMENT_CONTROLLER_VERSION=8
+GNOME_PLACEMENT_CONTROLLER_VERSION=9
 
 _gnome_placement_log() {
   printf '[window-placement] %s\n' "$*"
@@ -26,9 +26,17 @@ gnome_placement_supported() {
 }
 
 gnome_placement_prepare() {
-  local kind="$1" request ready result token tmp attempt line
+  local kind="$1" action="${2:-default}" request_fields="${3:-}" request ready result token tmp attempt line
   case "$kind" in
-    chromes|terminals) ;;
+    chromes)
+      [[ "$action" == default ]] || { _gnome_placement_fail "ação inválida para chromes: $action"; return 1; }
+      ;;
+    terminals)
+      case "$action" in
+        status|open|reconcile|reset) ;;
+        *) _gnome_placement_fail "ação inválida para terminals: $action"; return 1 ;;
+      esac
+      ;;
     *) _gnome_placement_fail "tipo de pedido inválido: $kind"; return 1 ;;
   esac
 
@@ -53,7 +61,11 @@ gnome_placement_prepare() {
   tmp="$request.tmp.$$"
 
   rm -f -- "$ready" "$result"
-  printf '%s\n' "$token" > "$tmp"
+  {
+    printf '%s\taction=%s' "$token" "$action"
+    [[ -n "$request_fields" ]] && printf '\t%s' "$request_fields"
+    printf '\n'
+  } > "$tmp"
   mv -f -- "$tmp" "$request"
 
   for ((attempt=0; attempt<80; attempt++)); do

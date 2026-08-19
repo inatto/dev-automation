@@ -15,8 +15,9 @@ const CHROMES_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.result']);
 const TERMINALS_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.request']);
 const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']);
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
+const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 8;
+const EXTENSION_VERSION = 9;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -35,6 +36,11 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         this._terminalSession = null;
         this._handledWindows = new Set();
         this._timeouts = new Set();
+
+        // O GNOME pode chamar disable()/enable() da extensão sem encerrar a sessão
+        // (por exemplo em transições de modo). O lote é vinculado ao PID do próprio
+        // gnome-shell: sobrevive a re-enable, mas é invalidado após logout/login.
+        this._ensureTerminalBatchSession();
 
         this._windowCreatedId = global.display.connect('window-created', (_display, window) => {
             this._inspectNewWindow(window, 24);
@@ -86,17 +92,26 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             this._prepareChromes(chromesToken);
         }
 
-        const terminalsToken = this._readToken(TERMINALS_REQUEST_PATH);
-        if (terminalsToken && terminalsToken !== this._lastTerminalsRequestToken) {
-            this._lastTerminalsRequestToken = terminalsToken;
-            this._prepareTerminals(terminalsToken);
+        const terminalRequest = this._readRequest(TERMINALS_REQUEST_PATH);
+        if (terminalRequest.token && terminalRequest.token !== this._lastTerminalsRequestToken) {
+            this._lastTerminalsRequestToken = terminalRequest.token;
+            this._prepareTerminals(
+                terminalRequest.token,
+                terminalRequest.fields.action || 'status',
+                this._positiveInteger(terminalRequest.fields.count)
+            );
         }
 
         const now = nowSeconds();
         if (this._chromeSession && now > this._chromeSession.expiresAt)
             this._chromeSession = null;
         if (this._terminalSession && now > this._terminalSession.expiresAt) {
-            this._writeTerminalResult(this._terminalSession, false);
+            this._writeTerminalResult(
+                this._terminalSession.token,
+                this._terminalSession.captured,
+                this._terminalSession.expected,
+                false
+            );
             this._terminalSession = null;
         }
     }
@@ -125,36 +140,82 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _prepareTerminals(token) {
-        const totalWorkspaces = global.workspace_manager.n_workspaces;
+    _prepareTerminals(token, action, projectCount) {
         const monitor = this._rightmostMonitor();
-        // Workspace 1 (índice 0) é LAZER. Terminais automáticos pertencem apenas
-        // aos workspaces de projeto, começando no workspace 2.
-        const queue = Array.from(
-            {length: Math.max(0, totalWorkspaces - 1)},
-            (_value, index) => index + 1
-        );
-        const expected = queue.length;
-        this._terminalSession = {
-            token,
-            monitor,
-            queue,
-            expected,
-            placed: 0,
-            expiresAt: nowSeconds() + Math.max(45, expected * 3),
-        };
+        const target = Math.min(projectCount, Math.max(0, global.workspace_manager.n_workspaces - 1));
+        const status = this._terminalStatus(target);
+        if (action !== 'open')
+            this._terminalSession = null;
 
-        try {
-            GLib.mkdir_with_parents(STATE_DIR, 0o700);
-            GLib.file_set_contents(
-                TERMINALS_READY_PATH,
-                `${token}\tcount=${expected}\tfirst_workspace=2\tmonitor=${monitor}\n`
-            );
-            this._writeTerminalResult(this._terminalSession, expected === 0);
-            if (expected === 0)
+        switch (action) {
+        case 'status':
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalResult(token, status.managed.length, status.managed.length, true);
+            return;
+
+        case 'open': {
+            const missing = Math.max(0, target - status.managed.length);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            if (missing === 0) {
+                this._writeTerminalResult(token, 0, 0, true);
                 this._terminalSession = null;
-        } catch (error) {
-            console.error(`[workspace-controller] falha ao preparar terminals: ${error}`);
+                return;
+            }
+
+            this._terminalSession = {
+                token,
+                target,
+                expected: missing,
+                captured: 0,
+                sequences: new Set(status.managed.map(window => this._stableSequence(window))),
+                expiresAt: nowSeconds() + Math.max(45, missing * 3),
+            };
+            this._writeTerminalResult(token, 0, missing, false);
+            return;
+        }
+
+        case 'reconcile': {
+            const missing = Math.max(0, target - status.managed.length);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            if (missing > 0) {
+                this._writeTerminalResult(token, status.managed.length, target, false);
+                return;
+            }
+
+            const assignments = this._terminalAssignments(status.managed, target);
+            for (const [workspaceIndex, window] of assignments)
+                this._schedulePlacement(window, workspaceIndex, monitor, 10);
+            this._writeTerminalResult(token, assignments.length, target, assignments.length === target);
+            return;
+        }
+
+        case 'reset': {
+            const targets = new Set(status.managed);
+            for (const window of this._projectTerminalWindows(target))
+                targets.add(window);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalResult(token, targets.size, targets.size, true);
+            this._removeFile(TERMINALS_BATCH_PATH);
+            this._terminalSession = null;
+
+            GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+                const timestamp = global.get_current_time();
+                for (const window of targets) {
+                    try {
+                        if (window.can_close?.() !== false)
+                            window.delete(timestamp);
+                    } catch (error) {
+                        console.error(`[workspace-controller] falha ao fechar terminal: ${error}`);
+                    }
+                }
+                return GLib.SOURCE_REMOVE;
+            });
+            return;
+        }
+
+        default:
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalResult(token, 0, target, false);
         }
     }
 
@@ -166,15 +227,25 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
         const now = nowSeconds();
         const terminalSession = this._terminalSession;
-        if (terminalSession && now <= terminalSession.expiresAt && terminalSession.queue.length > 0 && this._isTerminal(window)) {
-            const workspaceIndex = terminalSession.queue.shift();
-            terminalSession.placed += 1;
-            this._handledWindows.add(window);
-            this._schedulePlacement(window, workspaceIndex, terminalSession.monitor, 10);
-            this._writeTerminalResult(terminalSession, terminalSession.queue.length === 0);
-            if (terminalSession.queue.length === 0)
-                terminalSession.expiresAt = now + 3;
-            return;
+        if (terminalSession && now <= terminalSession.expiresAt && terminalSession.captured < terminalSession.expected && this._isTerminal(window)) {
+            const sequence = this._stableSequence(window);
+            if (sequence && !terminalSession.sequences.has(sequence)) {
+                terminalSession.sequences.add(sequence);
+                terminalSession.captured += 1;
+                this._handledWindows.add(window);
+                this._scheduleUnmaximize(window, 8);
+                this._writeManagedTerminalSequences([...terminalSession.sequences]);
+                const complete = terminalSession.captured === terminalSession.expected;
+                this._writeTerminalResult(
+                    terminalSession.token,
+                    terminalSession.captured,
+                    terminalSession.expected,
+                    complete
+                );
+                if (complete)
+                    terminalSession.expiresAt = now + 3;
+                return;
+            }
         }
 
         const chromeSession = this._chromeSession;
@@ -196,7 +267,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
 
         // Algumas aplicações definem WM_CLASS/GTK application id alguns ciclos após
-        // window-created. Reconsulta por poucos segundos, apenas durante pedidos explícitos.
+        // window-created. Reconsulta por poucos segundos apenas durante pedidos explícitos.
         if (attemptsLeft > 0 && (this._chromeSession || this._terminalSession)) {
             const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
                 this._timeouts.delete(id);
@@ -207,6 +278,104 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
+    _terminalStatus(target) {
+        const allTerminals = this._allTerminalWindows();
+        const bySequence = new Map(allTerminals.map(window => [this._stableSequence(window), window]));
+        const remembered = this._readManagedTerminalSequences();
+        const managed = [];
+        const managedSet = new Set();
+
+        for (const sequence of remembered) {
+            const window = bySequence.get(sequence);
+            if (!window || managed.length >= target)
+                continue;
+            managed.push(window);
+            managedSet.add(sequence);
+        }
+
+        // Adota no máximo um terminal já existente por workspace de projeto.
+        // Isso evita duplicar o terminal de onde o comando foi executado e ajuda
+        // a recuperar sessões antigas sem capturar vários terminais do mesmo projeto.
+        if (managed.length < target) {
+            const occupied = new Set();
+            for (const window of managed) {
+                const index = window.get_workspace?.()?.index?.() ?? -1;
+                if (index >= 1 && index <= target)
+                    occupied.add(index);
+            }
+
+            const candidates = this._projectTerminalWindows(target)
+                .filter(window => !managedSet.has(this._stableSequence(window)))
+                .sort((a, b) => this._stableSequence(a) - this._stableSequence(b));
+            for (const window of candidates) {
+                if (managed.length >= target)
+                    break;
+                const index = window.get_workspace?.()?.index?.() ?? -1;
+                if (occupied.has(index))
+                    continue;
+                const sequence = this._stableSequence(window);
+                managed.push(window);
+                managedSet.add(sequence);
+                occupied.add(index);
+            }
+        }
+
+        this._writeManagedTerminalSequences(managed.map(window => this._stableSequence(window)));
+        const untracked = this._projectTerminalWindows(target)
+            .filter(window => !managedSet.has(this._stableSequence(window))).length;
+        return {managed, untracked};
+    }
+
+    _terminalAssignments(managed, target) {
+        const assignments = new Map();
+        const used = new Set();
+        const sorted = [...managed].sort((a, b) => this._stableSequence(a) - this._stableSequence(b));
+
+        // Preserva primeiro os terminais que já estão sozinhos em um workspace de projeto.
+        for (const window of sorted) {
+            const index = window.get_workspace?.()?.index?.() ?? -1;
+            if (index >= 1 && index <= target && !assignments.has(index)) {
+                assignments.set(index, window);
+                used.add(window);
+            }
+        }
+
+        const remaining = sorted.filter(window => !used.has(window));
+        let cursor = 0;
+        for (let index = 1; index <= target; index++) {
+            if (assignments.has(index))
+                continue;
+            const window = remaining[cursor++];
+            if (!window)
+                break;
+            assignments.set(index, window);
+        }
+
+        return [...assignments.entries()].sort((a, b) => a[0] - b[0]);
+    }
+
+    _allTerminalWindows() {
+        const windows = [];
+        for (const actor of global.get_window_actors()) {
+            const window = actor.meta_window;
+            if (!window || window.get_window_type?.() !== Meta.WindowType.NORMAL)
+                continue;
+            if (window.is_on_all_workspaces?.())
+                continue;
+            if (this._isTerminal(window))
+                windows.push(window);
+        }
+        return windows;
+    }
+
+    _projectTerminalWindows(target) {
+        return this._allTerminalWindows().filter(window => {
+            const workspace = window.get_workspace?.();
+            const index = workspace?.index?.() ?? -1;
+            return index >= 1 && index <= target;
+        });
+    }
+
     _schedulePlacement(window, workspaceIndex, monitor, roundsLeft) {
         const place = () => {
             if (!window)
@@ -215,9 +384,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 const workspace = window.get_workspace?.();
                 if (!workspace || workspace.index() !== workspaceIndex)
                     window.change_workspace_by_index(workspaceIndex, false);
-                // Não herdar estado maximizado salvo pelo terminal. O objetivo é
-                // uma janela normal no monitor direito, não uma tela inteira por projeto.
-                if (window.get_maximized?.())
+                if ((window.get_maximize_flags?.() ?? 0) !== 0)
                     window.unmaximize(Meta.MaximizeFlags.BOTH);
                 if (window.get_monitor?.() !== monitor)
                     window.move_to_monitor(monitor);
@@ -235,6 +402,31 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             place();
             if (roundsLeft > 1)
                 this._schedulePlacement(window, workspaceIndex, monitor, roundsLeft - 1);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._timeouts.add(id);
+    }
+
+    _scheduleUnmaximize(window, roundsLeft) {
+        const normalize = () => {
+            if (!window)
+                return;
+            try {
+                if ((window.get_maximize_flags?.() ?? 0) !== 0)
+                    window.unmaximize(Meta.MaximizeFlags.BOTH);
+            } catch (error) {
+                console.error(`[workspace-controller] falha ao normalizar terminal: ${error}`);
+            }
+        };
+
+        normalize();
+        if (roundsLeft <= 0)
+            return;
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 180, () => {
+            this._timeouts.delete(id);
+            normalize();
+            if (roundsLeft > 1)
+                this._scheduleUnmaximize(window, roundsLeft - 1);
             return GLib.SOURCE_REMOVE;
         });
         this._timeouts.add(id);
@@ -261,6 +453,14 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
     _isTerminal(window) {
         return TERMINAL_RE.test(this._windowIdentity(window));
+    }
+
+    _stableSequence(window) {
+        try {
+            return Number(window.get_stable_sequence?.() ?? 0);
+        } catch (_) {
+            return 0;
+        }
     }
 
     _monitorByHorizontalEdge(rightmost) {
@@ -303,17 +503,90 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _writeTerminalResult(session, complete) {
-        if (!session)
-            return;
+    _writeTerminalReady(token, action, target, managed, untracked, monitor) {
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const missing = Math.max(0, target - managed);
+            GLib.file_set_contents(
+                TERMINALS_READY_PATH,
+                `${token}\taction=${action}\tcount=${target}\tmanaged=${managed}\tmissing=${missing}\tuntracked=${untracked}\tfirst_workspace=2\tmonitor=${monitor}\n`
+            );
+        } catch (error) {
+            console.error(`[workspace-controller] falha ao preparar terminals: ${error}`);
+        }
+    }
+
+    _writeTerminalResult(token, placed, expected, complete) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             GLib.file_set_contents(
                 TERMINALS_RESULT_PATH,
-                `${session.token}\tplaced=${session.placed}\texpected=${session.expected}\tcomplete=${complete ? 1 : 0}\n`
+                `${token}\tplaced=${placed}\texpected=${expected}\tcomplete=${complete ? 1 : 0}\n`
             );
         } catch (error) {
             console.error(`[workspace-controller] falha ao gravar resultado de terminals: ${error}`);
+        }
+    }
+
+    _shellProcessId() {
+        try {
+            const [ok, bytes] = GLib.file_get_contents('/proc/self/stat');
+            if (!ok)
+                return 'unknown';
+            return new TextDecoder('utf-8').decode(bytes).trim().split(/\s+/, 1)[0] || 'unknown';
+        } catch (_) {
+            return 'unknown';
+        }
+    }
+
+    _ensureTerminalBatchSession() {
+        const shell = this._shellProcessId();
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const [ok, bytes] = GLib.file_get_contents(TERMINALS_BATCH_PATH);
+            if (ok) {
+                const first = new TextDecoder('utf-8').decode(bytes).split(/\n/, 1)[0].trim();
+                if (first === `shell=${shell}`)
+                    return;
+            }
+            GLib.file_set_contents(TERMINALS_BATCH_PATH, `shell=${shell}\n`);
+        } catch (_) {
+            try {
+                GLib.file_set_contents(TERMINALS_BATCH_PATH, `shell=${shell}\n`);
+            } catch (error) {
+                console.error(`[workspace-controller] falha ao inicializar lote de terminals: ${error}`);
+            }
+        }
+    }
+
+    _readManagedTerminalSequences() {
+        const shell = this._shellProcessId();
+        try {
+            const [ok, bytes] = GLib.file_get_contents(TERMINALS_BATCH_PATH);
+            if (!ok)
+                return [];
+            const lines = new TextDecoder('utf-8').decode(bytes).split(/\n/);
+            if ((lines.shift() || '').trim() !== `shell=${shell}`) {
+                this._ensureTerminalBatchSession();
+                return [];
+            }
+            return lines
+                .map(value => Number(value.trim()))
+                .filter(value => Number.isInteger(value) && value > 0);
+        } catch (_) {
+            return [];
+        }
+    }
+
+    _writeManagedTerminalSequences(sequences) {
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const unique = [...new Set(sequences.filter(value => Number.isInteger(value) && value > 0))];
+            const shell = this._shellProcessId();
+            const body = unique.length ? `${unique.join('\n')}\n` : '';
+            GLib.file_set_contents(TERMINALS_BATCH_PATH, `shell=${shell}\n${body}`);
+        } catch (error) {
+            console.error(`[workspace-controller] falha ao persistir lote de terminals: ${error}`);
         }
     }
 
@@ -330,23 +603,44 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
     }
 
     _removeExtensionReady() {
+        this._removeFile(EXTENSION_READY_PATH);
+    }
+
+    _removeFile(path) {
         try {
-            GLib.unlink(EXTENSION_READY_PATH);
+            GLib.unlink(path);
         } catch (_) {
-            // Arquivo pode não existir durante primeiro enable/disable.
+            // Arquivo pode não existir.
         }
     }
 
     _readToken(path) {
+        return this._readRequest(path).token;
+    }
+
+    _readRequest(path) {
         try {
             const [ok, bytes] = GLib.file_get_contents(path);
             if (!ok)
-                return '';
+                return {token: '', fields: {}};
             const text = new TextDecoder('utf-8').decode(bytes).trim();
-            return text.split(/[\t\n]/, 1)[0] || '';
+            const parts = text.split(/[\t\n]/).filter(Boolean);
+            const token = parts.shift() || '';
+            const fields = {};
+            for (const part of parts) {
+                const pos = part.indexOf('=');
+                if (pos > 0)
+                    fields[part.slice(0, pos)] = part.slice(pos + 1);
+            }
+            return {token, fields};
         } catch (_) {
-            return '';
+            return {token: '', fields: {}};
         }
+    }
+
+    _positiveInteger(value) {
+        const parsed = Number.parseInt(String(value ?? ''), 10);
+        return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
     }
 
     _closeManagedWorkspaceWindows(token) {
@@ -371,9 +665,6 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             targets.push(window);
         }
 
-        // Confirma o pedido antes de fechar as janelas. Assim, se desktops --close
-        // foi chamado dentro de um workspace gerenciado, o terminal recebe a
-        // confirmação antes de sua própria janela ser solicitada para fechamento.
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             GLib.file_set_contents(CLOSE_RESULT_PATH, `solicitadas=${targets.length} ignoradas=${skipped}\n`);
