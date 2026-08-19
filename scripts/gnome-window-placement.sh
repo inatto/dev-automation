@@ -8,7 +8,7 @@ GNOME_PLACEMENT_STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automa
 GNOME_PLACEMENT_STATE_DIR="$GNOME_PLACEMENT_STATE_ROOT/desktops"
 GNOME_PLACEMENT_TOKEN=''
 GNOME_PLACEMENT_READY_LINE=''
-GNOME_PLACEMENT_CONTROLLER_VERSION=9
+GNOME_PLACEMENT_CONTROLLER_VERSION=10
 
 _gnome_placement_log() {
   printf '[window-placement] %s\n' "$*"
@@ -94,6 +94,22 @@ gnome_placement_ready_field() {
       fi
     done
   done <<<"$GNOME_PLACEMENT_READY_LINE"
+  return 1
+}
+
+gnome_placement_result_field() {
+  local kind="$1" key="$2" result line field
+  result="$GNOME_PLACEMENT_STATE_DIR/$kind.result"
+  [[ -n "$GNOME_PLACEMENT_TOKEN" && -s "$result" ]] || return 1
+  line="$(cat "$result" 2>/dev/null || true)"
+  [[ "${line%%$'\t'*}" == "$GNOME_PLACEMENT_TOKEN" ]] || return 1
+  IFS=$'\t' read -ra fields <<<"$line"
+  for field in "${fields[@]}"; do
+    if [[ "$field" == "$key="* ]]; then
+      printf '%s\n' "${field#*=}"
+      return 0
+    fi
+  done
   return 1
 }
 

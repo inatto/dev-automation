@@ -22,16 +22,16 @@ case "${1:-}" in
   info)
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     if [[ -s "$dir/extension.ready" ]]; then
-      printf '  Version: 9\n  State: ACTIVE\n'
+      printf '  Version: 10\n  State: ACTIVE\n'
     else
-      printf '  Version: 9\n  State: INACTIVE\n'
+      printf '  Version: 10\n  State: INACTIVE\n'
     fi
     exit 0
     ;;
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
     cat > "$HOME/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=9
+version=10
 controller=1
 floating-label=0
 window-placement=1
@@ -61,5 +61,5 @@ grep -q "_rightmostMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq '"version": 9' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
+grep -Fq '"version": 10' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
 echo 'OK: GNOME usa workspaces fixos nomeados, sem indicador flutuante, e fechamento preservando LAZER.'

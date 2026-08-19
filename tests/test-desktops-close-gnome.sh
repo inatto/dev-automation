@@ -21,16 +21,16 @@ case "${1:-}" in
   info)
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     if [[ -s "$dir/extension.ready" ]]; then
-      printf '  Version: 9\n  State: ACTIVE\n'
+      printf '  Version: 10\n  State: ACTIVE\n'
     else
-      printf '  Version: 9\n  State: INACTIVE\n'
+      printf '  Version: 10\n  State: INACTIVE\n'
     fi
     exit 0
     ;;
   enable)
     mkdir -p "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     cat > "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/extension.ready" <<'READY'
-version=9
+version=10
 controller=1
 floating-label=0
 window-placement=1

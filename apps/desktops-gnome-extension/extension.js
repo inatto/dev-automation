@@ -17,7 +17,7 @@ const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 9;
+const EXTENSION_VERSION = 10;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -106,12 +106,14 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         if (this._chromeSession && now > this._chromeSession.expiresAt)
             this._chromeSession = null;
         if (this._terminalSession && now > this._terminalSession.expiresAt) {
-            this._writeTerminalResult(
-                this._terminalSession.token,
-                this._terminalSession.captured,
-                this._terminalSession.expected,
-                false
-            );
+            if (!this._terminalSession.complete) {
+                this._writeTerminalResult(
+                    this._terminalSession.token,
+                    this._terminalSession.captured,
+                    this._terminalSession.expected,
+                    false
+                );
+            }
             this._terminalSession = null;
         }
     }
@@ -149,26 +151,34 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
         switch (action) {
         case 'status':
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
             this._writeTerminalResult(token, status.managed.length, status.managed.length, true);
             return;
 
         case 'open': {
             const missing = Math.max(0, target - status.managed.length);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
             if (missing === 0) {
                 this._writeTerminalResult(token, 0, 0, true);
                 this._terminalSession = null;
                 return;
             }
 
+            const existingSequences = new Set(
+                this._allTerminalWindows()
+                    .map(window => this._stableSequence(window))
+                    .filter(sequence => sequence > 0)
+            );
             this._terminalSession = {
                 token,
                 target,
                 expected: missing,
                 captured: 0,
-                sequences: new Set(status.managed.map(window => this._stableSequence(window))),
-                expiresAt: nowSeconds() + Math.max(45, missing * 3),
+                complete: false,
+                managedSequences: status.managed.map(window => this._stableSequence(window)),
+                overflowSequences: status.overflow.map(window => this._stableSequence(window)),
+                seenSequences: existingSequences,
+                expiresAt: nowSeconds() + Math.max(45, missing * 5),
             };
             this._writeTerminalResult(token, 0, missing, false);
             return;
@@ -176,7 +186,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
         case 'reconcile': {
             const missing = Math.max(0, target - status.managed.length);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
             if (missing > 0) {
                 this._writeTerminalResult(token, status.managed.length, target, false);
                 return;
@@ -184,37 +194,33 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
             const assignments = this._terminalAssignments(status.managed, target);
             for (const [workspaceIndex, window] of assignments)
-                this._schedulePlacement(window, workspaceIndex, monitor, 10);
+                this._scheduleTerminalPlacement(window, workspaceIndex, monitor, 12);
+
+            // Fecha apenas excedentes comprovadamente criados pelo lote. Terminais
+            // manuais não gerenciados continuam preservados.
+            this._closeTerminalWindows(status.overflow);
+            this._writeTerminalBatch(
+                assignments.map(([, window]) => this._stableSequence(window)),
+                []
+            );
             this._writeTerminalResult(token, assignments.length, target, assignments.length === target);
             return;
         }
 
         case 'reset': {
-            const targets = new Set(status.managed);
+            const targets = new Set([...status.managed, ...status.overflow]);
             for (const window of this._projectTerminalWindows(target))
                 targets.add(window);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
             this._writeTerminalResult(token, targets.size, targets.size, true);
             this._removeFile(TERMINALS_BATCH_PATH);
             this._terminalSession = null;
-
-            GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-                const timestamp = global.get_current_time();
-                for (const window of targets) {
-                    try {
-                        if (window.can_close?.() !== false)
-                            window.delete(timestamp);
-                    } catch (error) {
-                        console.error(`[workspace-controller] falha ao fechar terminal: ${error}`);
-                    }
-                }
-                return GLib.SOURCE_REMOVE;
-            });
+            this._closeTerminalWindows([...targets]);
             return;
         }
 
         default:
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, monitor);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
             this._writeTerminalResult(token, 0, target, false);
         }
     }
@@ -227,23 +233,35 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
         const now = nowSeconds();
         const terminalSession = this._terminalSession;
-        if (terminalSession && now <= terminalSession.expiresAt && terminalSession.captured < terminalSession.expected && this._isTerminal(window)) {
+        if (terminalSession && now <= terminalSession.expiresAt && this._isTerminal(window)) {
             const sequence = this._stableSequence(window);
-            if (sequence && !terminalSession.sequences.has(sequence)) {
-                terminalSession.sequences.add(sequence);
-                terminalSession.captured += 1;
+            if (sequence && !terminalSession.seenSequences.has(sequence)) {
+                terminalSession.seenSequences.add(sequence);
                 this._handledWindows.add(window);
-                this._scheduleUnmaximize(window, 8);
-                this._writeManagedTerminalSequences([...terminalSession.sequences]);
-                const complete = terminalSession.captured === terminalSession.expected;
+
+                if (terminalSession.captured < terminalSession.expected) {
+                    terminalSession.managedSequences.push(sequence);
+                    terminalSession.captured += 1;
+                } else {
+                    // Ptyxis pode criar mais de uma janela durante uma inicialização
+                    // concorrente. O excedente fica marcado para fechamento seguro na
+                    // próxima fase, em vez de ser deixado espalhado pelos workspaces.
+                    terminalSession.overflowSequences.push(sequence);
+                }
+
+                this._writeTerminalBatch(
+                    terminalSession.managedSequences,
+                    terminalSession.overflowSequences
+                );
+                terminalSession.complete = terminalSession.captured >= terminalSession.expected;
                 this._writeTerminalResult(
                     terminalSession.token,
                     terminalSession.captured,
                     terminalSession.expected,
-                    complete
+                    terminalSession.complete
                 );
-                if (complete)
-                    terminalSession.expiresAt = now + 3;
+                if (terminalSession.complete)
+                    terminalSession.expiresAt = now + 4;
                 return;
             }
         }
@@ -281,21 +299,36 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
     _terminalStatus(target) {
         const allTerminals = this._allTerminalWindows();
         const bySequence = new Map(allTerminals.map(window => [this._stableSequence(window), window]));
-        const remembered = this._readManagedTerminalSequences();
+        const batch = this._readTerminalBatch();
         const managed = [];
+        const overflow = [];
         const managedSet = new Set();
+        const overflowSet = new Set();
 
-        for (const sequence of remembered) {
+        for (const sequence of batch.managed) {
             const window = bySequence.get(sequence);
-            if (!window || managed.length >= target)
+            if (!window)
                 continue;
-            managed.push(window);
-            managedSet.add(sequence);
+            if (managed.length < target) {
+                managed.push(window);
+                managedSet.add(sequence);
+            } else if (!overflowSet.has(sequence)) {
+                overflow.push(window);
+                overflowSet.add(sequence);
+            }
+        }
+        for (const sequence of batch.overflow) {
+            const window = bySequence.get(sequence);
+            if (!window || managedSet.has(sequence) || overflowSet.has(sequence))
+                continue;
+            overflow.push(window);
+            overflowSet.add(sequence);
         }
 
-        // Adota no máximo um terminal já existente por workspace de projeto.
-        // Isso evita duplicar o terminal de onde o comando foi executado e ajuda
-        // a recuperar sessões antigas sem capturar vários terminais do mesmo projeto.
+        // Reaproveita no máximo um terminal já existente em cada workspace de
+        // projeto. Assim o próprio terminal de onde o comando foi executado pode
+        // servir ao projeto, mas uma pilha de janelas no mesmo workspace não é
+        // confundida com um lote saudável.
         if (managed.length < target) {
             const occupied = new Set();
             for (const window of managed) {
@@ -305,7 +338,10 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             }
 
             const candidates = this._projectTerminalWindows(target)
-                .filter(window => !managedSet.has(this._stableSequence(window)))
+                .filter(window => {
+                    const sequence = this._stableSequence(window);
+                    return !managedSet.has(sequence) && !overflowSet.has(sequence);
+                })
                 .sort((a, b) => this._stableSequence(a) - this._stableSequence(b));
             for (const window of candidates) {
                 if (managed.length >= target)
@@ -320,10 +356,16 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             }
         }
 
-        this._writeManagedTerminalSequences(managed.map(window => this._stableSequence(window)));
+        this._writeTerminalBatch(
+            managed.map(window => this._stableSequence(window)),
+            overflow.map(window => this._stableSequence(window))
+        );
         const untracked = this._projectTerminalWindows(target)
-            .filter(window => !managedSet.has(this._stableSequence(window))).length;
-        return {managed, untracked};
+            .filter(window => {
+                const sequence = this._stableSequence(window);
+                return !managedSet.has(sequence) && !overflowSet.has(sequence);
+            }).length;
+        return {managed, overflow, untracked};
     }
 
     _terminalAssignments(managed, target) {
@@ -407,29 +449,53 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         this._timeouts.add(id);
     }
 
-    _scheduleUnmaximize(window, roundsLeft) {
-        const normalize = () => {
+    _scheduleTerminalPlacement(window, workspaceIndex, monitor, roundsLeft) {
+        const place = () => {
             if (!window)
                 return;
             try {
-                if ((window.get_maximize_flags?.() ?? 0) !== 0)
-                    window.unmaximize(Meta.MaximizeFlags.BOTH);
+                const workspace = window.get_workspace?.();
+                if (!workspace || workspace.index() !== workspaceIndex)
+                    window.change_workspace_by_index(workspaceIndex, false);
+                if (window.get_monitor?.() !== monitor)
+                    window.move_to_monitor(monitor);
+                // GNOME/Mutter 49+ usa maximize() sem MaximizeFlags, igual ao
+                // controlador estável do pycharms neste mesmo projeto.
+                if (!window.is_maximized?.())
+                    window.maximize();
             } catch (error) {
-                console.error(`[workspace-controller] falha ao normalizar terminal: ${error}`);
+                console.error(`[workspace-controller] falha ao posicionar/maximizar terminal: ${error}`);
             }
         };
 
-        normalize();
+        place();
         if (roundsLeft <= 0)
             return;
         const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 180, () => {
             this._timeouts.delete(id);
-            normalize();
+            place();
             if (roundsLeft > 1)
-                this._scheduleUnmaximize(window, roundsLeft - 1);
+                this._scheduleTerminalPlacement(window, workspaceIndex, monitor, roundsLeft - 1);
             return GLib.SOURCE_REMOVE;
         });
         this._timeouts.add(id);
+    }
+
+    _closeTerminalWindows(windows) {
+        if (!windows || windows.length === 0)
+            return;
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            const timestamp = global.get_current_time();
+            for (const window of windows) {
+                try {
+                    if (window?.can_close?.() !== false)
+                        window.delete(timestamp);
+                } catch (error) {
+                    console.error(`[workspace-controller] falha ao fechar terminal excedente: ${error}`);
+                }
+            }
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _windowIdentity(window) {
@@ -503,13 +569,13 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _writeTerminalReady(token, action, target, managed, untracked, monitor) {
+    _writeTerminalReady(token, action, target, managed, untracked, overflow, monitor) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             const missing = Math.max(0, target - managed);
             GLib.file_set_contents(
                 TERMINALS_READY_PATH,
-                `${token}\taction=${action}\tcount=${target}\tmanaged=${managed}\tmissing=${missing}\tuntracked=${untracked}\tfirst_workspace=2\tmonitor=${monitor}\n`
+                `${token}\taction=${action}\tcount=${target}\tmanaged=${managed}\tmissing=${missing}\tuntracked=${untracked}\toverflow=${overflow}\tfirst_workspace=2\tmonitor=${monitor}\n`
             );
         } catch (error) {
             console.error(`[workspace-controller] falha ao preparar terminals: ${error}`);
@@ -559,31 +625,55 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _readManagedTerminalSequences() {
+    _readTerminalBatch() {
         const shell = this._shellProcessId();
         try {
             const [ok, bytes] = GLib.file_get_contents(TERMINALS_BATCH_PATH);
             if (!ok)
-                return [];
+                return {managed: [], overflow: []};
             const lines = new TextDecoder('utf-8').decode(bytes).split(/\n/);
             if ((lines.shift() || '').trim() !== `shell=${shell}`) {
-                this._ensureTerminalBatchSession();
-                return [];
+                this._removeFile(TERMINALS_BATCH_PATH);
+                return {managed: [], overflow: []};
             }
-            return lines
-                .map(value => Number(value.trim()))
-                .filter(value => Number.isInteger(value) && value > 0);
+
+            const managed = [];
+            const overflow = [];
+            for (const raw of lines) {
+                const line = raw.trim();
+                if (!line)
+                    continue;
+                if (/^managed=\d+$/.test(line)) {
+                    managed.push(Number(line.slice('managed='.length)));
+                } else if (/^overflow=\d+$/.test(line)) {
+                    overflow.push(Number(line.slice('overflow='.length)));
+                } else if (/^\d+$/.test(line)) {
+                    // Compatibilidade com o formato v9: números puros eram
+                    // sequências gerenciadas.
+                    managed.push(Number(line));
+                }
+            }
+            return {
+                managed: [...new Set(managed.filter(value => Number.isInteger(value) && value > 0))],
+                overflow: [...new Set(overflow.filter(value => Number.isInteger(value) && value > 0))],
+            };
         } catch (_) {
-            return [];
+            return {managed: [], overflow: []};
         }
     }
 
-    _writeManagedTerminalSequences(sequences) {
+    _writeTerminalBatch(managedSequences, overflowSequences) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
-            const unique = [...new Set(sequences.filter(value => Number.isInteger(value) && value > 0))];
+            const managed = [...new Set(managedSequences.filter(value => Number.isInteger(value) && value > 0))];
+            const overflow = [...new Set(overflowSequences.filter(value => Number.isInteger(value) && value > 0))]
+                .filter(value => !managed.includes(value));
             const shell = this._shellProcessId();
-            const body = unique.length ? `${unique.join('\n')}\n` : '';
+            const rows = [
+                ...managed.map(value => `managed=${value}`),
+                ...overflow.map(value => `overflow=${value}`),
+            ];
+            const body = rows.length ? `${rows.join('\n')}\n` : '';
             GLib.file_set_contents(TERMINALS_BATCH_PATH, `shell=${shell}\n${body}`);
         } catch (error) {
             console.error(`[workspace-controller] falha ao persistir lote de terminals: ${error}`);

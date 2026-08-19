@@ -172,6 +172,28 @@ dev-manager desktops
 
 A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-manager.projects`. Desktops extras existentes não são removidos automaticamente.
 
+### `terminals`
+
+No Ubuntu/GNOME/Wayland, abre um terminal por projeto configurado. O workspace
+1 (`LAZER`) e os dois últimos (`lrdp1`/`lrdp2`) ficam fora.
+
+O fluxo é deliberadamente dividido em duas chamadas para não disputar com o
+startup assíncrono do terminal:
+
+```bash
+terminals   # 1ª chamada: abre somente o que falta, uma janela por vez
+terminals   # 2ª chamada: move para o monitor direito e maximiza
+```
+
+Cada nova janela só é solicitada depois que o controlador GNOME confirma a
+anterior. Repetições posteriores apenas reconciliam posição e maximização, sem
+criar outro lote. Para fechar o lote e limpar terminais extras dos workspaces de
+projeto:
+
+```bash
+terminals --reset
+```
+
 ### `chromes`
 
 Abre duas janelas do Chrome:
