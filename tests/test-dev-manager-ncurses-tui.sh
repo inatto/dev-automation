@@ -15,7 +15,7 @@ command -v script >/dev/null 2>&1 || {
 cat > "$TMP/fake-manager.sh" <<'FAKE'
 #!/usr/bin/env bash
 echo 'Auto Code Manager - ncurses-smoke'
-echo 'Downloads: /tmp'
+echo 'ZIP_DIR: /tmp'
 echo 'Modo: light'
 echo 'IDLE leve: aguardando alterações'
 sleep 1.5
@@ -52,9 +52,7 @@ assert b"DAY / BASIC" in b, "tema BASIC não foi desenhado"
 assert b"DARK / MATRIX" in b, "atalho T não alternou para MATRIX"
 assert theme == "matrix", "tema selecionado não foi persistido"
 assert "F2/T: tema" in source, "atalho de tema não está documentado no rodapé"
-assert "WORKER TO:" in source, "TUI não mostra worker TO"
-assert "WORKER FROM:" in source, "TUI não mostra worker FROM"
-assert "ZIPs FROM:" in source, "TUI ainda não usa worker/from"
+assert "ZIPs CODE:" in source, "TUI não mostra ZIPs locais em Code"
 assert 'self.metric_text("CPU"' in source, "TUI não mostra barra de CPU"
 assert 'self.metric_text("RAM"' in source, "TUI não mostra barra de RAM"
 assert 'self.metric_text("DISK"' in source, "TUI não mostra barra de disco"

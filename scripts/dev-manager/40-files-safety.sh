@@ -1,36 +1,17 @@
 #!/usr/bin/env bash
-# Contexto: worker/to, worker/from, estabilidade, arquivos de configuração e segurança
+# Contexto: saída local dos ZIPs, estabilidade, arquivos de configuração e segurança
 
-worker_to_dir() {
-  local configured="${WORKER_TO_DIR:-}"
-  if [ -n "$configured" ]; then
-    printf '%s\n' "$configured"
-    return
-  fi
-  printf '%s\n' "${HOME}/worker/to"
+archive_output_dir() {
+  printf '%s\n' "$CODE_ROOT"
 }
 
-worker_from_dir() {
-  local configured="${WORKER_FROM_DIR:-}"
-  if [ -n "$configured" ]; then
-    printf '%s\n' "$configured"
-    return
-  fi
-  printf '%s\n' "${HOME}/worker/from"
-}
-
-ensure_worker_dirs() {
-  local to from
-  to="$(worker_to_dir)"
-  from="$(worker_from_dir)"
-  if [ -z "$to" ] || [ -z "$from" ]; then
-    echo "ERRO: caminhos worker/to e worker/from não puderam ser determinados." >&2
+ensure_archive_output_dir() {
+  local output_dir
+  output_dir="$(archive_output_dir)"
+  if [ -z "$output_dir" ] || [ ! -d "$output_dir" ]; then
+    echo "ERRO: pasta de saída dos ZIPs não existe: ${output_dir:-<vazio>}" >&2
     return 1
   fi
-  mkdir -p -- "$to" "$from" || {
-    echo "ERRO: não foi possível preparar worker/to e worker/from." >&2
-    return 1
-  }
 }
 
 stable_file() {

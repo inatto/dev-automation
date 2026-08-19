@@ -243,14 +243,8 @@ light_refresh_if_config_changed() {
   return 0
 }
 
-light_process_downloads_and_sql() {
-  local downloads folder
-
-  downloads="$(worker_from_dir)"
-  if configured_worker_from_zip_exists; then
-    run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado no monitor leve; ignora todos os demais ZIPs de worker/from." \
-      import_worker_from || true
-  fi
+light_process_sql() {
+  local folder
 
   while IFS= read -r folder || [ -n "$folder" ]; do
     [ -n "$folder" ] || continue
@@ -267,7 +261,7 @@ light_scan_cycle() {
   local plan_changed=false
 
   light_refresh_if_config_changed || return 1
-  light_process_downloads_and_sql
+  light_process_sql
 
   scan_file="$(mktemp "$STATE_DIR/light-scan-XXXXXX")" || return 1
   if ! light_scan_states > "$scan_file"; then
@@ -313,7 +307,7 @@ light_scan_cycle() {
 }
 
 start_change_monitor() {
-  case "${AUTO_CODE_MONITOR_MODE:-light}" in
+  case "${AUTO_CODE_MONITOR_MODE:-inotify}" in
     light)
       initialize_light_monitor
       ;;

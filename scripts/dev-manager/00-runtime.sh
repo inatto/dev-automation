@@ -12,15 +12,14 @@ STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-auto
 PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
-RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
-# Monitor leve por metadados: não consome nenhuma instância inotify.
-# A cada poucos segundos verifica somente metadados dos projetos configurados,
-# podando .gitignore/ignore-zip e sem abrir conteúdo de arquivo.
+# Backup local direto em /home/daniel/Code. O modo padrão é inotify para
+# reagir imediatamente a alterações reais do filesystem; BACKUP_EVERY mantém
+# apenas 1 segundo de debounce para agrupar a gravação atômica do editor.
 BACKUP_EVERY=1
 LIGHT_SCAN_INTERVAL=2
-AUTO_CODE_MONITOR_MODE="${AUTO_CODE_MONITOR_MODE:-light}"
+AUTO_CODE_MONITOR_MODE="${AUTO_CODE_MONITOR_MODE:-inotify}"
 STABLE_WAIT=1
 BEEP_REPEATS=2
 BEEP_GAP_MS=220
@@ -81,7 +80,6 @@ TUI_INOTIFY_MAX_WATCHES=0
 TUI_MANAGER_FDS=0
 TUI_MANAGER_FD_LIMIT=0
 TUI_PROJECT_COUNT=0
-TUI_DOWNLOAD_ZIPS=0
 TUI_LOG_FILE="$STATE_DIR/dev-manager.log"
 
 

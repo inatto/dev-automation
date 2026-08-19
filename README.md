@@ -15,60 +15,14 @@ chromes
 phpstorms
 phpstorm-dev
 local-nginx
-worker-sync
 orbital-app
 station-app
 inst-app
 ```
 
-### `worker-sync`
-
-Gerencia o canal Google Drive do worker com direção fixa:
-
-```text
-/home/daniel/worker/to -> danielmaiax:worker/to
-danielmaiax:worker/from -> /home/daniel/worker/from
-```
-
-`to` somente sobe por evento local (`inotifywait`). `from` somente baixa, verificado a cada 10 segundos.
-
-```bash
-worker-sync restart
-worker-sync status
-worker-sync test
-worker-sync logs
-worker-sync stop
-```
-
-O `restart` para units antigos, reinstala os units mantidos dentro deste repositório e inicia a configuração nova.
-
 ### `auto-code-manager`
 
-Monitora a pasta Downloads e associa cada ZIP ao projeto pelo começo do nome. Todos os ZIPs encontrados no início da rodada são capturados em um único lote e importados em sequência antes de o ciclo seguir para limpeza, backup ou espera.
-Além dos formatos comuns, aceita sufixos gerados ou codificados pelo navegador:
-
-```text
-dev-automation.zip
-dev-automation(15).zip
-dev-automation%23232-3434.zip
-dev-automation#revisado.zip
-```
-
-O primeiro caractere depois do nome do projeto precisa ser um separador não
-alfanumérico. Assim, `dev-automation2.zip` não é confundido com
-`dev-automation.zip`.
-
-Para testar somente o reconhecimento, sem importar o arquivo:
-
-```bash
-auto-code-manager --identify-zip 'dev-automation%23232-3434.zip'
-```
-
-Resultado esperado:
-
-```text
-bots/dev-automation
-```
+ZIPs locais: cada projeto normal configurado é monitorado por `inotify`; após 1 segundo de silêncio, somente o projeto alterado é compactado diretamente em `/home/daniel/Code/<projeto>.zip`. Não há upload/download nem Google Drive.
 
 #### Projetos e agregadores explícitos
 
@@ -102,9 +56,7 @@ Code.zip                       -> Code.zip
 O agregador contém somente os ZIPs configurados abaixo daquela pasta. Se houver
 um agregador mais específico, ele representa o ramo inteiro e evita duplicação.
 Por exemplo, com `orgs/orbital.zip` ativo, um `Code.zip` também ativo inclui
-`orbital.zip`, e não repete todos os `orbital-*.zip` dentro dele. Se a linha
-`orgs/orbital.zip` não existir, `orbital.zip` não é criado nem reconhecido na
-importação. O mesmo vale para `Code.zip` e `apps.zip`.
+`orbital.zip`, e não repete todos os `orbital-*.zip` dentro dele. Se a linha `orgs/orbital.zip` não existir, `orbital.zip` não é gerado. O mesmo vale para `Code.zip` e `apps.zip`.
 
 Para conferir exatamente os alvos ativos:
 
@@ -130,18 +82,6 @@ Para desativar, altere `BACKUP_BEEP_ENABLED`. O caminho pode ser configurado
 em `BACKUP_WINDOWS_WAVE_FILE`; o volume segue o volume geral do Windows.
 `BACKUP_BEEP_VOLUME` é usado somente pelo WAV de fallback.
 
-Para testar/importar diretamente um único ZIP sem iniciar o monitor contínuo:
-
-```bash
-auto-code-manager --import-one '/caminho/orbital.zip'
-```
-
-Para executar uma única rodada completa sobre todos os ZIPs presentes em Downloads:
-
-```bash
-auto-code-manager --import-downloads-once
-```
-
 
 ### `dev-status`
 
@@ -154,7 +94,7 @@ dev-status unzip
 dev-status done
 ```
 
-Sem o executável, o `auto-code-manager` continua funcionando normalmente; o indicador é observabilidade e nunca bloqueia backup/importação.
+Sem o executável, o `auto-code-manager` continua funcionando normalmente; o indicador é observabilidade e nunca bloqueia backup.
 
 Ao executar `dev-manager`, se `apps/dev-status/bin/dev-status.exe` ainda não existir, o build C++ é tentado automaticamente uma única vez. Depois de gerado, os próximos starts reutilizam o executável existente.
 
@@ -367,6 +307,6 @@ auto-code-manager --sql-zip-once
 
 ## Chave lógica global de projeto
 
-O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de importar ou gerar backups quando encontra duplicidade.
+O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
-Subprojetos cadastrados usam nome qualificado apenas no backup automático. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`. Na importação, tanto `exec-agent.zip`/`exec-agent-incremental.zip` quanto `dev-automation--exec-agent.zip` resolvem para o mesmo projeto `exec-agent`.
+Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.

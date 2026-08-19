@@ -44,16 +44,15 @@ append_nonrecursive_watch_root() {
   [ -d "$root" ] || return 0
   printf '%s\n' "$root" >> "$WATCH_LIST"
 
-  # O watcher principal usa -r. Para worker/from e pastas SQL que não pertencem
-  # a um projeto, excluímos os subdiretórios para manter o watch efetivamente
-  # não recursivo e barato.
+  # O watcher principal usa -r. Para pastas SQL que não pertencem a um
+  # projeto, excluímos subdiretórios para manter o watch não recursivo e barato.
   while IFS= read -r -d '' child; do
     printf '@%s\n' "$child" >> "$WATCH_LIST"
   done < <(find "$root" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 }
 
 start_backup_watcher() {
-  local exclude_regex root excluded downloads sql_folder bootstrap_fd read_fd
+  local exclude_regex root excluded sql_folder bootstrap_fd read_fd
   local watched_aux=0
   local -a roots=()
   local -a command=()
@@ -86,15 +85,6 @@ start_backup_watcher() {
       printf '@%s\n' "$excluded" >> "$WATCH_LIST"
     done < <(watch_excluded_directories "$root")
   done
-
-  # worker/from: entra no MESMO fluxo de eventos. Se estiver fora dos projetos,
-  # é observado somente no primeiro nível (onde o navegador grava os ZIPs).
-  downloads="$(worker_from_dir)"
-  if [ -n "$downloads" ] && [ -d "$downloads" ] && ! path_is_covered_by_roots "$downloads" "${roots[@]}"; then
-    append_nonrecursive_watch_root "$downloads"
-    roots+=("$downloads")
-    watched_aux=$((watched_aux + 1))
-  fi
 
   # Pastas SQL: normalmente já estão dentro de projetos. Só adiciona um root
   # auxiliar quando a pasta configurada estiver fora de todos eles.
@@ -151,16 +141,6 @@ event_has() {
 event_finished_write() {
   local events="$1"
   event_has "$events" CLOSE_WRITE || event_has "$events" MOVED_TO
-}
-
-path_is_worker_from_zip() {
-  local event_path="$1"
-  local downloads
-  downloads="$(worker_from_dir)"
-  [ -n "$downloads" ] || return 1
-  path_is_within_absolute "$event_path" "$downloads" || return 1
-  [ "$(dirname -- "$event_path")" = "$downloads" ] || return 1
-  [[ "${event_path,,}" == *.zip ]]
 }
 
 sql_folder_for_event() {
@@ -220,22 +200,6 @@ handle_watch_event() {
     elif [ "$event_path" = "$FOLDER_SQL_ZIP_FILE" ]; then
       WATCH_RELOAD_REQUESTED=true
     fi
-  fi
-
-  # ZIP novo em worker/from: importa diretamente pelo evento de gravação/rename.
-  # CLOSE_WRITE/MOVED_TO já garantem que o produtor fechou o arquivo; a própria
-  # importação ainda valida o ZIP antes de tocar no projeto.
-  if event_finished_write "$events" && path_is_worker_from_zip "$event_path" && [ -f "$event_path" ]; then
-    # worker/from pode conter qualquer porcaria que o usuário baixou. Só o nome
-    # resolvido por project_for_zip(), portanto cadastrado no .projects, entra
-    # no pipeline do manager. Os demais ZIPs são ignorados silenciosamente.
-    if worker_from_zip_is_configured "$event_path"; then
-      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo." \
-        import_one_zip "$event_path" true; then
-        archive_worker_from_zip "$event_path" FAILED || true
-      fi
-    fi
-    return 0
   fi
 
   # SQL novo: compacta somente a pasta que recebeu o arquivo.

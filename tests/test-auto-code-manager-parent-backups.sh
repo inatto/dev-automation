@@ -109,7 +109,7 @@ FAKE_PS_LOG="$SOUND_LOG" \
 CODE_ROOT="$CODE_ROOT" \
   "$MANAGER" --backup-once >"$LOG_FILE"
 
-sound_count="$(grep -Fc 'System.Media.SoundPlayer' "$SOUND_LOG" || true)"
+sound_count="$(grep -Fc 'ding.wav' "$SOUND_LOG" || true)"
 if [ "$sound_count" -ne 0 ]; then
   printf 'FALHOU: a rodada de backup não deveria tocar som, mas tocou %s vez(es).\n' "$sound_count" >&2
   cat "$SOUND_LOG" >&2 || true
@@ -202,12 +202,6 @@ fi
 code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
 [ "$code_entries" = $'inst-app.zip\norbital.zip' ] || {
   printf 'FALHOU: Code.zip deve representar o ramo orbital uma única vez:\n%s\n' "$code_entries" >&2
-  exit 1
-}
-
-identified="$(CODE_ROOT="$CODE_ROOT" "$MANAGER" --identify-zip orbital.zip)"
-[ "$identified" = 'orgs/orbital.zip' ] || {
-  printf 'FALHOU: orbital.zip identificado como %s\n' "$identified" >&2
   exit 1
 }
 

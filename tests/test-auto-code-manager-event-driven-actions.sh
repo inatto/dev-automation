@@ -6,7 +6,6 @@ TEMP="$(mktemp -d /tmp/auto-code-event-actions-XXXXXX)"
 TEST_PROJECT="$TEMP/manager"
 CODE_ROOT="$TEMP/Code"
 TEST_HOME="$TEMP/home"
-DOWNLOADS="$TEST_HOME/Downloads"
 PROJECT_DIR="$CODE_ROOT/orgs/alpha-app"
 SQL_DIR="$PROJECT_DIR/exports/ddl"
 LOG="$TEMP/manager.log"
@@ -27,7 +26,7 @@ command -v inotifywait >/dev/null 2>&1 || {
 }
 
 cp -a -- "$ROOT" "$TEST_PROJECT"
-mkdir -p "$DOWNLOADS" "$SQL_DIR"
+mkdir -p "$SQL_DIR"
 printf 'old\n' > "$PROJECT_DIR/value.txt"
 
 cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
@@ -75,36 +74,12 @@ wait_until() {
   exit 1
 }
 
-file_contains_new() { grep -Fxq 'new-from-download' "$PROJECT_DIR/value.txt" 2>/dev/null; }
-download_gone() { [ ! -e "$DOWNLOADS/alpha-app.zip" ]; }
 sql_gone() { [ ! -e "$SQL_DIR/event.sql" ]; }
 sql_zip_exists() { find "$SQL_DIR" -maxdepth 1 -type f -name '????????-????.zip' -print -quit | grep -q .; }
 zone_present() { [ -e "$PROJECT_DIR/test.txt:Zone.Identifier" ]; }
 
 wait_until 'baseline alpha.zip' test -s "$CODE_ROOT/alpha-app.zip"
 wait_until 'watcher event-driven ativo' grep -Fq 'IDLE event-driven' "$LOG"
-grep -Fq "Downloads:     $DOWNLOADS" "$LOG" || {
-  printf 'FALHOU: Downloads canônico WSL não foi usado\n' >&2
-  cat "$LOG" >&2
-  exit 1
-}
-if grep -Fq '/mnt/c/Users/' "$LOG"; then
-  printf 'FALHOU: houve fallback indevido para Downloads do Windows\n' >&2
-  cat "$LOG" >&2
-  exit 1
-fi
-
-# DOWNLOAD: move atômico para Downloads gera MOVED_TO e deve importar só esse ZIP.
-pkg="$TEMP/pkg"
-mkdir -p "$pkg"
-printf 'new-from-download\n' > "$pkg/value.txt"
-(
-  cd "$pkg"
-  zip -q "$TEMP/alpha-app.zip" value.txt
-)
-mv "$TEMP/alpha-app.zip" "$DOWNLOADS/alpha-app.zip"
-wait_until 'ZIP de Downloads importado' file_contains_new
-wait_until 'ZIP de Downloads removido após confirmação' download_gone
 
 # SQL: evento na pasta configurada compacta somente essa pasta e remove o SQL.
 printf 'select 1 from dual;\n' > "$TEMP/event.sql"
@@ -117,24 +92,16 @@ printf 'zone\n' > "$PROJECT_DIR/test.txt:Zone.Identifier"
 wait_until 'Zone.Identifier preservado no Linux nativo' zone_present
 
 # Em idle não deve haver nova rodada de scan.
-download_scans_before="$(grep -Fc 'Verificando Downloads:' "$LOG" || true)"
 zone_scans_before="$(grep -Fc 'Limpando Zone.Identifier em' "$LOG" || true)"
 sleep 3
-download_scans_after="$(grep -Fc 'Verificando Downloads:' "$LOG" || true)"
 zone_scans_after="$(grep -Fc 'Limpando Zone.Identifier em' "$LOG" || true)"
-[ "$download_scans_after" = "$download_scans_before" ] || {
-  printf 'FALHOU: Downloads voltou a ser varrido em idle\n' >&2
-  cat "$LOG" >&2
-  exit 1
-}
 [ "$zone_scans_after" = "$zone_scans_before" ] || {
   printf 'FALHOU: Zone.Identifier voltou a ser varrido em idle\n' >&2
   cat "$LOG" >&2
   exit 1
 }
 
-grep -Fq 'ZIP cadastrado no .projects detectado pelo filesystem; importa somente este arquivo.' "$LOG"
 grep -Fq 'SQL detectado pelo filesystem; compacta somente a pasta afetada.' "$LOG"
-grep -Fq 'nenhuma varredura periódica de projetos, Downloads ou SQL' "$LOG"
+grep -Fq 'mudanças geram ZIP local do projeto' "$LOG"
 
-printf 'OK: Downloads/SQL/backup são event-driven; Linux nativo ignora Zone.Identifier\n'
+printf 'OK: backup local e SQL são event-driven; Linux nativo ignora Zone.Identifier\n'

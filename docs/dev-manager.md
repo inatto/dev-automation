@@ -73,8 +73,8 @@ O ícone do `Dev Automation` na bandeja do Windows também aceita botão direito
 - `Despausar dev-manager`: retoma o mesmo processo, sem reiniciar o monitor.
 
 Enquanto estiver efetivamente pausado, o ícone mostra `P` e o status `Pausado`.
-O controle é cooperativo para nunca interromper no meio uma gravação/importação
-ou substituição de ZIP.
+O controle é cooperativo para nunca interromper no meio uma gravação ou
+substituição de ZIP.
 
 Quando toda a rodada de backups configurados termina com sucesso, o monitor pode
 tocar `C:\\Windows\\Media\\ding.wav` uma única vez. `Code.zip` só participa
@@ -83,7 +83,7 @@ da rodada quando estiver explicitamente listado em `auto-code-manager.projects`.
 ## Projetos e agregadores explícitos
 
 O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
-`/home/daniel/Code` e é a única fonte da verdade para backup/importação.
+`/home/daniel/Code` e é a única fonte da verdade para backup.
 
 - `bots/dev-automation` é um projeto e gera `dev-automation.zip`;
 - `bots/dev-automation/apps/exec-agent` é outro projeto e gera `dev-automation--exec-agent.zip`;
@@ -94,7 +94,8 @@ O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
 - `Code.zip` habilita opcionalmente o agregador geral.
 
 Nenhum agregador é inferido. Ao remover/comentar uma entrada `.zip`, aquele ZIP
-deixa de ser gerenciado e é removido na limpeza de backups. Agregadores contêm
+deixa de ser atualizado. Como a saída é a própria pasta `Code`, ZIPs antigos ou
+manuais nunca são apagados automaticamente. Agregadores contêm
 somente ZIPs de alvos configurados abaixo da pasta e um agregador mais específico
 substitui seus descendentes no agregador acima, evitando duplicação.
 
@@ -108,7 +109,7 @@ existe mais backup completo periódico por relógio.
 Cada evento é atribuído ao projeto normal mais específico. Assim, uma alteração
 em `bots/dev-automation/apps/exec-agent` marca somente `exec-agent`; o pai
 `dev-automation` não é recompactado porque o subprojeto cadastrado já é excluído
-do ZIP do pai. Após `BACKUP_EVERY` segundos sem novas alterações (20s na
+do ZIP do pai. Após `BACKUP_EVERY` segundos sem novas alterações (1s na
 configuração atual), o manager compacta apenas os projetos marcados e os
 agregadores explícitos que dependem deles.
 
@@ -118,26 +119,13 @@ uso de memória/watches e impedindo que atividade de dependências dispare backu
 Novos diretórios ignorados criados durante a execução fazem o watcher se
 reconfigurar e podar a nova subárvore.
 
-`Zone.Identifier` é removido por evento dentro dos projetos monitorados. A
-varredura completa de segurança continua existindo, mas agora é rara
-(`ZONE_EVERY=300`) em vez de percorrer `/home/daniel/Code` a cada poucos
-segundos.
+Em Linux nativo, `Zone.Identifier` não recebe tratamento especial. A compatibilidade
+para esse sidecar continua restrita ao WSL.
 
 Dependência no Ubuntu/WSL:
 
 ```bash
 sudo apt-get install -y inotify-tools
-```
-
-## Lote de Downloads
-
-Em cada ciclo, todos os arquivos `.zip` já presentes em Downloads são capturados
-numa lista única. O monitor mostra `LOTE [1/N]`, processa do primeiro ao último e
-só depois segue para limpeza de `Zone.Identifier`, backups e espera do próximo
-ciclo. Para testar uma rodada sem deixar o monitor contínuo aberto:
-
-```bash
-auto-code-manager --import-downloads-once
 ```
 
 ## Cores dos ciclos
@@ -146,7 +134,6 @@ Quando a saída está em um terminal compatível, cada contexto do ciclo usa uma
 cor fixa para facilitar a leitura:
 
 - ciclo completo: ciano;
-- Downloads/importação: azul;
 - SQL para ZIP: magenta;
 - limpeza de `Zone.Identifier`: amarelo;
 - backups configurados: verde;
@@ -167,6 +154,6 @@ No ícone do Dev Automation, use o botão direito e escolha `Desativar som` ou `
 
 ## Chave lógica global de projeto
 
-O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de importar ou gerar backups quando encontra duplicidade.
+O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
-Subprojetos cadastrados usam nome qualificado apenas no backup automático. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`. Na importação, tanto `exec-agent.zip`/`exec-agent-incremental.zip` quanto `dev-automation--exec-agent.zip` resolvem para o mesmo projeto `exec-agent`.
+Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.

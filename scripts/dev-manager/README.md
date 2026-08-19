@@ -8,15 +8,11 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `10-tui-legacy.sh`: fallback ANSI da TUI
 - `20-status-logging.sh`: logs/status/lock/pausa
 - `30-sounds.sh`: sons
-- `40-files-safety.sh`: worker/from e segurança
+- `40-files-safety.sh`: saída local dos ZIPs e segurança
 - `50-project-registry.sh`: catálogo de projetos/agregadores
-- `60-project-runtime.sh`: identificação e restart sinalizado
-- `70-imports.sh`: importação de ZIPs
 - `80-backup-filters.sh`: filtros rsync
 - `90-sql-zip.sh`: ZIPs SQL
 - `100-protected-config.sh`: config protegida/baselines
-- `110-removal-markers.sh`: `.remover`
-- `120-external-merge.sh`: `.external`
 - `130-backups.sh`: geração de backups
 - `140-light-monitor.sh`: monitor leve
 - `150-inotify-plan.sh`: plano de watches
