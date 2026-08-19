@@ -133,4 +133,3 @@ make_project_rsync_filter() {
   # Os próprios arquivos de configuração devem continuar no backup, salvo se
   # alguma regra explícita disser o contrário.
 }
-

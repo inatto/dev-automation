@@ -174,13 +174,18 @@ import_one_zip() {
     "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
 
+  # Config protegido nunca entra no rsync direto. Primeiro é reconciliado em
+  # staging: ********/*** recupera o valor real local; valores não secretos podem mudar.
   {
+    echo "- /config/local/***"
     echo "- **/config/local/***"
+    echo "- /config/remote/***"
     echo "- **/config/remote/***"
+    echo "- /config/production/***"
     echo "- **/config/production/***"
   } >> "$unzip_filter_file"
 
-  log "Protegendo no unzip: */config/local/**, */config/remote/** e */config/production/**"
+  log "Protegendo no unzip: config/local, config/remote e config/production entram somente por merge seguro."
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
     log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
@@ -188,9 +193,11 @@ import_one_zip() {
     return 1
   fi
 
-  # Configs local/remote/production são simplesmente preservados no destino.
-  # O manager NÃO cria .external, NÃO materializa par e NÃO faz merge secreto.
-  # Se um config precisar mudar, isso deve vir por ação explícita fora do watcher.
+  if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
+    log "ERRO: merge seguro dos configs protegidos falhou. Projeto não recebeu o staging; ZIP mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+    return 1
+  fi
 
   removal_count="$(find "$filtered_dir" -type f -name '*.remover' -printf '.' 2>/dev/null | wc -c)"
   if ! prepare_removal_markers "$filtered_dir" "$project_dir" "$removal_manifest"; then

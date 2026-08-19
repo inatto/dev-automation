@@ -5,6 +5,7 @@ backup_project() {
   local project="$1"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
   local child child_name child_zip child_count
+  local sanitize_result sanitized_files sanitized_values redacted_files
   local -a children=()
 
   project_dir="$(project_path "$project")"
@@ -61,7 +62,6 @@ backup_project() {
       "auto-code-manager.ignore-zip" \
       "$filter_file"
     append_registered_subproject_excludes "$project" "$filter_file"
-
     # .remover é instrução transitória recebida em ZIP. Nunca volta para o
     # backup/cache do projeto, mesmo que uma regra específica tente incluí-la.
     {
@@ -76,7 +76,22 @@ backup_project() {
       return 1
     fi
 
+    # Sanitiza SOMENTE a cópia temporária. O projeto real nunca recebe *****.
+    if ! sanitize_result="$(sanitize_backup_config_passwords "$temp_dir")"; then
+      log "ERRO ao sanitizar segredos dos configs no backup: $project"
+      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+      return 1
+    fi
+    IFS=: read -r sanitized_files sanitized_values redacted_files <<< "$sanitize_result"
+    if [ "${sanitized_values:-0}" -gt 0 ] || [ "${redacted_files:-0}" -gt 0 ]; then
+      log "CONFIGS NO ZIP: ${sanitized_values:-0} segredo(s) mascarado(s); ${redacted_files:-0} arquivo(s) protegido(s) totalmente redigido(s); original intocado."
+    fi
 
+    if ! save_protected_config_baseline "$project" "$temp_dir"; then
+      log "ERRO ao salvar referência sanitizada dos configs protegidos: $project"
+      rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
+      return 1
+    fi
   fi
 
   if ! (cd "$temp_dir" && zip -qry "$temp_zip" .); then

@@ -295,8 +295,8 @@ nem observado automaticamente pelo `dev-manager`.
 O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
 Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
-### Git-crypt no dev-manager (v41)
 
+### Git-crypt no dev-manager
 
 O dev-manager não cria nem altera regras de atributos Git. Para projetos com pastas config reconhecidas, a única ação automática é tentar:
 
@@ -305,3 +305,16 @@ git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key
 ```
 
 Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração. Se o unlock falhar, apenas registra o erro e as pastas config encontradas.
+
+## ZIP seguro de configs (v43)
+
+- `config/local`, `config/remote` e `config/production` entram no ZIP para conferência.
+- A cópia temporária mascara senhas/tokens/chaves como `********`; o projeto original não é alterado.
+- Na importação, `***` ou mais asteriscos significam **preservar o valor real local**.
+- Chaves sensíveis (`PASSWORD`, `TOKEN`, `SECRET`, `API_KEY` etc.) **sempre preservam o valor local**, mesmo se o ZIP retornar outro valor em texto puro. O ZIP/chat nunca é fonte de segredo.
+- Valores não secretos alterados no ZIP podem ser aplicados. Chaves existentes apenas localmente são preservadas.
+- Se um config novo vier com segredo mascarado e não houver valor local para recuperar, a importação falha e o ZIP permanece em Downloads.
+- Arquivos de formato não reconciliável dentro dessas pastas são enviados como `********` inteiro e nunca sobrescrevem o arquivo local.
+- Nenhum `.external` é persistido no projeto.
+- `.env`/`.env.*` fora das pastas de config continuam fora do fluxo por padrão.
+- Git-crypt continua somente com `git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key`; não cria `.gitattributes`.

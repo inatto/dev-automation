@@ -34,7 +34,9 @@ DEV_MANAGER_MODULES=(
   70-imports.sh
   80-backup-filters.sh
   90-sql-zip.sh
+  100-protected-config.sh
   110-removal-markers.sh
+  120-protected-config-merge.sh
   130-backups.sh
   140-light-monitor.sh
   150-inotify-plan.sh

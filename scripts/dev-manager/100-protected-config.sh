@@ -1,5 +1,24 @@
 #!/usr/bin/env bash
-# Contexto: sanitização e baseline de configurações protegidas
+# Contexto: configs protegidas enviados ao chat com segredos mascarados.
+# NUNCA altera o projeto original durante o backup: trabalha somente na cópia temporária.
+
+protected_config_relpath() {
+  case "$1" in
+    config/local/*|config/remote/*|config/production/*|*/config/local/*|*/config/remote/*|*/config/production/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+mergeable_protected_config_relpath() {
+  local rel="$1" name suffix
+  protected_config_relpath "$rel" || return 1
+  name="${rel##*/}"
+  name="${name,,}"
+  case "$name" in
+    env|.env|config|settings|.env.*|*.env|*.ini|*.conf|*.cfg|*.properties) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 sanitize_backup_config_passwords() {
   local backup_dir="$1"
@@ -11,8 +30,6 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 placeholder = "********"
-config_extensions = {".env", ".ini", ".conf", ".cfg", ".properties"}
-config_names = {"env", ".env", "config", "settings"}
 secret_key = re.compile(
     r"(?:^|_)(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)(?:$|_)",
     re.IGNORECASE,
@@ -23,22 +40,34 @@ assignment = re.compile(
 url_credentials = re.compile(
     r"(?P<prefix>\b[A-Za-z][A-Za-z0-9+.-]*://[^\s:/@]+:)(?P<password>[^\s@]*)(?P<suffix>@)"
 )
+pem_private = re.compile(
+    r"-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
+    re.IGNORECASE | re.DOTALL,
+)
 changed_files = 0
 changed_values = 0
+fully_redacted = 0
 
 
-def is_config_file(path: Path) -> bool:
-    parts = path.relative_to(root).parts
-    if not any(part.lower() == "config" for part in parts[:-1]):
-        return False
+def rel_parts(path: Path):
+    return path.relative_to(root).parts
 
+
+def protected(path: Path) -> bool:
+    parts = rel_parts(path)
+    for i in range(len(parts) - 2):
+        if parts[i].lower() == "config" and parts[i + 1].lower() in {"local", "remote", "production"}:
+            return True
+    return False
+
+
+def mergeable(path: Path) -> bool:
     name = path.name.lower()
-    suffix = path.suffix.lower()
     return (
-        suffix in config_extensions
-        or name in config_names
+        name in {"env", ".env", "config", "settings"}
         or name.startswith(".env.")
         or name.endswith(".env")
+        or path.suffix.lower() in {".ini", ".conf", ".cfg", ".properties"}
     )
 
 
@@ -46,27 +75,31 @@ def mask_value(value: str) -> str:
     stripped = value.strip()
     if not stripped:
         return value
-
     leading = value[: len(value) - len(value.lstrip())]
     trailing = value[len(value.rstrip()) :]
     core = stripped
-
     comment = ""
     comment_match = re.match(r"^(.*?)(\s+[;#][^\r\n]*)$", core)
     if comment_match:
         core, comment = comment_match.groups()
         core = core.rstrip()
-
     if len(core) >= 2 and core[0] == core[-1] and core[0] in {"'", '"'}:
         masked = f"{core[0]}{placeholder}{core[-1]}"
     else:
         masked = placeholder
-
     return f"{leading}{masked}{comment}{trailing}"
 
 
 for path in root.rglob("*"):
-    if not path.is_file() or not is_config_file(path):
+    if not path.is_file() or not protected(path):
+        continue
+
+    # Formato que não sabemos reconciliar com segurança: mantém o caminho no
+    # ZIP, mas nunca envia o conteúdo. Na volta ele também nunca sobrescreve o local.
+    if not mergeable(path):
+        path.write_text(placeholder + "\n", encoding="utf-8")
+        changed_files += 1
+        fully_redacted += 1
         continue
 
     try:
@@ -75,24 +108,50 @@ for path in root.rglob("*"):
         continue
 
     if b"\x00" in raw:
+        path.write_text(placeholder + "\n", encoding="utf-8")
+        changed_files += 1
+        fully_redacted += 1
         continue
 
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
+        path.write_text(placeholder + "\n", encoding="utf-8")
+        changed_files += 1
+        fully_redacted += 1
         continue
 
-    output = []
-    file_changed = False
+    # Chaves privadas PEM não podem vazar mesmo se estiverem em valor multilinha.
+    text, pem_count = pem_private.subn(placeholder, text)
+    if pem_count:
+        changed_values += pem_count
 
-    for line in text.splitlines(keepends=True):
+    output = []
+    file_changed = pem_count > 0
+    lines = text.splitlines(keepends=True)
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         match = assignment.match(line)
         if not match:
             output.append(line)
+            i += 1
             continue
 
         key = match.group("key")
         value = match.group("value")
+
+        # Valor secreto multilinha entre aspas: é mais seguro redigir o arquivo
+        # inteiro do que tentar adivinhar onde termina o segredo.
+        stripped = value.strip()
+        if secret_key.search(key) and stripped[:1] in {"'", '"'}:
+            quote = stripped[0]
+            if not (len(stripped) >= 2 and stripped.endswith(quote)):
+                path.write_text(placeholder + "\n", encoding="utf-8")
+                changed_files += 1
+                fully_redacted += 1
+                output = None
+                break
 
         if secret_key.search(key):
             new_value = mask_value(value)
@@ -107,20 +166,16 @@ for path in root.rglob("*"):
             changed_values += 1
 
         output.append(f"{match.group('prefix')}{new_value}{match.group('ending')}")
+        i += 1
 
+    if output is None:
+        continue
     if file_changed:
         path.write_text("".join(output), encoding="utf-8", newline="")
         changed_files += 1
 
-print(f"{changed_files}:{changed_values}")
+print(f"{changed_files}:{changed_values}:{fully_redacted}")
 PY_SANITIZE
-}
-
-protected_config_relpath() {
-  case "$1" in
-    */config/local/*|*/config/remote/*|*/config/production/*) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 protected_config_baseline_dir() {
@@ -145,16 +200,6 @@ save_protected_config_baseline() {
   done < <(find "$sanitized_root" -type f -printf '%P\0')
 }
 
-canonical_external_relpath() {
-  local rel="$1"
-
-  while [[ "$rel" == *.external ]]; do
-    rel="${rel%.external}"
-  done
-
-  printf '%s.external\n' "$rel"
-}
-
 valid_import_relative_path() {
   local rel="$1"
   case "$rel" in
@@ -162,4 +207,3 @@ valid_import_relative_path() {
     *) return 0 ;;
   esac
 }
-
