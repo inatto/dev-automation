@@ -1,10 +1,1 @@
-.dev-automation-workspace-corner {
-    font-size: 14px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.92);
-    background-color: rgba(16, 18, 23, 0.78);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 9px;
-    padding: 6px 10px;
-    box-shadow: 0 3px 12px 0 rgba(0, 0, 0, 0.28);
-}
+/* v5: sem UI própria. O workspace é exibido somente pela taskbar/painel do GNOME. */

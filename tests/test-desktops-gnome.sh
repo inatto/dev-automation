@@ -22,9 +22,10 @@ case "${1:-}" in
   info) exit 0 ;;
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
-    cat > "$HOME/.local/state/dev-automation/desktops/ui.ready" <<'READY'
-version=4
-corner=1
+    cat > "$HOME/.local/state/dev-automation/desktops/extension.ready" <<'READY'
+version=5
+controller=1
+floating-label=0
 READY
     exit 0
     ;;
@@ -38,10 +39,9 @@ grep -Fq 'org.gnome.mutter dynamic-workspaces false' "$GSETTINGS_LOG"
 grep -Fq 'org.gnome.desktop.wm.preferences num-workspaces 5' "$GSETTINGS_LOG"
 grep -Fq "workspace-names ['LAZER', 'dev-automation', 'orbital-app', 'lrdp1', 'lrdp2']" "$GSETTINGS_LOG"
 test -f "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/extension.js"
-grep -q "active-workspace-changed" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "dev-automation-workspace-corner" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "getWorkAreaForMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -q "corner=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "dev-automation-workspace-corner" "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -q "getWorkAreaForMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -q "floating-label=0" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "PanelMenu.Button" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "Main.panel.addToStatusArea" "$ROOT/apps/desktops-gnome-extension/extension.js"
 ! grep -q "Main.overview.connect" "$ROOT/apps/desktops-gnome-extension/extension.js"
@@ -49,5 +49,5 @@ grep -q "corner=1" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'UI de workspaces confirmada pelo GNOME: indicador único no canto inferior direito ativo.' "$TMP/out"
-echo 'OK: GNOME usa workspaces fixos nomeados, indicador único no canto inferior direito e fechamento preservando LAZER.'
+grep -Fq 'Extensão GNOME confirmada: sem indicador flutuante; nome do workspace permanece somente na taskbar.' "$TMP/out"
+echo 'OK: GNOME usa workspaces fixos nomeados, sem indicador flutuante, e fechamento preservando LAZER.'

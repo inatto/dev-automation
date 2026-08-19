@@ -17,7 +17,7 @@ printf 'GNOME Shell 50.1\n'
 FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
-# Simula enable aceito pelo CLI, mas extensão quebrada sem ui.ready.
+# Simula enable aceito pelo CLI, mas extensão quebrada sem extension.ready.
 exit 0
 FAKE
 chmod +x "$TMP/bin/"*
@@ -26,5 +26,5 @@ out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" DESKTOPS_PLATFORM=gnome PROJECTS_F
 rc=$?
 set -e
 [[ "$rc" -ne 0 ]]
-grep -Fq 'não confirmou o indicador único no canto inferior direito' <<<"$out"
-echo 'OK: desktops falha explicitamente se o GNOME não confirmar a UI visual.'
+grep -Fq 'não confirmou o modo sem indicador flutuante' <<<"$out"
+echo 'OK: desktops falha explicitamente se o GNOME não confirmar o controlador sem UI própria.'

@@ -7,15 +7,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
 DESKTOPS_PLATFORM="${DESKTOPS_PLATFORM:-auto}"
-GNOME_OSD_UUID='workspace-name-osd@dev-automation'
-GNOME_OSD_SOURCE="$PROJECT_ROOT/apps/desktops-gnome-extension"
-GNOME_OSD_TARGET="$HOME/.local/share/gnome-shell/extensions/$GNOME_OSD_UUID"
+GNOME_EXTENSION_UUID='workspace-name-osd@dev-automation'
+GNOME_EXTENSION_SOURCE="$PROJECT_ROOT/apps/desktops-gnome-extension"
+GNOME_EXTENSION_TARGET="$HOME/.local/share/gnome-shell/extensions/$GNOME_EXTENSION_UUID"
 STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 DESKTOPS_STATE_DIR="$STATE_ROOT/desktops"
 DESKTOPS_CLOSE_REQUEST="$DESKTOPS_STATE_DIR/close.request"
 DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
 DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
-DESKTOPS_UI_READY="$DESKTOPS_STATE_DIR/ui.ready"
+DESKTOPS_EXTENSION_READY="$DESKTOPS_STATE_DIR/extension.ready"
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
@@ -52,8 +52,8 @@ show_list() {
 
 request_gnome_close() {
   command -v gnome-extensions >/dev/null 2>&1 || fail 'gnome-extensions não encontrado'
-  install_gnome_osd
-  gnome-extensions info "$GNOME_OSD_UUID" >/dev/null 2>&1 || \
+  install_gnome_extension
+  gnome-extensions info "$GNOME_EXTENSION_UUID" >/dev/null 2>&1 || \
     fail 'extensão GNOME de workspaces ainda não registrada; faça logout/login uma vez e rode desktops --close novamente.'
 
   mkdir -p "$DESKTOPS_STATE_DIR"
@@ -95,8 +95,8 @@ Uso:
   desktops          Sincroniza os workspaces e seus nomes
 
 Ubuntu/GNOME:
-  usa quantidade fixa de workspaces, nomeia todos e instala uma extensão que mostra
-  somente o nome atual no canto inferior direito do monitor principal.
+  usa quantidade fixa de workspaces, nomeia todos e mantém uma extensão de controle
+  sem UI própria. O nome do workspace fica somente na taskbar/painel já configurado.
   lrdp1 e lrdp2 ficam sempre por último.
 
 WSL/Windows:
@@ -118,48 +118,49 @@ shell_major() {
   printf '%s\n' "$version"
 }
 
-install_gnome_osd() {
-  command -v gnome-extensions >/dev/null 2>&1 || fail 'gnome-extensions não encontrado; não é possível garantir os nomes visuais.'
-  [[ -f "$GNOME_OSD_SOURCE/extension.js" ]] || fail "extensão visual ausente: $GNOME_OSD_SOURCE"
+install_gnome_extension() {
+  command -v gnome-extensions >/dev/null 2>&1 || fail 'gnome-extensions não encontrado; não é possível ativar o controlador de workspaces.'
+  [[ -f "$GNOME_EXTENSION_SOURCE/extension.js" ]] || fail "extensão GNOME ausente: $GNOME_EXTENSION_SOURCE"
 
-  mkdir -p "$GNOME_OSD_TARGET"
-  cp -f "$GNOME_OSD_SOURCE/extension.js" "$GNOME_OSD_TARGET/extension.js"
-  cp -f "$GNOME_OSD_SOURCE/stylesheet.css" "$GNOME_OSD_TARGET/stylesheet.css"
+  mkdir -p "$GNOME_EXTENSION_TARGET"
+  cp -f "$GNOME_EXTENSION_SOURCE/extension.js" "$GNOME_EXTENSION_TARGET/extension.js"
+  cp -f "$GNOME_EXTENSION_SOURCE/stylesheet.css" "$GNOME_EXTENSION_TARGET/stylesheet.css"
 
   local major
   major="$(shell_major)"
-  cat > "$GNOME_OSD_TARGET/metadata.json" <<JSON
+  cat > "$GNOME_EXTENSION_TARGET/metadata.json" <<JSON
 {
-  "uuid": "$GNOME_OSD_UUID",
-  "name": "Dev Automation Workspace Names",
-  "description": "Mostra somente o workspace atual, de forma discreta, no canto inferior direito do monitor principal.",
+  "uuid": "$GNOME_EXTENSION_UUID",
+  "name": "Dev Automation Workspace Controller",
+  "description": "Mantém o suporte ao desktops --close sem criar indicador visual duplicado; o nome do workspace fica somente na taskbar.",
   "shell-version": ["$major"],
-  "version": 4
+  "version": 5
 }
 JSON
 
-  if gnome-extensions info "$GNOME_OSD_UUID" >/dev/null 2>&1; then
+  if gnome-extensions info "$GNOME_EXTENSION_UUID" >/dev/null 2>&1; then
     mkdir -p "$DESKTOPS_STATE_DIR"
-    rm -f -- "$DESKTOPS_UI_READY"
-    gnome-extensions disable "$GNOME_OSD_UUID" >/dev/null 2>&1 || true
-    gnome-extensions enable "$GNOME_OSD_UUID" >/dev/null 2>&1 || \
-      fail 'GNOME recusou habilitar a extensão visual de workspaces.'
+    rm -f -- "$DESKTOPS_EXTENSION_READY" "$DESKTOPS_STATE_DIR/ui.ready"
+    gnome-extensions disable "$GNOME_EXTENSION_UUID" >/dev/null 2>&1 || true
+    gnome-extensions enable "$GNOME_EXTENSION_UUID" >/dev/null 2>&1 || \
+      fail 'GNOME recusou habilitar a extensão de controle dos workspaces.'
 
     local attempt ready=""
     for ((attempt=0; attempt<50; attempt++)); do
-      if [[ -s "$DESKTOPS_UI_READY" ]]; then
-        ready="$(cat "$DESKTOPS_UI_READY" 2>/dev/null || true)"
-        if grep -Fqx 'version=4' <<<"$ready" && \
-           grep -Fqx 'corner=1' <<<"$ready"; then
-          log 'UI de workspaces confirmada pelo GNOME: indicador único no canto inferior direito ativo.'
+      if [[ -s "$DESKTOPS_EXTENSION_READY" ]]; then
+        ready="$(cat "$DESKTOPS_EXTENSION_READY" 2>/dev/null || true)"
+        if grep -Fqx 'version=5' <<<"$ready" && \
+           grep -Fqx 'controller=1' <<<"$ready" && \
+           grep -Fqx 'floating-label=0' <<<"$ready"; then
+          log 'Extensão GNOME confirmada: sem indicador flutuante; nome do workspace permanece somente na taskbar.'
           return 0
         fi
       fi
       sleep 0.1
     done
-    fail 'a extensão foi habilitada, mas não confirmou o indicador único no canto inferior direito; veja journalctl --user -b | grep workspace-name-osd.'
+    fail 'a extensão foi habilitada, mas não confirmou o modo sem indicador flutuante; veja journalctl --user -b | grep workspace-name-osd.'
   else
-    fail 'extensão visual instalada, mas o GNOME Shell ainda não a registrou; faça logout/login uma vez e rode desktops novamente.'
+    fail 'extensão GNOME instalada, mas o Shell ainda não a registrou; faça logout/login uma vez e rode desktops novamente.'
   fi
 }
 
@@ -184,7 +185,7 @@ sync_gnome() {
   gsettings set org.gnome.mutter dynamic-workspaces false
   gsettings set org.gnome.desktop.wm.preferences num-workspaces "$required_count"
   gsettings set org.gnome.desktop.wm.preferences workspace-names "$names_variant"
-  install_gnome_osd
+  install_gnome_extension
 
   log "GNOME sincronizado: $required_count workspaces fixos; lrdp1 e lrdp2 são os dois últimos."
   show_list
