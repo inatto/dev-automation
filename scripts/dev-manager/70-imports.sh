@@ -45,13 +45,13 @@ import_one_zip() {
     return 1
   fi
   if ! validate_zip_entries_safe "$zip_file"; then
-    log "ERRO: ZIP contém caminho/symlink/tipo inseguro. O ZIP foi mantido."
+    log "ERRO: ZIP contém caminho/tipo inseguro. O ZIP foi mantido."
     rm -rf -- "$temp_dir"
     return 1
   fi
 
-  log "Extraindo ZIP para a pasta temporária..."
-  if ! unzip -oq -- "$zip_file" -d "$temp_dir"; then
+  log "Extraindo ZIP para a pasta temporária; symlinks do ZIP serão ignorados..."
+  if ! extract_zip_without_symlinks "$zip_file" "$temp_dir"; then
     log "ERRO: falha ao extrair. O ZIP foi mantido."
     rm -rf -- "$temp_dir"
     return 1
@@ -192,6 +192,10 @@ import_one_zip() {
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
+
+  # Se o destino local já possui symlink, esse caminho pertence à máquina.
+  # Nada vindo do ZIP pode substituí-lo, atravessá-lo ou recriá-lo.
+  preserve_destination_symlinks_from_staging "$project_dir" "$filtered_dir"
 
   if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
     log "ERRO: merge seguro dos configs protegidos falhou. Projeto não recebeu o staging; ZIP mantido."

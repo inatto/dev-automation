@@ -76,6 +76,11 @@ backup_project() {
       return 1
     fi
 
+    # Symlink é estado do filesystem local, não conteúdo portátil do projeto.
+    # O rsync -a copia o próprio link sem segui-lo; removemos somente da cópia
+    # temporária antes de gerar o ZIP. O projeto original permanece intocado.
+    find "$temp_dir" -type l -delete
+
     # Sanitiza SOMENTE a cópia temporária. O projeto real nunca recebe *****.
     if ! sanitize_result="$(sanitize_backup_config_passwords "$temp_dir")"; then
       log "ERRO ao sanitizar segredos dos configs no backup: $project"

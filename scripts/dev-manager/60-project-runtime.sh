@@ -152,8 +152,6 @@ from pathlib import PurePosixPath
 path = sys.argv[1]
 try:
     with zipfile.ZipFile(path) as zf:
-        entries = []
-        symlink_paths = set()
         for info in zf.infolist():
             name = info.filename
             if not name or "\x00" in name:
@@ -166,21 +164,73 @@ try:
                 raise ValueError(f"travessia de diretório: {name}")
             mode = (info.external_attr >> 16) & 0xFFFF
             kind = stat.S_IFMT(mode)
-            if kind not in (0, stat.S_IFREG, stat.S_IFDIR, stat.S_IFLNK):
-                raise ValueError(f"tipo especial recusado: {name}")
-            clean = PurePosixPath(normalized.rstrip("/"))
-            entries.append((name, clean, kind))
+            # Symlink é aceito apenas como entrada ignorável. A extração segura
+            # abaixo nunca o materializa nem segue o alvo.
             if kind == stat.S_IFLNK:
-                symlink_paths.add(clean)
-
-        # Symlink como dado de backup é legítimo. O que não pode acontecer é o
-        # ZIP usar esse symlink como diretório e depois gravar algo através dele.
-        for name, clean, _kind in entries:
-            for parent in clean.parents:
-                if parent in symlink_paths:
-                    raise ValueError(f"entrada atravessa symlink: {name}")
+                continue
+            if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                raise ValueError(f"tipo especial recusado: {name}")
 except Exception as exc:
     print(f"ZIP inseguro: {exc}", file=sys.stderr)
     raise SystemExit(1)
 PY_ZIP_SAFE
+}
+
+
+extract_zip_without_symlinks() {
+  local zip_file="$1" destination="$2"
+  python3 - "$zip_file" "$destination" <<'PY_ZIP_EXTRACT'
+import os
+import re
+import stat
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
+
+archive = sys.argv[1]
+root = Path(sys.argv[2]).resolve()
+
+with zipfile.ZipFile(archive) as zf:
+    for info in zf.infolist():
+        name = info.filename
+        if not name or "\x00" in name:
+            raise SystemExit(f"entrada ZIP inválida: {name!r}")
+        normalized = name.replace("\\", "/")
+        if normalized.startswith(("/", "//")) or re.match(r"^[A-Za-z]:/", normalized):
+            raise SystemExit(f"caminho absoluto recusado: {name}")
+        parts = PurePosixPath(normalized).parts
+        if any(part == ".." for part in parts):
+            raise SystemExit(f"travessia recusada: {name}")
+
+        mode = (info.external_attr >> 16) & 0xFFFF
+        kind = stat.S_IFMT(mode)
+        if kind == stat.S_IFLNK:
+            continue
+        if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+            raise SystemExit(f"tipo especial recusado: {name}")
+
+        target = root.joinpath(*parts)
+        resolved_parent = target.parent.resolve()
+        if root != resolved_parent and root not in resolved_parent.parents:
+            raise SystemExit(f"destino fora da extração: {name}")
+
+        if info.is_dir() or kind == stat.S_IFDIR:
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as src, open(target, "wb") as dst:
+            while True:
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                dst.write(chunk)
+PY_ZIP_EXTRACT
+}
+
+preserve_destination_symlinks_from_staging() {
+  local project_dir="$1" staging_dir="$2" rel
+  while IFS= read -r -d '' rel; do
+    rm -rf -- "$staging_dir/$rel"
+  done < <(find "$project_dir" -type l -printf '%P\0' 2>/dev/null)
 }
