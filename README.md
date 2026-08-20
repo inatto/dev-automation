@@ -136,7 +136,8 @@ ao gateway Nginx local:
 
 ```bash
 local-nginx            # gera, instala, valida e recarrega o Nginx
-local-nginx --validate # somente valida os arquivos de configuração
+local-nginx test       # valida os arquivos de configuração
+local-nginx --validate # alias explícito da validação
 local-nginx --render   # mostra a configuração gerada sem instalar
 ```
 

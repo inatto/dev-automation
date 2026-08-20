@@ -447,7 +447,7 @@ case "${1:-}" in
   --render)
     generate_config
     ;;
-  --validate)
+  test|--validate)
     validate_services
     validate_static_locations
     log 'services.csv e static-locations.csv válidos'
@@ -456,6 +456,6 @@ case "${1:-}" in
     install_config
     ;;
   *)
-    fail "uso: $(basename "$0") [--install|--validate|--render]"
+    fail "uso: $(basename "$0") [--install|test|--validate|--render]"
     ;;
 esac

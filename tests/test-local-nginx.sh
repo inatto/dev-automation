@@ -29,29 +29,28 @@ expect_fail() {
 }
 
 "$SCRIPT" --validate >/dev/null
+"$SCRIPT" test >/dev/null
 config_one="$TEMP_ROOT/one.conf"
 config_two="$TEMP_ROOT/two.conf"
 "$SCRIPT" --render > "$config_one"
 "$SCRIPT" --render > "$config_two"
 cmp -s "$config_one" "$config_two" || fail 'render repetido não é idempotente'
 
-# Hosts base: codinomes locais e nomes próprios.
-grep -Fq 'server_name admin.localhost;' "$config_one" || fail 'admin.localhost ausente'
-grep -Fq 'server_name painel.localhost;' "$config_one" || fail 'painel.localhost ausente'
-grep -Fq 'server_name anpprev.localhost;' "$config_one" || fail 'anpprev.localhost ausente'
-grep -Fq 'server_name sinproprev.localhost;' "$config_one" || fail 'sinproprev.localhost ausente'
+# Cada host cadastrado deve gerar exatamente um gateway HTTP + HTTPS.
+host_count="$(awk -F';' 'NR > 1 && !seen[$5]++ {count++} END {print count+0}' "$SERVICES")"
+while IFS= read -r host; do
+  grep -Fq "server_name $host;" "$config_one" || fail "$host ausente"
+done < <(awk -F';' 'NR > 1 && !seen[$5]++ {print $5}' "$SERVICES")
 ! grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'alias tecnico site-inst.localhost permaneceu publico'
-grep -Fq 'server_name conv-app.localhost;' "$config_one" || fail 'conv-app.localhost ausente'
-grep -Fq 'server_name monitor.amazon-infra.localhost;' "$config_one" || fail 'monitor.amazon-infra.localhost ausente'
-[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
-[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
-[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
-[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq 6 ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
-[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq 6 ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
-[[ "$(grep -c '^    location = /api {$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve normalizar /api para /api/'
-[[ "$(grep -c '^        return 308 /api/;$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve preservar o redirect /api do remoto'
-[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq 6 ]] || fail 'cada gateway HTTPS deve usar certificado'
-[[ "$(grep -c '^    location / {$' "$config_one")" -eq 6 ]] || fail 'cada app-base deve ter exatamente um location /'
+[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
+[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
+[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
+[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
+[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
+[[ "$(grep -c '^    location = /api {$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve normalizar /api para /api/'
+[[ "$(grep -c '^        return 308 /api/;$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve preservar o redirect /api do remoto'
+[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway HTTPS deve usar certificado'
+[[ "$(grep -c '^    location / {$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve ter exatamente um location /'
 
 # Orbital é o foco do admin.localhost.
 admin_block="$TEMP_ROOT/admin.conf"
@@ -73,15 +72,18 @@ module_count="$(awk -F';' 'NR > 1 && $2 == "module" {count++} END {print count+0
 generated_module_count="$(grep -Ec '^    location /orbital-[^/]+/ \{$' "$admin_block")"
 [[ "$generated_module_count" -eq "$module_count" ]] || fail 'nem todos os módulos Orbital foram gerados automaticamente'
 
-for module_name in orbital-assets orbital-content orbital-crm orbital-events orbital-fin orbital-mail orbital-marketing orbital-reports orbital-ui orbital-vouchers orbital-legal; do
+while IFS= read -r module_name; do
   grep -Fq "location /$module_name/ {" "$admin_block" || fail "módulo ausente: $module_name"
-done
+done < <(awk -F';' 'NR > 1 && $2 == "module" {print $1}' "$SERVICES")
 
-# Demais apps-base usam host próprio; tenants compartilham as portas do inst-app.
+# Demais apps-base usam host próprio; publicação estática é associada por aplicação.
 painel_block="$TEMP_ROOT/painel.conf"
 awk '/server_name painel\.localhost;/{count++; if (count == 2) on=1} on{print} on && /^}$/{exit}' "$config_one" > "$painel_block"
 grep -Fq '127.0.0.1:4002' "$painel_block" || fail 'painel não usa station-app 4002'
 grep -Fq '127.0.0.1:8002/' "$painel_block" || fail 'painel não usa API station-app 8002'
+grep -Fq 'location ^~ /tenants/ {' "$painel_block" || fail 'painel não publica /tenants/'
+grep -Fq 'alias /home/daniel/storage/tenants/;' "$painel_block" || fail 'painel usa storage de tenants incorreto'
+! grep -Fq 'location ^~ /storage/' "$painel_block" || fail 'painel não deve criar rota /storage/'
 for tenant in anpprev sinproprev; do
   site_block="$TEMP_ROOT/$tenant.conf"
   awk -v target="$tenant.localhost" '
@@ -97,6 +99,7 @@ for tenant in anpprev sinproprev; do
   grep -Fq 'alias /home/daniel/storage/static/inst-app/;' "$site_block" || fail "$tenant usa storage estático incorreto"
 done
 grep -Fxq 'site-inst;/tenants/;/home/daniel/storage/tenants/' "$STATIC_LOCATIONS"
+grep -Fxq 'station-app;/tenants/;/home/daniel/storage/tenants/' "$STATIC_LOCATIONS"
 grep -Fxq 'site-inst;/static/inst-app/;/home/daniel/storage/static/inst-app/' "$STATIC_LOCATIONS"
 
 # O gerador não conhece módulos ou apps individualmente.
@@ -106,11 +109,11 @@ fi
 
 custom_csv="$TEMP_ROOT/custom.csv"
 cp "$SERVICES" "$custom_csv"
-printf 'orbital-new;module;4112;8112;admin.localhost;/orbital-new\n' >> "$custom_csv"
+printf 'orbital-new;module;4199;8199;admin.localhost;/orbital-new\n' >> "$custom_csv"
 custom_config="$TEMP_ROOT/custom.conf"
 SERVICES_FILE="$custom_csv" "$SCRIPT" --render > "$custom_config"
-grep -Fq 'proxy_pass http://127.0.0.1:4112;' "$custom_config" || fail 'novo módulo do CSV não foi gerado'
-grep -Fq 'proxy_pass http://127.0.0.1:8112/api/;' "$custom_config" || fail 'API de novo módulo do CSV não foi gerada'
+grep -Fq 'proxy_pass http://127.0.0.1:4199;' "$custom_config" || fail 'novo módulo do CSV não foi gerado'
+grep -Fq 'proxy_pass http://127.0.0.1:8199/api/;' "$custom_config" || fail 'API de novo módulo do CSV não foi gerada'
 
 custom_base_csv="$TEMP_ROOT/custom-base.csv"
 cp "$SERVICES" "$custom_base_csv"

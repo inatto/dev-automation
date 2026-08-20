@@ -152,6 +152,8 @@ from pathlib import PurePosixPath
 path = sys.argv[1]
 try:
     with zipfile.ZipFile(path) as zf:
+        entries = []
+        symlink_paths = set()
         for info in zf.infolist():
             name = info.filename
             if not name or "\x00" in name:
@@ -164,10 +166,19 @@ try:
                 raise ValueError(f"travessia de diretório: {name}")
             mode = (info.external_attr >> 16) & 0xFFFF
             kind = stat.S_IFMT(mode)
-            if kind == stat.S_IFLNK:
-                raise ValueError(f"symlink recusado: {name}")
-            if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+            if kind not in (0, stat.S_IFREG, stat.S_IFDIR, stat.S_IFLNK):
                 raise ValueError(f"tipo especial recusado: {name}")
+            clean = PurePosixPath(normalized.rstrip("/"))
+            entries.append((name, clean, kind))
+            if kind == stat.S_IFLNK:
+                symlink_paths.add(clean)
+
+        # Symlink como dado de backup é legítimo. O que não pode acontecer é o
+        # ZIP usar esse symlink como diretório e depois gravar algo através dele.
+        for name, clean, _kind in entries:
+            for parent in clean.parents:
+                if parent in symlink_paths:
+                    raise ValueError(f"entrada atravessa symlink: {name}")
 except Exception as exc:
     print(f"ZIP inseguro: {exc}", file=sys.stderr)
     raise SystemExit(1)
