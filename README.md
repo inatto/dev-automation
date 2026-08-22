@@ -347,13 +347,15 @@ Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exem
 
 ### Git-crypt no dev-manager
 
-O dev-manager não cria nem altera regras de atributos Git. Para projetos com pastas config reconhecidas, a única ação automática é tentar:
+O dev-manager **não executa git-crypt automaticamente**. Não verifica, não desbloqueia e não cria regras de criptografia ao iniciar nem durante backups. O `dev-automation` também não mantém regra ampla `config/**` em `.gitattributes`.
+
+Quando necessário, o unlock continua disponível somente por ação manual explícita:
 
 ```bash
-git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key
+dev-manager git-crypt
 ```
 
-Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração. Se o unlock falhar, apenas registra o erro e as pastas config encontradas.
+Esse comando manual usa a chave padrão `/home/daniel/static/git-reverse-crypt-2.key` e apenas tenta `git-crypt unlock`. Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração.
 
 ## ZIP seguro de configs (v43)
 
@@ -366,4 +368,4 @@ Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.
 - Arquivos de formato não reconciliável dentro dessas pastas são enviados como `********` inteiro e nunca sobrescrevem o arquivo local.
 - Nenhum `.external` é persistido no projeto.
 - `.env`/`.env.*` fora das pastas de config continuam fora do fluxo por padrão.
-- Git-crypt continua somente com `git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key`; não cria `.gitattributes`.
+- Git-crypt não roda automaticamente; quando necessário, use `dev-manager git-crypt` de forma explícita.

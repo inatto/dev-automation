@@ -17,11 +17,8 @@ backup_project() {
     return 1
   fi
 
-  if ! target_is_aggregate "$project"; then
-    # Antes do backup: apenas garante git-crypt desbloqueado com a chave padrão.
-    # Não cria/edita atributos Git nem altera o índice.
-    gitcrypt_guard_project "$project" || true
-  fi
+  # Git-crypt é estritamente manual; backup não verifica nem desbloqueia
+  # repositórios automaticamente.
 
   taskbar_status backup "$archive_name"
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"

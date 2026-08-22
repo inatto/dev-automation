@@ -165,9 +165,8 @@ fi
 
 initialize_pause_control
 
-# Ao iniciar, apenas tenta desbloquear git-crypt com a chave padrão.
-# Nenhum atributo Git ou arquivo do projeto é criado/alterado.
-gitcrypt_guard_all || true
+# Git-crypt é estritamente manual. O monitor não verifica nem desbloqueia
+# repositórios automaticamente durante a inicialização.
 
 if ! start_change_monitor; then
   taskbar_status error "Monitor indisponível"

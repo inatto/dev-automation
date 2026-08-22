@@ -37,7 +37,7 @@ Uso:
   dev-manager --test-backup-sound Testa o aviso sutil de backup
   dev-manager commands     Atualiza todos os comandos globais
   dev-manager desktops     Cria/nomeia desktops pelos projetos ativos
-  dev-manager git-crypt    Executa git-crypt unlock com a chave padrão
+  dev-manager git-crypt    Executa MANUALMENTE git-crypt unlock com a chave padrão
   dev-manager g512         Mostra/controla o auxiliar RGB do Logitech G512
   dev-manager status       Verifica se há um monitor ativo
   dev-manager stop         Explica como encerrar o monitor ativo
