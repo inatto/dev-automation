@@ -27,7 +27,7 @@ cat > "$TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
 bash "$CLEAR_TERMINAL_SOURCE"
-exec "$SOURCE" "\$@"
+exec bash "$SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$TARGET"
 

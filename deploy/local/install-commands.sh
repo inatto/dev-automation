@@ -119,7 +119,7 @@ cat > "$AUTO_TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
 bash "$CLEAR_TERMINAL_SOURCE"
-exec "$AUTO_SOURCE" "\$@"
+exec bash "$AUTO_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$AUTO_TARGET"
 log "criado: auto-code-manager -> $AUTO_SOURCE"
@@ -161,7 +161,7 @@ for command_name in chromes terminals chatgpts phpstorms pycharms phpstorm-dev d
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
 bash "$CLEAR_TERMINAL_SOURCE"
-exec "$source_file" "\$@"
+exec bash "$source_file" "\$@"
 EOF_WRAPPER
   chmod +x "$target_file"
   log "criado: $command_name -> $source_file"
@@ -172,7 +172,7 @@ rm -f "$ORACLE_MONITOR_TARGET"
 cat > "$ORACLE_MONITOR_TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
-exec "$PROJECT_RUNNER" "oracle-monitor" "$ORACLE_MONITOR_DIR" "local" "\$@"
+exec bash "$PROJECT_RUNNER" "oracle-monitor" "$ORACLE_MONITOR_DIR" "local" "\$@"
 EOF_WRAPPER
 chmod +x "$ORACLE_MONITOR_TARGET"
 log "criado: oracle-monitor -> $ORACLE_MONITOR_DIR"
@@ -187,11 +187,11 @@ for lrdp_name in lrdp1 lrdp2; do
   cat > "$lrdp_target" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
-if [[ ! -x "$lrdp_source" ]]; then
-  printf '[$lrdp_name] ERRO: comando do projeto não encontrado/executável: %s\n' "$lrdp_source" >&2
+if [[ ! -f "$lrdp_source" ]]; then
+  printf '[$lrdp_name] ERRO: comando do projeto não encontrado: %s\n' "$lrdp_source" >&2
   exit 1
 fi
-exec "$lrdp_source" "\$@"
+exec bash "$lrdp_source" "\$@"
 EOF_WRAPPER
   chmod +x "$lrdp_target"
   log "criado: $lrdp_name -> $lrdp_source"

@@ -53,7 +53,7 @@ create_command() {
   cat > "$target" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-project-commands
-exec "$COMMAND_RUNNER" "$command_name" "$project_dir" "$deploy_mode" "\$@"
+exec bash "$COMMAND_RUNNER" "$command_name" "$project_dir" "$deploy_mode" "\$@"
 EOF_WRAPPER
   chmod +x "$target"
   printf '%s\n' "$command_name" >> "$new_manifest"
@@ -69,7 +69,7 @@ create_all_command() {
   cat > "$target" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-project-commands
-exec "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "\$@"
+exec bash "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "\$@"
 EOF_WRAPPER
   chmod +x "$target"
   printf '%s\n' "$command_name" >> "$new_manifest"
@@ -121,7 +121,7 @@ create_special_all_command() {
   cat > "$target" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-project-commands
-exec "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "$forced_action" "\$@"
+exec bash "$ALL_COMMAND_RUNNER" "$command_name" "$deploy_mode" "$PROJECTS_FILE" "$CODE_ROOT" "$TARGET_DIR" "$forced_action" "\$@"
 EOF_WRAPPER
   chmod +x "$target"
   printf '%s\n' "$command_name" >> "$new_manifest"

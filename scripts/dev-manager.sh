@@ -130,10 +130,12 @@ action="${1:-start}"
 case "$action" in
   start|run)
     shift || true
-    # Inicialização deliberadamente mínima: não reinstala comandos, não compila
-    # dev-status e não inicia/garante RGB. Esses recursos ficam nos comandos
-    # explícitos próprios; o start apenas executa o monitor.
-    printf '[dev-manager] executando monitor mínimo em primeiro plano; para parar, pressione Ctrl+C.\n'
+    # O dev-manager é também o ponto de autorreparo dos comandos locais.
+    # Reinstala/valida wrappers e executáveis antes de iniciar o monitor para
+    # que um round-trip de ZIP nunca deixe ~/.local/bin apontando para scripts
+    # sem permissão de execução.
+    refresh_global_commands
+    printf '[dev-manager] executando monitor em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"
     ;;
   --test-sound|test-sound)
