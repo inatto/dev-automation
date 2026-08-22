@@ -216,6 +216,9 @@ with zipfile.ZipFile(archive) as zf:
 
         if info.is_dir() or kind == stat.S_IFDIR:
             target.mkdir(parents=True, exist_ok=True)
+            permissions = mode & 0o777
+            if permissions:
+                os.chmod(target, permissions)
             continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -225,6 +228,9 @@ with zipfile.ZipFile(archive) as zf:
                 if not chunk:
                     break
                 dst.write(chunk)
+        permissions = mode & 0o777
+        if permissions:
+            os.chmod(target, permissions)
 PY_ZIP_EXTRACT
 }
 
@@ -233,4 +239,21 @@ preserve_destination_symlinks_from_staging() {
   while IFS= read -r -d '' rel; do
     rm -rf -- "$staging_dir/$rel"
   done < <(find "$project_dir" -type l -printf '%P\0' 2>/dev/null)
+}
+
+preserve_destination_modes_from_staging() {
+  local project_dir="$1" staging_dir="$2" rel destination staged
+
+  while IFS= read -r -d '' rel; do
+    destination="$project_dir/$rel"
+    staged="$staging_dir/$rel"
+
+    [ -e "$destination" ] || continue
+    [ ! -L "$destination" ] || continue
+
+    if { [ -f "$staged" ] && [ -f "$destination" ]; } || \
+       { [ -d "$staged" ] && [ -d "$destination" ]; }; then
+      chmod --reference="$destination" -- "$staged" || return 1
+    fi
+  done < <(find "$staging_dir" -mindepth 1 \( -type f -o -type d \) -printf '%P\0' 2>/dev/null)
 }

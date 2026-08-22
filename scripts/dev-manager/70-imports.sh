@@ -203,6 +203,15 @@ import_one_zip() {
     return 1
   fi
 
+  # ZIPs podem vir de Windows, navegador ou ferramentas que descartam o bit
+  # executável. Para caminhos que já existem localmente, o chmod local é a
+  # fonte da verdade: ajustamos somente o staging antes do rsync final.
+  if ! preserve_destination_modes_from_staging "$project_dir" "$filtered_dir"; then
+    log "ERRO: falha ao preservar permissões locais no staging. Projeto não foi alterado; ZIP mantido."
+    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+    return 1
+  fi
+
   removal_count="$(find "$filtered_dir" -type f -name '*.remover' -printf '.' 2>/dev/null | wc -c)"
   if ! prepare_removal_markers "$filtered_dir" "$project_dir" "$removal_manifest"; then
     log "ERRO: validação de .remover falhou. O ZIP foi mantido."
