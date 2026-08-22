@@ -37,17 +37,14 @@ BACKUP_BEEP_ENABLED=false
 TASKBAR_STATUS_ENABLED=false
 ENV
 
-# Mesmo arquivo volta sem +x: conteúdo deve atualizar, chmod local deve ficar 0755.
+# Caso correto: saiu executável e voltou executável.
 printf 'new\n' > "$PKG/deploy/local/setup.sh"
-chmod 644 "$PKG/deploy/local/setup.sh"
-
-# Arquivo novo deve manter o modo portátil registrado no ZIP.
+chmod 755 "$PKG/deploy/local/setup.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$PKG/deploy/local/new-task.sh"
 chmod 755 "$PKG/deploy/local/new-task.sh"
-
 (
   cd "$PKG"
-  zip -qr "$D/alpha-app--permissions.zip" .
+  zip -qr "$D/alpha-app--permissions-ok.zip" .
 )
 
 HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
@@ -56,6 +53,26 @@ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_T
 [ "$(cat "$P/deploy/local/setup.sh")" = new ]
 [ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 755 ]
 [ "$(stat -c '%a' "$P/deploy/local/new-task.sh")" = 755 ]
-[ ! -e "$D/alpha-app--permissions.zip" ]
+[ ! -e "$D/alpha-app--permissions-ok.zip" ]
 
-printf 'OK: unzip preserva chmod local de arquivos existentes e modo seguro do ZIP para arquivos novos\n'
+# Caso errado: arquivo existente era executável e voltou sem +x. Deve recusar.
+rm -rf -- "$PKG"
+mkdir -p "$PKG/deploy/local"
+printf 'should-not-import\n' > "$PKG/deploy/local/setup.sh"
+chmod 644 "$PKG/deploy/local/setup.sh"
+(
+  cd "$PKG"
+  zip -qr "$D/alpha-app--permissions-bad.zip" .
+)
+
+set +e
+HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
+  "$M/scripts/auto-code-manager.sh" --import-downloads-once >/dev/null 2>&1
+rc=$?
+set -e
+[ "$rc" -ne 0 ]
+[ "$(cat "$P/deploy/local/setup.sh")" = new ]
+[ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 755 ]
+[ -e "$D/alpha-app--permissions-bad.zip" ]
+
+printf 'OK: chmod do ZIP faz round-trip e mudança silenciosa do bit executável é recusada\n'

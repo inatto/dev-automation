@@ -11,6 +11,7 @@ mkdir -p "$CODE/bots/dev-automation" "$CODE/orgs/orbital/orbital-app" "$CODE/inf
 cat > "$CFG" <<'PROJECTS'
 bots/dev-automation
 orgs/missing-project
+orgs/orbital.zip
 orgs/orbital/orbital-app
 infra/amazon-infra
 infra/amazon-infra/apps/monitor-app
@@ -40,4 +41,4 @@ if grep -q 'window.activate(global.get_current_time())' "$EXT"; then
 fi
 grep -q "workspaces.tsv" "$EXT" || { echo 'FALHOU: extensão não lê mapa de workspaces' >&2; exit 1; }
 
-echo 'OK: pycharms usa a mesma posição de desktops (1=LAZER, 2+=config), ignora ausentes para abrir, move cada projeto ao workspace correto, manda ao maior monitor e não ativa/troca o workspace atual.'
+echo 'OK: pycharms ignora agregadores *.zip, preserva o grid real e move cada projeto ao workspace correto.'

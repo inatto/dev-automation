@@ -10,6 +10,7 @@ PROJECTS_FILE="$TMP/projects"
 mkdir -p \
   "$CODE_ROOT/bots/dev-automation" \
   "$CODE_ROOT/infra/amazon-infra" \
+  "$CODE_ROOT/orgs/orbital" \
   "$CODE_ROOT/orgs/orbital/orbital-app" \
   "$CODE_ROOT/orgs/orbital/orbital-events"
 
@@ -17,6 +18,7 @@ cat > "$PROJECTS_FILE" <<'PROJECTS'
 # comentado/fora
 bots/dev-automation
 infra/amazon-infra
+orgs/orbital.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-events
 PROJECTS
@@ -65,4 +67,4 @@ grep -q 'Já aberto; ignorando' "$ROOT/scripts/phpstorms.sh" || {
   exit 1
 }
 
-echo 'OK: phpstorms usa exatamente os projetos ativos, na mesma ordem, sem agrupamento e de forma idempotente.'
+echo 'OK: phpstorms abre somente projetos reais; agregadores *.zip são ignorados.'

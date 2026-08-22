@@ -241,19 +241,119 @@ preserve_destination_symlinks_from_staging() {
   done < <(find "$project_dir" -type l -printf '%P\0' 2>/dev/null)
 }
 
-preserve_destination_modes_from_staging() {
-  local project_dir="$1" staging_dir="$2" rel destination staged
+verify_zip_modes_after_extract() {
+  local zip_file="$1" destination="$2"
+  python3 - "$zip_file" "$destination" <<'PY_ZIP_MODE_VERIFY'
+import os
+import stat
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
 
-  while IFS= read -r -d '' rel; do
-    destination="$project_dir/$rel"
-    staged="$staging_dir/$rel"
+archive = sys.argv[1]
+root = Path(sys.argv[2]).resolve()
+errors = []
 
-    [ -e "$destination" ] || continue
-    [ ! -L "$destination" ] || continue
+with zipfile.ZipFile(archive) as zf:
+    for info in zf.infolist():
+        normalized = info.filename.replace("\\", "/")
+        parts = PurePosixPath(normalized).parts
+        mode = (info.external_attr >> 16) & 0xFFFF
+        kind = stat.S_IFMT(mode)
+        if kind == stat.S_IFLNK:
+            continue
+        expected = mode & 0o777
+        if not expected:
+            # ZIPs sem metadata POSIX não têm modo confiável para conferir.
+            continue
+        target = root.joinpath(*parts)
+        if not target.exists():
+            errors.append(f"ausente após extração: {info.filename}")
+            continue
+        actual = stat.S_IMODE(target.stat().st_mode) & 0o777
+        if actual != expected:
+            errors.append(f"modo divergente {info.filename}: ZIP={expected:03o} extraído={actual:03o}")
 
-    if { [ -f "$staged" ] && [ -f "$destination" ]; } || \
-       { [ -d "$staged" ] && [ -d "$destination" ]; }; then
-      chmod --reference="$destination" -- "$staged" || return 1
-    fi
-  done < <(find "$staging_dir" -mindepth 1 \( -type f -o -type d \) -printf '%P\0' 2>/dev/null)
+if errors:
+    print("ERRO: round-trip de permissões do ZIP falhou:", file=sys.stderr)
+    for error in errors[:50]:
+        print(f"  {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY_ZIP_MODE_VERIFY
+}
+
+verify_zip_modes_against_tree() {
+  local zip_file="$1" tree_root="$2"
+  python3 - "$zip_file" "$tree_root" <<'PY_ZIP_TREE_VERIFY'
+import stat
+import sys
+import zipfile
+from pathlib import Path, PurePosixPath
+
+archive = sys.argv[1]
+root = Path(sys.argv[2]).resolve()
+errors = []
+
+with zipfile.ZipFile(archive) as zf:
+    for info in zf.infolist():
+        normalized = info.filename.replace("\\", "/")
+        parts = PurePosixPath(normalized).parts
+        mode = (info.external_attr >> 16) & 0xFFFF
+        kind = stat.S_IFMT(mode)
+        if kind == stat.S_IFLNK:
+            continue
+        expected_path = root.joinpath(*parts)
+        if not expected_path.exists():
+            continue
+        expected = stat.S_IMODE(expected_path.stat().st_mode) & 0o777
+        stored = mode & 0o777
+        if stored != expected:
+            errors.append(f"modo não preservado no ZIP {info.filename}: origem={expected:03o} ZIP={stored:03o}")
+
+if errors:
+    print("ERRO: ZIP não preservou permissões da árvore de origem:", file=sys.stderr)
+    for error in errors[:50]:
+        print(f"  {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY_ZIP_TREE_VERIFY
+}
+
+verify_existing_execute_bits_unchanged() {
+  local incoming_root="$1" project_dir="$2"
+  python3 - "$incoming_root" "$project_dir" <<'PY_EXEC_GUARD'
+import os
+import stat
+import sys
+from pathlib import Path
+
+incoming = Path(sys.argv[1]).resolve()
+project = Path(sys.argv[2]).resolve()
+errors = []
+
+for root, dirs, files in os.walk(incoming):
+    root_path = Path(root)
+    for name in files:
+        src = root_path / name
+        if src.is_symlink() or not src.is_file():
+            continue
+        rel = src.relative_to(incoming)
+        dst = project / rel
+        if dst.is_symlink() or not dst.exists() or not dst.is_file():
+            continue
+        src_exec = stat.S_IMODE(src.stat().st_mode) & 0o111
+        dst_exec = stat.S_IMODE(dst.stat().st_mode) & 0o111
+        if bool(src_exec) != bool(dst_exec):
+            errors.append(
+                f"{rel}: projeto={'executável' if dst_exec else 'não executável'} "
+                f"ZIP={'executável' if src_exec else 'não executável'} "
+                f"({stat.S_IMODE(dst.stat().st_mode) & 0o777:03o}->{stat.S_IMODE(src.stat().st_mode) & 0o777:03o})"
+            )
+
+if errors:
+    print("ERRO: o ZIP alterou o bit executável de arquivo(s) já existente(s):", file=sys.stderr)
+    for error in errors[:50]:
+        print(f"  {error}", file=sys.stderr)
+    print("Importação recusada antes de alterar o projeto.", file=sys.stderr)
+    raise SystemExit(1)
+PY_EXEC_GUARD
 }

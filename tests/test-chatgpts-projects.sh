@@ -14,6 +14,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${line#./}"
   line="${line%/}"
   [[ -n "$line" ]] || continue
+  [[ "${line,,}" == *.zip ]] && continue
   basename -- "$line"
 done < "$ROOT/config/auto-code-manager.projects" > "$EXPECTED"
 
@@ -21,6 +22,6 @@ done < "$ROOT/config/auto-code-manager.projects" > "$EXPECTED"
 diff -u "$EXPECTED" "$ACTUAL"
 
 grep -q 'CHATGPTS_SOURCE=' "$ROOT/deploy/local/install-commands.sh"
-grep -q 'for command_name in chromes chatgpts phpstorms' "$ROOT/deploy/local/install-commands.sh"
+grep -Eq 'for command_name in .*chatgpts.*phpstorms' "$ROOT/deploy/local/install-commands.sh"
 
 echo '[test-chatgpts-projects] OK'

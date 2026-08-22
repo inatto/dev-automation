@@ -32,6 +32,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${line#./}"
   line="${line%/}"
   [[ -n "$line" ]] || continue
+  [[ "${line,,}" == *.zip ]] && continue
   projects+=("$(basename -- "$line")")
 done < "$PROJECTS_FILE"
 
@@ -94,7 +95,7 @@ case "${1:-}" in
   --help|-h|help)
     cat <<'HELP'
 Uso:
-  desktops --list   Mostra LAZER + projetos + lrdp1 + lrdp2, sem alterar o sistema
+  desktops --list   Mostra LAZER + projetos reais + lrdp1 + lrdp2; ignora agregadores *.zip
   desktops --close              Solicita fechamento de todas as janelas dos workspaces 2..N; preserva LAZER
   desktops --ensure-controller  Instala/recarrega apenas o controlador GNOME, sem renomear workspaces
   desktops                      Sincroniza os workspaces e seus nomes

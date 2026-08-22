@@ -20,7 +20,7 @@ Uso:
   phpstorms --help   Mostra esta ajuda
 
 Regra:
-  abre exatamente cada projeto ativo de auto-code-manager.projects, na mesma ordem usada por desktops
+  abre somente projetos reais de auto-code-manager.projects; agregadores *.zip não abrem IDE
 EOF_HELP
 }
 
@@ -44,6 +44,7 @@ esac
 [[ -d "$CODE_ROOT" ]] || fail "raiz de projetos não encontrada: $CODE_ROOT"
 
 # Usa exatamente a mesma fonte canônica e a mesma ordem do comando desktops.
+# Agregadores *.zip são indicadores de backup/importação, nunca projetos de IDE.
 # Não agrupa projetos irmãos e não ignora dev-automation. Se uma pasta ativa
 # não existir, falha para evitar que phpstorms fique diferente de desktops.
 resolved_projects=()
@@ -55,6 +56,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${line#./}"
   line="${line%/}"
   [[ -n "$line" ]] || continue
+  [[ "${line,,}" == *.zip ]] && continue
 
   project_path="$CODE_ROOT/$line"
   [[ -d "$project_path" ]] || fail "projeto ativo não encontrado: $project_path"

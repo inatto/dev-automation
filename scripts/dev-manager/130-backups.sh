@@ -109,6 +109,11 @@ backup_project() {
     rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
+  if ! verify_zip_modes_against_tree "$temp_zip" "$temp_dir"; then
+    log "ERRO: backup ZIP não preservou chmod da origem: $project"
+    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
+    return 1
+  fi
 
   mv -f -- "$temp_zip" "$final_zip"
   rm -rf -- "$temp_dir"

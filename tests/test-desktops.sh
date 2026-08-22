@@ -11,6 +11,7 @@ cat > "$PROJECTS_FILE" <<'PROJECTS'
 #orgs/disabled
 bots/dev-automation
 infra/amazon-infra
+orgs/orbital.zip
 orgs/orbital/orbital-app
 PROJECTS
 
@@ -22,7 +23,7 @@ expected=$'1\tLAZER (preservado)\n2\tdev-automation\n3\tamazon-infra\n4\torbital
   exit 1
 }
 
-printf 'OK: Desktop 1 preservado e projetos ativos seguem exatamente a ordem do arquivo\n'
+printf 'OK: Desktop 1 preservado; agregadores *.zip não viram desktops; projetos reais mantêm a ordem\n'
 
 FAKE_BIN="$TEMP_ROOT/bin"
 mkdir -p "$FAKE_BIN"

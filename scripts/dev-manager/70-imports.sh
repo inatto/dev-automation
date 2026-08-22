@@ -56,6 +56,11 @@ import_one_zip() {
     rm -rf -- "$temp_dir"
     return 1
   fi
+  if ! verify_zip_modes_after_extract "$zip_file" "$temp_dir"; then
+    log "ERRO: chmod armazenado no ZIP não sobreviveu à extração. Projeto não foi alterado; ZIP mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
 
   if [ -d "$temp_dir/$archive_name" ]; then
     source_dir="$temp_dir/$archive_name"
@@ -156,6 +161,14 @@ import_one_zip() {
     return 1
   }
 
+  # Arquivo existente não pode voltar do ZIP mudando silenciosamente o bit
+  # executável. Isso detecta 755->644 (ou o inverso) antes de tocar no projeto.
+  if ! verify_existing_execute_bits_unchanged "$source_dir" "$project_dir"; then
+    log "ERRO: executabilidade divergente na volta do ZIP. Projeto não foi alterado; ZIP mantido."
+    rm -rf -- "$temp_dir"
+    return 1
+  fi
+
   # O ZIP em /home/daniel/Code é o ponto de retorno imediatamente anterior à
   # importação. Só tocamos no projeto se esse backup pré-importação validar.
   log "Gerando backup pré-importação do estado atual..."
@@ -199,15 +212,6 @@ import_one_zip() {
 
   if ! materialize_changed_protected_configs "$project" "$source_dir" "$filtered_dir"; then
     log "ERRO: merge seguro dos configs protegidos falhou. Projeto não recebeu o staging; ZIP mantido."
-    rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
-    return 1
-  fi
-
-  # ZIPs podem vir de Windows, navegador ou ferramentas que descartam o bit
-  # executável. Para caminhos que já existem localmente, o chmod local é a
-  # fonte da verdade: ajustamos somente o staging antes do rsync final.
-  if ! preserve_destination_modes_from_staging "$project_dir" "$filtered_dir"; then
-    log "ERRO: falha ao preservar permissões locais no staging. Projeto não foi alterado; ZIP mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi

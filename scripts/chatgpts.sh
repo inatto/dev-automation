@@ -19,7 +19,7 @@ Uso:
   chatgpts --help   Mostra esta ajuda
 
 Regra:
-  usa exatamente os projetos ativos de auto-code-manager.projects, na mesma ordem de desktops/phpstorms
+  usa somente projetos reais de auto-code-manager.projects; agregadores *.zip não recebem janela
 HELP
 }
 
@@ -49,6 +49,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   line="${line#./}"
   line="${line%/}"
   [[ -n "$line" ]] || continue
+  [[ "${line,,}" == *.zip ]] && continue
   projects+=("$(basename -- "$line")")
 done < "$CONFIG_FILE"
 
