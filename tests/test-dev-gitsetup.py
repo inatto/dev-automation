@@ -104,11 +104,9 @@ orgs/beta|https://github.com/owner/beta.git
             self.assertTrue((code / "orgs/fallback/.git").is_dir())
             calls = log.read_text()
             self.assertIn("https://github.com/other/fallback.git", calls)
-            self.assertIn("https://github.com/owner/alpha.git", calls)
-            self.assertNotIn("https://github.com/STALE/alpha.git", calls)
+            self.assertIn("https://github.com/STALE/alpha.git", calls)
             repos_text = (Path(result.args[result.args.index("--repositories-file") + 1])).read_text()
-            self.assertIn("bots/alpha|https://github.com/owner/alpha.git", repos_text)
-            self.assertNotIn("STALE", repos_text)
+            self.assertIn("bots/alpha|https://github.com/STALE/alpha.git", repos_text)
             self.assertIn("[subprojeto] bots/alpha/apps/child -> incluído em bots/alpha", result.stdout)
 
     def test_is_idempotent_existing_repositories_are_fetched(self):
@@ -226,12 +224,38 @@ orgs/beta|https://github.com/owner/beta.git
             self.assertFalse((code / "bots/alpha").exists())
             self.assertTrue((code / "orgs/beta/.git").is_dir())
 
+    def test_explicit_mapping_works_even_when_repo_is_not_in_user_repos(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = Path(td)
+            code = temp / "Code"
+            config = temp / "config"
+            config.mkdir(exist_ok=True)
+            projects = config / "projects"
+            projects.write_text("bots/dev-automation\n")
+            repos = config / "repos"
+            repos.write_text("bots/dev-automation|https://github.com/inatto/dev-automation.git\n")
+            bindir, _state, log = self.make_fake_tools(temp)
+            env = os.environ.copy()
+            env["PATH"] = f"{bindir}:{env['PATH']}"
+            result = subprocess.run(
+                [
+                    "python3", str(SCRIPT),
+                    "--code-root", str(code),
+                    "--projects-file", str(projects),
+                    "--repositories-file", str(repos),
+                ],
+                env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue((code / "bots/dev-automation/.git").is_dir())
+            self.assertIn("https://github.com/inatto/dev-automation.git", log.read_text())
+
     def test_requests_login_when_no_account_is_authenticated(self):
         with tempfile.TemporaryDirectory() as td:
             result, _code, state, log = self.run_sync(Path(td), initially_authenticated=False)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(state.exists())
-            self.assertIn("gh auth login --hostname github.com --git-protocol https --web", log.read_text())
+            self.assertIn("gh auth login --hostname github.com --web", log.read_text())
             self.assertIn("Nenhum usuário GitHub autenticado", result.stdout)
 
 

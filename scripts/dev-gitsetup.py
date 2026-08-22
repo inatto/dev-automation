@@ -4,8 +4,8 @@
 Project list source of truth: config/projects/<machine-id>.projects.
 On first real run, the machine-specific file is created from config/projects/default.projects.
 Machine identity comes automatically from /etc/machine-id.
-Repository location source of truth: GitHub API for the active gh account.
-config/environment.repositories is refreshed from GitHub after successful resolution.
+Repository location source of truth: config/environment.repositories when mapped.
+GitHub API is used only as fallback for projects without an explicit mapping.
 """
 
 from __future__ import annotations
@@ -147,7 +147,7 @@ def ensure_github_auth(non_interactive: bool = False) -> str:
         out("[dev-gitsetup] Nenhum usuário GitHub autenticado.")
         out("[dev-gitsetup] Abrindo login oficial do GitHub CLI...")
         login = run(
-            ["gh", "auth", "login", "--hostname", "github.com", "--git-protocol", "https", "--web"],
+            ["gh", "auth", "login", "--hostname", "github.com", "--web"],
             check=False,
         )
         if login.returncode != 0:
@@ -200,38 +200,40 @@ def _mapped_full_name(url: str) -> str | None:
 
 
 def resolve_repo(project: str, mapping: dict[str, str], accessible: dict[str, list[tuple[str, str]]]) -> tuple[str, str]:
-    """Resolve exclusively from the current GitHub API result.
+    """Resolve from explicit mapping first, then fall back to the GitHub API.
 
-    A previous environment.repositories entry may only disambiguate two currently
-    accessible repositories with the same basename. Its URL is never trusted as
-    the clone source.
+    This matters for bootstrap repositories that are cloneable by URL/full name but
+    are not returned by /user/repos for the currently authenticated account.
     """
+    mapped = mapping.get(project)
+    if mapped:
+        full_name = _mapped_full_name(mapped)
+        if not full_name:
+            fail(f"URL GitHub inválida em environment.repositories para '{project}': {mapped}")
+        return full_name, mapped
+
     name = PurePosixPath(project).name
     matches = accessible.get(name, [])
     if not matches:
-        fail(f"repositório não encontrado no GitHub para '{project}' (nome esperado: {name})")
+        fail(
+            f"repositório não encontrado para '{project}' (nome esperado: {name}). "
+            f"Adicione '{project}|https://github.com/OWNER/{name}.git' em config/environment.repositories"
+        )
     if len(matches) == 1:
         return matches[0]
-
-    previous = mapping.get(project)
-    previous_full = _mapped_full_name(previous) if previous else None
-    if previous_full:
-        selected = [item for item in matches if item[0].lower() == previous_full.lower()]
-        if len(selected) == 1:
-            return selected[0]
 
     names = ", ".join(full for full, _ in matches)
     fail(
         f"mais de um repositório GitHub acessível chamado '{name}': {names}. "
-        "O environment.repositories antigo só desempata se apontar para um deles."
+        f"Adicione o mapeamento explícito de '{project}' em config/environment.repositories"
     )
 
 
 def write_repository_map(path: Path, entries: list[tuple[str, str]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     content = [
-        "# Gerado automaticamente por dev-gitsetup a partir do GitHub API.",
-        "# Não use este arquivo como fonte da verdade; execute dev-gitsetup para atualizá-lo.",
+        "# Mapeamento de caminho local -> repositório GitHub usado pelo dev-gitsetup.",
+        "# Entradas explícitas têm prioridade; projetos sem entrada usam descoberta via GitHub API.",
     ]
     content.extend(f"{project}|{clone_url}" for project, clone_url in entries)
     content.append("")

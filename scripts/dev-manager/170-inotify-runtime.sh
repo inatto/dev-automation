@@ -113,7 +113,15 @@ start_backup_watcher() {
   command+=(--fromfile "$WATCH_LIST")
 
   : > "$WATCH_LOG"
-  "${command[@]}" >"$WATCH_FIFO" 2>>"$WATCH_LOG" &
+  # O watcher é um processo de longa duração. Feche explicitamente nele o FD
+  # do flock do manager; caso contrário, se o manager morrer, o inotifywait
+  # herda o lock e deixa um falso "Auto Code Manager ativo" para sempre.
+  (
+    if [[ "${MONITOR_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+      exec {MONITOR_LOCK_FD}>&-
+    fi
+    exec "${command[@]}"
+  ) >"$WATCH_FIFO" 2>>"$WATCH_LOG" &
   WATCH_PID=$!
 
   # O produtor já foi aberto; agora o consumidor pode ficar somente em leitura.
