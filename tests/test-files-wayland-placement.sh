@@ -20,7 +20,7 @@ esac
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=11
+version=12
 controller=1
 floating-label=0
 window-placement=1

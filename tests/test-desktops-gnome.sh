@@ -31,7 +31,7 @@ case "${1:-}" in
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
     cat > "$HOME/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=11
+version=12
 controller=1
 floating-label=0
 window-placement=1
@@ -61,5 +61,5 @@ grep -q "_rightmostMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq '"version": 11' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
+grep -Fq '"version": 12' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
 echo 'OK: GNOME usa workspaces fixos nomeados, sem indicador flutuante, e fechamento preservando LAZER.'

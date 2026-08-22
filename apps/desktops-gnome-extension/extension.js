@@ -17,7 +17,7 @@ const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 11;
+const EXTENSION_VERSION = 12;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -213,6 +213,19 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             return;
         }
 
+        case 'managed-reset': {
+            // Usado automaticamente quando a lista/ordem de projetos muda.
+            // Fecha SOMENTE o lote que o próprio `terminals` gerencia; terminais
+            // manuais existentes nos workspaces continuam intocados.
+            const targets = new Set([...status.managed, ...status.overflow]);
+            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
+            this._writeTerminalResult(token, targets.size, targets.size, true);
+            this._removeFile(TERMINALS_BATCH_PATH);
+            this._terminalSession = null;
+            this._closeTerminalWindows([...targets]);
+            return;
+        }
+
         case 'reset': {
             const targets = new Set([...status.managed, ...status.overflow]);
             for (const window of this._projectTerminalWindows(target))
@@ -331,36 +344,9 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             overflowSet.add(sequence);
         }
 
-        // Reaproveita no máximo um terminal já existente em cada workspace de
-        // projeto. Assim o próprio terminal de onde o comando foi executado pode
-        // servir ao projeto, mas uma pilha de janelas no mesmo workspace não é
-        // confundida com um lote saudável.
-        if (managed.length < target) {
-            const occupied = new Set();
-            for (const window of managed) {
-                const index = window.get_workspace?.()?.index?.() ?? -1;
-                if (index >= 1 && index <= target)
-                    occupied.add(index);
-            }
-
-            const candidates = this._projectTerminalWindows(target)
-                .filter(window => {
-                    const sequence = this._stableSequence(window);
-                    return !managedSet.has(sequence) && !overflowSet.has(sequence);
-                })
-                .sort((a, b) => this._stableSequence(a) - this._stableSequence(b));
-            for (const window of candidates) {
-                if (managed.length >= target)
-                    break;
-                const index = window.get_workspace?.()?.index?.() ?? -1;
-                if (occupied.has(index))
-                    continue;
-                const sequence = this._stableSequence(window);
-                managed.push(window);
-                managedSet.add(sequence);
-                occupied.add(index);
-            }
-        }
+        // Somente janelas capturadas explicitamente pelo lote de `terminals`
+        // podem ser gerenciadas. Um terminal manual já aberto em algum workspace
+        // nunca conta como projeto, pois isso deslocava toda a lista em +1/-1.
 
         this._writeTerminalBatch(
             managed.map(window => this._stableSequence(window)),
@@ -375,31 +361,13 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
     }
 
     _terminalAssignments(managed, target) {
-        const assignments = new Map();
-        const used = new Set();
-        const sorted = [...managed].sort((a, b) => this._stableSequence(a) - this._stableSequence(b));
-
-        // Preserva primeiro os terminais que já estão sozinhos em um workspace de projeto.
-        for (const window of sorted) {
-            const index = window.get_workspace?.()?.index?.() ?? -1;
-            if (index >= 1 && index <= target && !assignments.has(index)) {
-                assignments.set(index, window);
-                used.add(window);
-            }
-        }
-
-        const remaining = sorted.filter(window => !used.has(window));
-        let cursor = 0;
-        for (let index = 1; index <= target; index++) {
-            if (assignments.has(index))
-                continue;
-            const window = remaining[cursor++];
-            if (!window)
-                break;
-            assignments.set(index, window);
-        }
-
-        return [...assignments.entries()].sort((a, b) => a[0] - b[0]);
+        // `managed` já vem na ordem persistida pelo lote, que é exatamente a
+        // ordem em que terminals.sh abriu os projetos. Workspace do GNOME é
+        // zero-based: índice 0 = LAZER; projeto 0 = workspace índice 1.
+        // Nunca inferimos a identidade do projeto pela posição atual da janela.
+        return managed
+            .slice(0, target)
+            .map((window, projectIndex) => [projectIndex + 1, window]);
     }
 
     _allTerminalWindows() {

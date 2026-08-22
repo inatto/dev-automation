@@ -16,6 +16,8 @@ STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
 OPEN_SETTLE_SECONDS="${TERMINALS_OPEN_SETTLE_SECONDS:-2}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
+PROJECTS_SIGNATURE_FILE="$STATE_DIR/terminals.projects.sha256"
+TERMINALS_BATCH_FILE="$STATE_DIR/terminals.batch"
 
 log(){ printf '[terminals] %s\n' "$*"; }
 warn(){ printf '[terminals] AVISO: %s\n' "$*" >&2; }
@@ -75,6 +77,32 @@ launch_terminal_window() {
     x-terminal-emulator) (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &) ;;
     *) return 1 ;;
   esac
+}
+
+current_projects_signature() {
+  printf '%s\0' "${project_entries[@]}" | sha256sum | awk '{print $1}'
+}
+
+persist_projects_signature() {
+  local signature="$1" tmp
+  mkdir -p "$STATE_DIR"
+  tmp="$PROJECTS_SIGNATURE_FILE.tmp.$$"
+  printf '%s\n' "$signature" > "$tmp"
+  mv -f -- "$tmp" "$PROJECTS_SIGNATURE_FILE"
+}
+
+reconcile_project_list_identity() {
+  local current="$1" previous=''
+  [[ -s "$PROJECTS_SIGNATURE_FILE" ]] && previous="$(head -n1 "$PROJECTS_SIGNATURE_FILE" 2>/dev/null || true)"
+
+  # Um lote existente sem assinatura veio de uma versão antiga. Uma assinatura
+  # diferente significa que projeto(s) foram inseridos/removidos/reordenados.
+  # Em ambos os casos a posição antiga não identifica mais o projeto correto.
+  if [[ -s "$TERMINALS_BATCH_FILE" && ( -z "$previous" || "$previous" != "$current" ) ]]; then
+    log 'lista/ordem de projetos mudou; descartando somente os terminais gerenciados antigos para reconstruir a associação exata.'
+    gnome_placement_prepare terminals managed-reset "count=$count" ||       fail 'não foi possível limpar o lote antigo de terminais gerenciados.'
+    gnome_placement_wait_complete terminals 120 ||       fail 'o GNOME não confirmou a limpeza do lote antigo de terminais.'
+  fi
 }
 
 acquire_lock() {
@@ -161,6 +189,7 @@ case "${1:-}" in
   --reset|reset)
     acquire_lock
     legacy_compatible_reset
+    rm -f -- "$PROJECTS_SIGNATURE_FILE"
     exit 0
     ;;
   --help|-h|help)
@@ -175,6 +204,8 @@ esac
 
 acquire_lock
 request_fields="count=$count"
+projects_signature="$(current_projects_signature)"
+reconcile_project_list_identity "$projects_signature"
 
 # Consulta sempre o estado real. Repetir o comando não cria lote novo quando
 # os terminais gerenciados ainda existem.
@@ -237,6 +268,7 @@ if (( missing > 0 )); then
 
   [[ "$OPEN_SETTLE_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || OPEN_SETTLE_SECONDS=2
   sleep "$OPEN_SETTLE_SECONDS"
+  persist_projects_signature "$projects_signature"
   log "FASE ABERTURA CONCLUÍDA: $missing terminal(is) novo(s) capturado(s), sem distribuição."
   log 'PRÓXIMA CHAMADA: terminals fará somente a MOVIMENTAÇÃO e MAXIMIZAÇÃO, um terminal por projeto no monitor direito.'
   exit 0
@@ -248,5 +280,6 @@ gnome_placement_prepare terminals reconcile "$request_fields" || fail 'não foi 
 if ! gnome_placement_wait_complete terminals 200; then
   fail 'o GNOME não confirmou a movimentação completa. Rode: terminals --diagnose'
 fi
+persist_projects_signature "$projects_signature"
 log "MOVIMENTAÇÃO CONCLUÍDA: 1 terminal por projeto, workspaces 2..$((count + 1)), monitor direito e MAXIMIZADO."
 log 'Idempotência: próximas chamadas apenas reconciliam; não abrem outro lote enquanto os terminais gerenciados existirem.'

@@ -36,7 +36,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=11
+version=12
 controller=1
 floating-label=0
 window-placement=1
@@ -160,7 +160,12 @@ grep -Fq '_scheduleTerminalPlacement' "$ROOT/apps/desktops-gnome-extension/exten
 grep -Fq 'window.maximize()' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq 'overflowSequences' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq '_closeTerminalWindows(status.overflow)' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'index >= 1 && index <= target' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq 'projectIndex + 1' "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -Fq 'Reaproveita no máximo um terminal já existente' "$ROOT/apps/desktops-gnome-extension/extension.js"
+! grep -Fq 'Preserva primeiro os terminais' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq "case 'managed-reset'" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq 'lista/ordem de projetos mudou' "$ROOT/scripts/terminals.sh"
+grep -Fq 'status|open|reconcile|reset|managed-reset' "$ROOT/scripts/gnome-window-placement.sh"
 
 # Reset deve funcionar até com o controlador v9 ainda carregado, justamente para
 # limpar imediatamente o excesso criado pela versão anterior.

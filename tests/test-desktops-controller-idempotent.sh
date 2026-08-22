@@ -6,7 +6,7 @@ trap 'rm -rf -- "$TMP"' EXIT
 mkdir -p "$TMP/bin" "$TMP/home/.local/state/dev-automation/desktops"
 printf 'bots/dev-automation\n' > "$TMP/projects"
 cat > "$TMP/home/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=11
+version=12
 controller=1
 floating-label=0
 window-placement=1
@@ -35,5 +35,5 @@ for _ in 1 2 3; do
     "$ROOT/scripts/desktops.sh" >/dev/null
 done
 [[ ! -s "$TMP/ext.calls" ]]
-grep -Fqx 'version=11' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
+grep -Fqx 'version=12' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
 echo 'OK: controlador GNOME é idempotente; execuções repetidas não fazem enable/disable nem apagam o marker.'
