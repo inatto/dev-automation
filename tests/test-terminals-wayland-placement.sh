@@ -105,10 +105,10 @@ READY
         fi
         observed=$current
         complete=0
-        (( observed >= 3 )) && complete=1
-        printf '%s\tplaced=%s\texpected=3\tcomplete=%s\n' "$open_token" "$observed" "$complete" > "$TMP/state/desktops/terminals.result"
+        (( observed >= 5 )) && complete=1
+        printf '%s\tplaced=%s\texpected=5\tcomplete=%s\n' "$open_token" "$observed" "$complete" > "$TMP/state/desktops/terminals.result"
         if (( complete == 1 )); then
-          managed=3
+          managed=5
           open_token=''
         fi
       fi
@@ -134,7 +134,7 @@ common_env=(
 )
 
 out1="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
-[[ "$(wc -l < "$TMP/terminal.log")" -eq 3 ]]
+[[ "$(wc -l < "$TMP/terminal.log")" -eq 5 ]]
 [[ ! -e "$TMP/race.detected" ]]
 grep -Fq 'FASE: ABERTURA' <<<"$out1"
 grep -Fq 'Abrindo UM POR VEZ' <<<"$out1"
@@ -148,7 +148,7 @@ out2="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
 [[ "$(wc -l < "$TMP/terminal.log")" -eq "$after_first" ]]
 grep -Fq 'FASE: MOVIMENTAÇÃO' <<<"$out2"
 grep -Fq 'ABERTURA: 0.' <<<"$out2"
-grep -Fq 'workspaces 2..4' <<<"$out2"
+grep -Fq 'workspaces 2..6' <<<"$out2"
 grep -Fq 'monitor direito e MAXIMIZADO' <<<"$out2"
 grep -Fq 'próximas chamadas apenas reconciliam' <<<"$out2"
 wait "$watcher"
@@ -180,8 +180,8 @@ READY_V9
     action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
     [[ "$action" == reset ]] || { sleep 0.03; continue; }
     printf '%s\n' "$action" > "$TMP/reset.actions"
-    printf '%s\taction=reset\tcount=3\tmanaged=3\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" > "$TMP/state/desktops/terminals.ready"
-    printf '%s\tplaced=3\texpected=3\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+    printf '%s\taction=reset\tcount=3\tmanaged=5\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" > "$TMP/state/desktops/terminals.ready"
+    printf '%s\tplaced=5\texpected=5\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
     exit 0
   done
   exit 5
@@ -191,4 +191,4 @@ TERMINALS_FAKE_EXT_VERSION=9 env "${common_env[@]}" "$ROOT/scripts/terminals.sh"
 wait "$reset_watcher"
 grep -Fxq reset "$TMP/reset.actions"
 
-echo 'OK: terminals abre sequencialmente sem rajada, move/maximiza na segunda chamada e mantém reset compatível com v9.'
+echo 'OK: terminals abre projetos + lrdp1/lrdp2 sequencialmente, move/maximiza na segunda chamada e mantém reset compatível com v9.'

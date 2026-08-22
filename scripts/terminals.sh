@@ -2,7 +2,7 @@
 # Terminais em duas fases, no mesmo padrão operacional do pycharms:
 # 1ª chamada abre somente o que falta, UM POR VEZ e com confirmação do GNOME;
 # 2ª e seguintes apenas reconciliam workspace/monitor/maximização.
-# Workspace 1 = LAZER; lrdp1/lrdp2 ficam fora. Um terminal por projeto.
+# Workspace 1 = LAZER; um terminal por projeto e, no final, um em lrdp1 e outro em lrdp2.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -46,6 +46,11 @@ load_projects() {
       project_dirs+=("$CODE_ROOT")
     fi
   done < "$PROJECTS_FILE"
+
+  # lrdp1 e lrdp2 são os dois workspaces finais definidos por desktops.sh.
+  # Também recebem um terminal, depois de todos os projetos.
+  project_entries+=("lrdp1" "lrdp2")
+  project_dirs+=("$HOME" "$HOME")
 }
 
 terminal_backend() {
@@ -128,7 +133,7 @@ show_diagnose() {
   local count="${#project_entries[@]}"
   printf '=== TERMINALS / GNOME ===\n'
   printf 'Sessão: %s / %s\n' "${XDG_CURRENT_DESKTOP:-?}" "${XDG_SESSION_TYPE:-?}"
-  printf 'Projetos: %s (workspaces 2..%s; LAZER e lrdp1/lrdp2 excluídos)\n' "$count" "$((count + 1))"
+  printf 'Destinos: %s (projetos + lrdp1/lrdp2; workspaces 2..%s; LAZER excluído)\n' "$count" "$((count + 1))"
   printf 'Terminal: '; terminal_backend || printf 'nenhum terminal compatível encontrado\n'
   printf 'Monitores:\n'
   command -v xrandr >/dev/null 2>&1 && xrandr --listmonitors 2>/dev/null || true
@@ -147,7 +152,7 @@ show_diagnose() {
 
 load_projects
 count="${#project_entries[@]}"
-(( count > 0 )) || fail 'nenhum projeto configurado para receber terminal.'
+(( count > 2 )) || fail 'nenhum projeto configurado para receber terminal.'
 
 case "${1:-}" in
   --diagnose|diagnose) show_diagnose; exit 0 ;;
@@ -159,7 +164,7 @@ case "${1:-}" in
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
     printf 'Fluxo: 1ª chamada abre exatamente os terminais faltantes, um por vez; 2ª chamada distribui e maximiza um por projeto no monitor direito.\n'
-    printf 'LAZER (workspace 1) e lrdp1/lrdp2 não recebem terminal automático.\n'
+    printf 'LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
     exit 0
     ;;
   '') ;;

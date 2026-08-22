@@ -1,10 +1,96 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec xfreerdp3 \
-  /v:192.168.1.143 \
-  /u:daniel \
-  /p:20bqns_DL.. \
-  /multimon \
-  /cert:ignore \
-  "$@"
+# Cadastre outros logins copiando uma linha abaixo no formato:
+#   "Nome exibido|usuario|senha"
+# Exemplo:
+#   "Trabalho|outro.usuario|outra_senha"
+LOGIN_PROFILES=(
+    "Principal|daniel|20bqns_DL.."
+    "Gov|govbr|20bqns_GR"
+)
+
+choose_login() {
+  local index choice profile label username password
+
+  if (( ${#LOGIN_PROFILES[@]} == 0 )); then
+    printf 'Nenhum login cadastrado em LOGIN_PROFILES.\n' >&2
+    return 2
+  fi
+
+  if (( ${#LOGIN_PROFILES[@]} == 1 )) || [[ ! -t 0 ]]; then
+    profile="${LOGIN_PROFILES[0]}"
+  else
+    printf 'Login RDP:\n' >&2
+    for index in "${!LOGIN_PROFILES[@]}"; do
+      IFS='|' read -r label username password <<<"${LOGIN_PROFILES[$index]}"
+      printf '  %d) %s (%s)%s\n' "$((index + 1))" "$label" "$username" "$([[ $index -eq 0 ]] && printf ' [padrão]')" >&2
+    done
+    read -r -p "Escolha [1-${#LOGIN_PROFILES[@]}]: " choice
+    choice="${choice:-1}"
+    if [[ ! "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#LOGIN_PROFILES[@]} )); then
+      printf 'Login inválido: %s\n' "$choice" >&2
+      return 2
+    fi
+    profile="${LOGIN_PROFILES[$((choice - 1))]}"
+  fi
+
+  IFS='|' read -r label username password <<<"$profile"
+  if [[ -z "$username" ]]; then
+    printf 'Perfil de login inválido: usuário vazio.\n' >&2
+    return 2
+  fi
+  printf '%s\t%s\n' "$username" "$password"
+}
+
+choose_audio_mode() {
+  local change choice
+
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' '/audio-mode:server'
+    return
+  fi
+
+  read -r -p 'Quer alterar a configuração? [s/N]: ' change
+  case "${change:-N}" in
+    [sS])
+      printf 'Áudio RDP:\n' >&2
+      printf '  1) Tocar neste computador\n' >&2
+      printf '  2) Tocar no computador remoto (Bluetooth remoto) [padrão]\n' >&2
+      printf '  3) Sem áudio\n' >&2
+      read -r -p 'Escolha [1/2/3]: ' choice
+      case "${choice:-2}" in
+        1) printf '%s\n' '/audio-mode:redirect' ;;
+        2) printf '%s\n' '/audio-mode:server' ;;
+        3) printf '%s\n' '/audio-mode:none' ;;
+        *)
+          printf 'Opção inválida: %s\n' "$choice" >&2
+          return 2
+          ;;
+      esac
+      ;;
+    [nN]|'')
+      printf '%s\n' '/audio-mode:server'
+      ;;
+    *)
+      printf 'Resposta inválida: %s (use S ou N)\n' "$change" >&2
+      return 2
+      ;;
+  esac
+}
+
+IFS=$'\t' read -r rdp_user rdp_password < <(choose_login)
+audio_mode="$(choose_audio_mode)"
+
+rdp_args=(
+  /v:192.168.1.143
+  "/u:$rdp_user"
+  /multimon
+  "$audio_mode"
+  /cert:ignore
+)
+if [[ -n "$rdp_password" ]]; then
+  rdp_args+=("/p:$rdp_password")
+fi
+
+exec xfreerdp3 "${rdp_args[@]}" "$@"
