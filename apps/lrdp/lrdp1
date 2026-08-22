@@ -79,8 +79,33 @@ choose_audio_mode() {
   esac
 }
 
+
+choose_microphone_mode() {
+  local change choice
+
+  if [[ ! -t 0 ]]; then
+    printf '%s\n' '/microphone'
+    return
+  fi
+
+  read -r -p 'Repassar microfone? [s/N]: ' change
+  case "${change:-N}" in
+    [sS])
+      printf '%s\n' '/microphone'
+      ;;
+    [nN]|'')
+      printf '%s\n' ''
+      ;;
+    *)
+      printf 'Resposta inválida: %s (use S ou N)\n' "$change" >&2
+      return 2
+      ;;
+  esac
+}
+
 IFS=$'\t' read -r rdp_user rdp_password < <(choose_login)
 audio_mode="$(choose_audio_mode)"
+microphone_mode="$(choose_microphone_mode)"
 
 rdp_args=(
   /v:192.168.1.143
@@ -89,6 +114,10 @@ rdp_args=(
   "$audio_mode"
   /cert:ignore
 )
+if [[ -n "$microphone_mode" ]]; then
+  rdp_args+=("$microphone_mode")
+fi
+
 if [[ -n "$rdp_password" ]]; then
   rdp_args+=("/p:$rdp_password")
 fi
