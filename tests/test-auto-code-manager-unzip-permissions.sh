@@ -55,24 +55,21 @@ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_T
 [ "$(stat -c '%a' "$P/deploy/local/new-task.sh")" = 755 ]
 [ ! -e "$D/alpha-app--permissions-ok.zip" ]
 
-# Caso errado: arquivo existente era executável e voltou sem +x. Deve recusar.
+# O ZIP é a fonte de verdade: se ele trouxer 0644, a importação deve aplicar 0644.
 rm -rf -- "$PKG"
 mkdir -p "$PKG/deploy/local"
-printf 'should-not-import\n' > "$PKG/deploy/local/setup.sh"
+printf 'mode-from-zip\n' > "$PKG/deploy/local/setup.sh"
 chmod 644 "$PKG/deploy/local/setup.sh"
 (
   cd "$PKG"
-  zip -qr "$D/alpha-app--permissions-bad.zip" .
+  zip -qr "$D/alpha-app--permissions-644.zip" .
 )
 
-set +e
 HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
-  "$M/scripts/auto-code-manager.sh" --import-downloads-once >/dev/null 2>&1
-rc=$?
-set -e
-[ "$rc" -ne 0 ]
-[ "$(cat "$P/deploy/local/setup.sh")" = new ]
-[ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 755 ]
-[ -e "$D/alpha-app--permissions-bad.zip" ]
+  "$M/scripts/auto-code-manager.sh" --import-downloads-once >/dev/null
 
-printf 'OK: chmod do ZIP faz round-trip e mudança silenciosa do bit executável é recusada\n'
+[ "$(cat "$P/deploy/local/setup.sh")" = mode-from-zip ]
+[ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 644 ]
+[ ! -e "$D/alpha-app--permissions-644.zip" ]
+
+printf 'OK: chmod armazenado no ZIP é reaplicado fielmente na importação\n'

@@ -198,14 +198,16 @@ handle_watch_event() {
     fi
   fi
 
-  # ZIP novo em Downloads: só nomes resolvidos para projeto cadastrado E
-  # existente entram. Desconhecidos ficam intocados. CLOSE_WRITE/MOVED_TO
-  # garante que o produtor terminou de gravar antes da validação do ZIP.
+  # Um evento de ZIP em Downloads é somente o GATILHO. A unidade de trabalho
+  # é a fila inteira: import_downloads revarre Downloads após cada importação e
+  # só devolve o controle ao inotify quando não resta ZIP reconhecido sem tentar.
+  # Isso evita perder B/C/D quando eles terminam enquanto A ainda está sendo
+  # validado/aplicado.
   if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
     if download_zip_is_configured "$event_path"; then
-      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; valida, faz backup pré-importação, aplica e remove somente após confirmação." \
-        import_one_zip "$event_path" true; then
-        LOG_CONTEXT=error log "ERRO: importação falhou; ZIP mantido em Downloads: $event_path"
+      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; drena toda a fila, valida, faz backup pré-importação, aplica e remove somente após confirmação." \
+        import_downloads; then
+        LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
       fi
     fi
     return 0

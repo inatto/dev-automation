@@ -161,13 +161,9 @@ import_one_zip() {
     return 1
   }
 
-  # Arquivo existente não pode voltar do ZIP mudando silenciosamente o bit
-  # executável. Isso detecta 755->644 (ou o inverso) antes de tocar no projeto.
-  if ! verify_existing_execute_bits_unchanged "$source_dir" "$project_dir"; then
-    log "ERRO: executabilidade divergente na volta do ZIP. Projeto não foi alterado; ZIP mantido."
-    rm -rf -- "$temp_dir"
-    return 1
-  fi
+  # O modo POSIX armazenado no ZIP é a fonte de verdade da importação.
+  # A extração segura já o reaplica no staging e verify_zip_modes_after_extract
+  # confirma o round-trip antes de qualquer alteração no projeto.
 
   # O ZIP em /home/daniel/Code é o ponto de retorno imediatamente anterior à
   # importação. Só tocamos no projeto se esse backup pré-importação validar.
@@ -288,9 +284,9 @@ import_one_zip() {
 }
 
 import_downloads() {
-  local downloads zip_file
-  local total index imported=0 failed=0
-  local -a zip_files=()
+  local downloads zip_file selected_zip
+  local imported=0 failed=0 processed=0
+  local -A attempted=()
 
   downloads="$(download_inbox_dir)"
 
@@ -301,49 +297,56 @@ import_downloads() {
 
   log "Verificando Downloads: $downloads"
 
-  # A fila de importação é EXCLUSIVAMENTE o que está cadastrado no .projects.
-  # ZIP aleatório em Downloads (ROM, instalador, pacote etc.) é invisível para
-  # o manager: não entra no lote, não é apagado e não mantém o monitor em loop.
-  while IFS= read -r -d '' zip_file; do
-    download_zip_is_configured "$zip_file" || continue
-    zip_files+=("$zip_file")
-  done < <(
-    find "$downloads" \
-      -maxdepth 1 \
-      -type f \
-      -iname "*.zip" \
-      -print0 2>/dev/null | sort -z
-  )
+  # Downloads é uma fila drenável, não apenas um snapshot. Depois de cada ZIP
+  # processado, varremos novamente a pasta. Assim, ZIPs que terminarem de baixar
+  # enquanto uma importação está em andamento entram no MESMO ciclo antes de o
+  # monitor voltar a dormir no inotify.
+  #
+  # ZIP desconhecido continua invisível. ZIP que falhar é tentado apenas uma vez
+  # nesta drenagem e permanece em Downloads para inspeção/correção, evitando loop.
+  while true; do
+    selected_zip=""
 
-  total="${#zip_files[@]}"
-  if [ "$total" -eq 0 ]; then
+    while IFS= read -r -d '' zip_file; do
+      download_zip_is_configured "$zip_file" || continue
+      [ -z "${attempted[$zip_file]+x}" ] || continue
+      selected_zip="$zip_file"
+      break
+    done < <(
+      find "$downloads" \
+        -maxdepth 1 \
+        -type f \
+        -iname "*.zip" \
+        -print0 2>/dev/null | sort -z
+    )
+
+    [ -n "$selected_zip" ] || break
+
+    attempted["$selected_zip"]=1
+    processed=$((processed + 1))
+    wait_if_paused
+
+    log "FILA DE DOWNLOADS [$processed]: $(basename -- "$selected_zip")"
+
+    if ! download_zip_has_purpose "$(basename -- "$selected_zip")"; then
+      log "AVISO PADRÃO DE NOME: use <projeto>--<o-que-faz>.zip; pacote atual não descreve a finalidade."
+    fi
+
+    if import_one_zip "$selected_zip"; then
+      imported=$((imported + 1))
+    else
+      failed=$((failed + 1))
+      log "ERRO: falha ao importar: $(basename -- "$selected_zip")"
+      log "ZIP COM FALHA MANTIDO EM DOWNLOADS: $selected_zip"
+    fi
+  done
+
+  if [ "$processed" -eq 0 ]; then
     log "Nenhum ZIP de projeto existente/configurado encontrado em Downloads nesta rodada."
     return 0
   fi
 
-  log "LOTE DE DOWNLOADS: $total ZIP(s) reconhecido(s) serão processados em sequência."
-
-  for ((index = 0; index < total; index++)); do
-    wait_if_paused
-    zip_file="${zip_files[$index]}"
-    log "LOTE [$((index + 1))/$total]: $(basename -- "$zip_file")"
-
-    if ! download_zip_has_purpose "$(basename -- "$zip_file")"; then
-      log "AVISO PADRÃO DE NOME: use <projeto>--<o-que-faz>.zip; pacote atual não descreve a finalidade."
-    fi
-
-    if import_one_zip "$zip_file"; then
-      imported=$((imported + 1))
-    else
-      failed=$((failed + 1))
-      log "ERRO: falha ao importar: $(basename -- "$zip_file")"
-      # Falha é conservadora: mantém o ZIP original em Downloads para
-      # inspeção/correção. Nada é renomeado, arquivado ou apagado.
-      log "ZIP COM FALHA MANTIDO EM DOWNLOADS: $zip_file"
-    fi
-  done
-
-  LOG_CONTEXT=download_done log "LOTE DE DOWNLOADS CONCLUÍDO: $imported sucesso(s), $failed falha(s), $total processado(s)."
+  LOG_CONTEXT=download_done log "FILA DE DOWNLOADS DRENADA: $imported sucesso(s), $failed falha(s), $processed processado(s)."
   [ "$failed" -eq 0 ]
 }
 
