@@ -17,7 +17,7 @@ const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 10;
+const EXTENSION_VERSION = 11;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -86,10 +86,10 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             this._closeManagedWorkspaceWindows(closeToken);
         }
 
-        const chromesToken = this._readToken(CHROMES_REQUEST_PATH);
-        if (chromesToken && chromesToken !== this._lastChromesRequestToken) {
-            this._lastChromesRequestToken = chromesToken;
-            this._prepareChromes(chromesToken);
+        const chromesRequest = this._readRequest(CHROMES_REQUEST_PATH);
+        if (chromesRequest.token && chromesRequest.token !== this._lastChromesRequestToken) {
+            this._lastChromesRequestToken = chromesRequest.token;
+            this._prepareChromes(chromesRequest.token, chromesRequest.fields);
         }
 
         const terminalRequest = this._readRequest(TERMINALS_REQUEST_PATH);
@@ -118,13 +118,19 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _prepareChromes(token) {
-        const workspaceIndex = global.workspace_manager.get_active_workspace_index();
+    _prepareChromes(token, fields = {}) {
+        const requestedWorkspace = this._positiveInteger(fields.workspace);
+        const workspaceCount = Math.max(1, global.workspace_manager.n_workspaces);
+        const workspaceIndex = requestedWorkspace > 0
+            ? Math.min(requestedWorkspace, workspaceCount) - 1
+            : global.workspace_manager.get_active_workspace_index();
         const monitor = this._leftmostMonitor();
+        const maximize = String(fields.maximize ?? '0') === '1';
         this._chromeSession = {
             token,
             workspaceIndex,
             monitor,
+            maximize,
             expiresAt: nowSeconds() + 18,
             browsers: 0,
             nautilus: 0,
@@ -134,7 +140,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             GLib.file_set_contents(
                 CHROMES_READY_PATH,
-                `${token}\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\n`
+                `${token}\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\tmaximize=${maximize ? 1 : 0}\n`
             );
             this._writeChromeResult();
         } catch (error) {
@@ -271,14 +277,14 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             if (this._isBrowser(window)) {
                 chromeSession.browsers += 1;
                 this._handledWindows.add(window);
-                this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10);
+                this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10, chromeSession.maximize);
                 this._writeChromeResult();
                 return;
             }
             if (this._isNautilus(window)) {
                 chromeSession.nautilus += 1;
                 this._handledWindows.add(window);
-                this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10);
+                this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10, chromeSession.maximize);
                 this._writeChromeResult();
                 return;
             }
@@ -418,7 +424,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         });
     }
 
-    _schedulePlacement(window, workspaceIndex, monitor, roundsLeft) {
+    _schedulePlacement(window, workspaceIndex, monitor, roundsLeft, maximize = false) {
         const place = () => {
             if (!window)
                 return;
@@ -426,10 +432,12 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 const workspace = window.get_workspace?.();
                 if (!workspace || workspace.index() !== workspaceIndex)
                     window.change_workspace_by_index(workspaceIndex, false);
-                if ((window.get_maximize_flags?.() ?? 0) !== 0)
+                if (!maximize && (window.get_maximize_flags?.() ?? 0) !== 0)
                     window.unmaximize(Meta.MaximizeFlags.BOTH);
                 if (window.get_monitor?.() !== monitor)
                     window.move_to_monitor(monitor);
+                if (maximize && !window.is_maximized?.())
+                    window.maximize();
             } catch (error) {
                 console.error(`[workspace-controller] falha ao posicionar janela: ${error}`);
             }
@@ -443,7 +451,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             this._timeouts.delete(id);
             place();
             if (roundsLeft > 1)
-                this._schedulePlacement(window, workspaceIndex, monitor, roundsLeft - 1);
+                this._schedulePlacement(window, workspaceIndex, monitor, roundsLeft - 1, maximize);
             return GLib.SOURCE_REMOVE;
         });
         this._timeouts.add(id);

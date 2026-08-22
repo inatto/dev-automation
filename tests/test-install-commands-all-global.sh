@@ -36,6 +36,9 @@ commands=(
   g512-rgb
   desktops
   chromes
+  chromes-all
+  files
+  files-all
   terminals
   phpstorms
   pycharms

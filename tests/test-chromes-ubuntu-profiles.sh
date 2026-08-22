@@ -28,7 +28,7 @@ grep -Fq 'nome=Sindicatto' <<<"$OUT"
 grep -Fq 'Sindicatto resolvido: Profile 3 (detectado pelo nome/metadados)' <<<"$OUT"
 
 : > "$TMP/chrome.log"
-HOME="$TMP/home" PATH="$TMP/bin:$PATH" CHROMES_TEST_LOG="$TMP/chrome.log" "$SCRIPT" >/dev/null
+HOME="$TMP/home" PATH="$TMP/bin:$PATH" CHROMES_TEST_LOG="$TMP/chrome.log" CHROMES_LOCAL_URLS="https://admin.localhost/" "$SCRIPT" >/dev/null
 # Os dois lançamentos são assíncronos; espere só o necessário para o fake gravar.
 for _ in {1..20}; do
   [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]] && break

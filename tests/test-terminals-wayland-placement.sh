@@ -36,7 +36,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=10
+version=11
 controller=1
 floating-label=0
 window-placement=1

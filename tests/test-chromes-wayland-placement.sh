@@ -31,9 +31,9 @@ case "${1:-}" in
   info)
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     if [[ -s "$dir/extension.ready" ]]; then
-      printf '  Version: 10\n  State: ACTIVE\n'
+      printf '  Version: 11\n  State: ACTIVE\n'
     else
-      printf '  Version: 10\n  State: INACTIVE\n'
+      printf '  Version: 11\n  State: INACTIVE\n'
     fi
     exit 0
     ;;
@@ -41,7 +41,7 @@ case "${1:-}" in
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     mkdir -p "$dir"
     cat > "$dir/extension.ready" <<'READY'
-version=10
+version=11
 controller=1
 floating-label=0
 window-placement=1
@@ -62,8 +62,9 @@ chmod +x "$TMP/bin/"*
   for _ in $(seq 1 120); do
     req="$TMP/state/desktops/chromes.request"
     if [[ -s "$req" ]]; then
-      token="$(cat "$req")"
-      printf '%s\tworkspace=7\tmonitor=0\n' "$token" > "$TMP/state/desktops/chromes.ready"
+      request="$(cat "$req")"
+      IFS=$'\t' read -r token _ <<< "$request"
+      printf '%s\tworkspace=7\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
       for _ in $(seq 1 160); do
         if [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]]; then
           printf '%s\tbrowsers=2\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
@@ -87,13 +88,16 @@ out="$(
   AUTO_CODE_STATE_DIR="$TMP/state" \
   PROJECTS_FILE="$TMP/projects" \
   CHROMES_TEST_LOG="$TMP/chrome.log" \
+  CHROMES_LOCAL_URLS='https://admin.localhost/' \
     "$ROOT/scripts/chromes/ubuntu.sh"
 )"
 wait "$watcher"
 
-grep -Fq 'Destino: workspace atual 7, monitor mais à esquerda' <<<"$out"
-grep -Fq 'Chrome confirmado no workspace atual / monitor esquerdo.' <<<"$out"
+grep -Fq 'Destino: workspace atual 7, monitor mais à esquerda, maximizado.' <<<"$out"
+grep -Fq 'Chrome confirmado no workspace atual / monitor esquerdo / maximizado.' <<<"$out"
 [[ "$(wc -l < "$TMP/chrome.log")" -eq 2 ]]
 grep -Fq -- '--profile-directory=Default' "$TMP/chrome.log"
 grep -Fq -- '--profile-directory=Profile 3' "$TMP/chrome.log"
-echo 'OK: chromes usa somente o workspace atual e delega as novas janelas ao monitor esquerdo.'
+echo 'OK: chromes usa o workspace atual e abre as janelas maximizadas no monitor esquerdo.'
+grep -Fq 'workspace=' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq 'maximize' "$ROOT/apps/desktops-gnome-extension/extension.js"
