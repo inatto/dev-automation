@@ -7,7 +7,8 @@ project_configured_normal_paths() {
 
   while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
     line="${raw_line%%#*}"
-    line="$(printf '%s' "$line" | xargs)"
+    line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
     [[ -n "$line" ]] || continue
     line="${line#./}"
     line="${line%/}"

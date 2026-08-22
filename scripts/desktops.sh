@@ -5,7 +5,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
+# shellcheck source=lib/project-config.sh
+source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 DESKTOPS_PLATFORM="${DESKTOPS_PLATFORM:-auto}"
 GNOME_EXTENSION_UUID='workspace-name-osd@dev-automation'
 GNOME_EXTENSION_SOURCE="$PROJECT_ROOT/apps/desktops-gnome-extension"

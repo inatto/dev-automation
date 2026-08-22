@@ -11,7 +11,9 @@ KEY_FILE="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/git-reverse-crypt-2.k
 MODE="unlock"
 ONLY_PROJECT=""
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PROJECTS_FILE="${PROJECTS_FILE:-$PROJECT_ROOT/config/auto-code-manager.projects}"
+# shellcheck source=lib/project-config.sh
+source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CRITICALS=0
 UNLOCKED=0
 WARNINGS=0

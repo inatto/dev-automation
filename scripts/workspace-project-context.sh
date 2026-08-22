@@ -4,7 +4,9 @@
 
 WORKSPACE_CONTEXT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 WORKSPACE_CONTEXT_ROOT="$(cd -- "$WORKSPACE_CONTEXT_DIR/.." && pwd -P)"
-PROJECTS_FILE="${PROJECTS_FILE:-$WORKSPACE_CONTEXT_ROOT/config/auto-code-manager.projects}"
+# shellcheck source=lib/project-config.sh
+source "$WORKSPACE_CONTEXT_ROOT/scripts/lib/project-config.sh"
+PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$WORKSPACE_CONTEXT_ROOT")}"
 SERVICES_FILE="${SERVICES_FILE:-$WORKSPACE_CONTEXT_ROOT/config/services.csv}"
 
 declare -ag WORKSPACE_PROJECTS=()

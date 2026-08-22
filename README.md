@@ -1,5 +1,28 @@
 # dev-automation
 
+## Primeiro passo em uma máquina nova
+
+O bootstrap distingue automaticamente as duas camadas: **Windows + WSL** e **Ubuntu/Linux nativo**. No WSL ele instala `wslu` e abre a autenticação do GitHub no navegador do Windows; no Ubuntu nativo não usa nenhuma integração do Windows.
+
+Comando único, idempotente, para uma máquina nova:
+
+```bash
+sudo apt update && sudo apt install -y git gh python3 && if grep -qiE '(microsoft|wsl)' /proc/sys/kernel/osrelease /proc/version 2>/dev/null; then sudo apt install -y wslu && GH_LOGIN='GH_BROWSER=wslview gh auth login --hostname github.com --web'; else GH_LOGIN='gh auth login --hostname github.com --web'; fi && (gh auth status --hostname github.com >/dev/null 2>&1 || eval "$GH_LOGIN") && mkdir -p "$HOME/Code/bots" && if [ -d "$HOME/Code/bots/dev-automation/.git" ]; then git -C "$HOME/Code/bots/dev-automation" pull --ff-only; elif [ -e "$HOME/Code/bots/dev-automation" ]; then echo "ERRO: ~/Code/bots/dev-automation existe mas não é um repositório Git." >&2; false; else gh repo clone inatto/dev-automation "$HOME/Code/bots/dev-automation"; fi && cd "$HOME/Code/bots/dev-automation"
+```
+
+Depois, instale/atualize os comandos globais:
+
+```bash
+./deploy/local/install-commands.sh && source ~/.bashrc
+```
+
+Por fim, prepare os projetos desta máquina. O `dev-gitsetup` identifica automaticamente o computador por `/etc/machine-id`; na primeira execução real, cria `config/projects/<machine-id>.projects` a partir de `config/projects/default.projects` e baixa somente os projetos definidos para essa máquina:
+
+```bash
+dev-gitsetup --dry-run
+dev-gitsetup
+```
+
 Automação local dos projetos em `/home/daniel/Code`, com execução direta em
 primeiro plano e encerramento por `Ctrl+C`.
 
@@ -26,9 +49,12 @@ ZIPs locais: cada projeto normal configurado é monitorado por `inotify`; após 
 
 #### Projetos e agregadores explícitos
 
-`config/auto-code-manager.projects` é a única fonte da verdade para os backups.
-Nenhum `apps.zip`, `orbital.zip`, `Code.zip` ou outro ZIP de pasta é inferido
-automaticamente.
+A lista ativa é específica por computador: `config/projects/<machine-id>.projects`,
+onde `<machine-id>` vem automaticamente de `/etc/machine-id`. Na primeira execução
+real do `dev-gitsetup`, o arquivo da máquina é criado a partir de
+`config/projects/default.projects`. `config/auto-code-manager.projects` fica apenas
+como compatibilidade legada. Nenhum `apps.zip`, `orbital.zip`, `Code.zip` ou outro
+ZIP de pasta é inferido automaticamente.
 
 Uma entrada normal representa um projeto real:
 
@@ -217,7 +243,7 @@ phpstorm-dev
 
 ### `phpstorms`
 
-Lê os projetos ativos de `config/auto-code-manager.projects`.
+Lê os projetos ativos da lista resolvida para a máquina (`config/projects/<machine-id>.projects`).
 
 A regra de abertura é:
 

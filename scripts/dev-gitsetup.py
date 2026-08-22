@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Bootstrap/synchronize the projects declared by dev-automation.
 
-Project list source of truth: config/auto-code-manager.projects.
+Project list source of truth: config/projects/<machine-id>.projects.
+On first real run, the machine-specific file is created from config/projects/default.projects.
+Machine identity comes automatically from /etc/machine-id.
 Repository location source of truth: GitHub API for the active gh account.
 config/environment.repositories is refreshed from GitHub after successful resolution.
 """
@@ -18,7 +20,9 @@ from typing import Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CODE_ROOT = Path(os.environ.get("CODE_ROOT", "/home/daniel/Code"))
-DEFAULT_PROJECTS_FILE = PROJECT_ROOT / "config" / "auto-code-manager.projects"
+PROJECTS_DIR = PROJECT_ROOT / "config" / "projects"
+DEFAULT_PROJECTS_FILE = PROJECTS_DIR / "default.projects"
+LEGACY_PROJECTS_FILE = PROJECT_ROOT / "config" / "auto-code-manager.projects"
 DEFAULT_REPOSITORIES_FILE = PROJECT_ROOT / "config" / "environment.repositories"
 
 
@@ -39,6 +43,46 @@ def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subproc
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.PIPE if capture else None,
     )
+
+
+def machine_id() -> str:
+    value = os.environ.get("DEV_MACHINE_ID", "").strip()
+    if not value:
+        path = Path("/etc/machine-id")
+        try:
+            value = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            fail(f"não foi possível ler /etc/machine-id: {exc}")
+
+    normalized = value.lower()
+    if len(normalized) != 32 or any(ch not in "0123456789abcdef" for ch in normalized):
+        fail(f"machine-id inválido: {value!r}")
+    return normalized
+
+
+def resolve_projects_file(explicit: Path | None, *, dry_run: bool) -> tuple[Path, str | None]:
+    if explicit is not None:
+        return explicit, None
+
+    mid = machine_id()
+    machine_file = PROJECTS_DIR / f"{mid}.projects"
+    if machine_file.is_file():
+        return machine_file, mid
+
+    source = DEFAULT_PROJECTS_FILE if DEFAULT_PROJECTS_FILE.is_file() else LEGACY_PROJECTS_FILE
+    if not source.is_file():
+        fail(f"arquivo default de projetos não encontrado: {DEFAULT_PROJECTS_FILE}")
+
+    if dry_run:
+        out(f"[dev-gitsetup] DRY-RUN: criaria {machine_file} a partir de {source}")
+        return source, mid
+
+    machine_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = machine_file.with_name(machine_file.name + f".tmp.{os.getpid()}")
+    tmp.write_text(source.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    os.replace(tmp, machine_file)
+    out(f"[dev-gitsetup] Criado: {machine_file} (base: {source.name})")
+    return machine_file, mid
 
 
 def active_projects(path: Path) -> list[str]:
@@ -205,11 +249,16 @@ def git_root(path: Path) -> Path | None:
 
 
 def sync(args: argparse.Namespace) -> int:
+    projects_file, mid = resolve_projects_file(args.projects_file, dry_run=args.dry_run)
+    if mid is not None:
+        out(f"[dev-gitsetup] Machine ID: {mid}")
+    out(f"[dev-gitsetup] Projetos: {projects_file}")
+
     ensure_command("git")
     user = ensure_github_auth(args.non_interactive)
     out(f"[dev-gitsetup] GitHub autenticado: {user}")
 
-    projects = active_projects(args.projects_file)
+    projects = active_projects(projects_file)
     mapping = repository_map(args.repositories_file)
     project_set = set(projects)
     roots = [project for project in projects if parent_project(project, project_set) is None]
@@ -303,10 +352,15 @@ def sync(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dev-gitsetup",
-        description="Prepara /home/daniel/Code a partir de config/auto-code-manager.projects.",
+        description="Prepara /home/daniel/Code usando a lista de projetos desta máquina (/etc/machine-id).",
     )
     p.add_argument("--code-root", type=Path, default=DEFAULT_CODE_ROOT)
-    p.add_argument("--projects-file", type=Path, default=DEFAULT_PROJECTS_FILE)
+    p.add_argument(
+        "--projects-file",
+        type=Path,
+        default=None,
+        help="override explícito; por padrão usa config/projects/<machine-id>.projects",
+    )
     p.add_argument("--repositories-file", type=Path, default=DEFAULT_REPOSITORIES_FILE)
     p.add_argument("--dry-run", action="store_true", help="mostra o que faria sem clonar/atualizar")
     p.add_argument("--non-interactive", action="store_true", help="falha em vez de abrir gh auth login")

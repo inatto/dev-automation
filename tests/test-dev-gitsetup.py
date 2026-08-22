@@ -124,6 +124,108 @@ orgs/beta|https://github.com/owner/beta.git
             self.assertIn("fetch --all --prune", calls)
             self.assertNotIn("git clone", calls)
 
+
+    def test_creates_machine_projects_from_default_on_first_real_run(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = Path(td)
+            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script.parent.mkdir(parents=True)
+            copied_script.write_text(SCRIPT.read_text())
+            config = temp / "config"
+            projects_dir = config / "projects"
+            projects_dir.mkdir(parents=True)
+            default_projects = projects_dir / "default.projects"
+            default_projects.write_text("bots/alpha\norgs/beta\n")
+            repos = config / "repos"
+            repos.write_text("")
+            bindir, _state, _log = self.make_fake_tools(temp)
+            code = temp / "Code"
+            machine = "0123456789abcdef0123456789abcdef"
+            env = os.environ.copy()
+            env["PATH"] = f"{bindir}:{env['PATH']}"
+            env["DEV_MACHINE_ID"] = machine
+            result = subprocess.run(
+                [
+                    "python3", str(copied_script),
+                    "--code-root", str(code),
+                    "--repositories-file", str(repos),
+                ],
+                env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            machine_file = projects_dir / f"{machine}.projects"
+            self.assertTrue(machine_file.is_file())
+            self.assertEqual(machine_file.read_text(), default_projects.read_text())
+            self.assertIn(f"Machine ID: {machine}", result.stdout)
+            self.assertIn(str(machine_file), result.stdout)
+            self.assertTrue((code / "bots/alpha/.git").is_dir())
+            self.assertTrue((code / "orgs/beta/.git").is_dir())
+
+    def test_dry_run_does_not_create_machine_projects_file(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = Path(td)
+            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script.parent.mkdir(parents=True)
+            copied_script.write_text(SCRIPT.read_text())
+            config = temp / "config"
+            projects_dir = config / "projects"
+            projects_dir.mkdir(parents=True)
+            (projects_dir / "default.projects").write_text("bots/alpha\n")
+            repos = config / "repos"
+            repos.write_text("")
+            bindir, _state, _log = self.make_fake_tools(temp)
+            code = temp / "Code"
+            machine = "fedcba9876543210fedcba9876543210"
+            env = os.environ.copy()
+            env["PATH"] = f"{bindir}:{env['PATH']}"
+            env["DEV_MACHINE_ID"] = machine
+            result = subprocess.run(
+                [
+                    "python3", str(copied_script),
+                    "--code-root", str(code),
+                    "--repositories-file", str(repos),
+                    "--dry-run",
+                ],
+                env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((projects_dir / f"{machine}.projects").exists())
+            self.assertIn("DRY-RUN: criaria", result.stdout)
+            self.assertFalse((code / "bots/alpha").exists())
+
+    def test_existing_machine_projects_is_preserved_and_used(self):
+        with tempfile.TemporaryDirectory() as td:
+            temp = Path(td)
+            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script.parent.mkdir(parents=True)
+            copied_script.write_text(SCRIPT.read_text())
+            config = temp / "config"
+            projects_dir = config / "projects"
+            projects_dir.mkdir(parents=True)
+            (projects_dir / "default.projects").write_text("bots/alpha\n")
+            machine = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            machine_file = projects_dir / f"{machine}.projects"
+            machine_file.write_text("orgs/beta\n")
+            repos = config / "repos"
+            repos.write_text("")
+            bindir, _state, _log = self.make_fake_tools(temp)
+            code = temp / "Code"
+            env = os.environ.copy()
+            env["PATH"] = f"{bindir}:{env['PATH']}"
+            env["DEV_MACHINE_ID"] = machine
+            result = subprocess.run(
+                [
+                    "python3", str(copied_script),
+                    "--code-root", str(code),
+                    "--repositories-file", str(repos),
+                ],
+                env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(machine_file.read_text(), "orgs/beta\n")
+            self.assertFalse((code / "bots/alpha").exists())
+            self.assertTrue((code / "orgs/beta/.git").is_dir())
+
     def test_requests_login_when_no_account_is_authenticated(self):
         with tempfile.TemporaryDirectory() as td:
             result, _code, state, log = self.run_sync(Path(td), initially_authenticated=False)

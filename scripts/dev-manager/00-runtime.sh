@@ -5,7 +5,9 @@
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-unzip"
-PROJECTS_FILE="$PROJECT_ROOT/config/auto-code-manager.projects"
+# shellcheck source=../lib/project-config.sh
+source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+PROJECTS_FILE="${DEV_MANAGER_PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
