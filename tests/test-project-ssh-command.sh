@@ -76,9 +76,12 @@ grep -Fq 'servidor: ubuntu@52.67.135.170' "$TMP/run.log"
 ! grep -Fq '44.219.174.82' "$TMP/run.log"
 grep -Fq 'site OK: HTTP 200 em 0.123s | https://admin.sindicatto.com/orbital-mail/' "$TMP/run.log"
 grep -Fq 'SSH OK: ubuntu@52.67.135.170' "$TMP/run.log"
+grep -Fq 'pasta remota do projeto: /home/ubuntu/apps/orgs/orbital/orbital-mail (inferido do padrão /apps/<projeto>)' "$TMP/run.log"
+grep -Fq 'abrindo sessão SSH interativa em: /home/ubuntu/apps/orgs/orbital/orbital-mail' "$TMP/run.log"
 [[ "$(wc -l < "$SSH_LOG")" -eq 2 ]]
 grep -Fq 'BatchMode=yes ubuntu@52.67.135.170' "$SSH_LOG"
 grep -Fq 'ubuntu@52.67.135.170' "$SSH_LOG"
+grep -Fq '/home/ubuntu/apps/orgs/orbital/orbital-mail' "$SSH_LOG"
 
 
 # Também funciona fora do amazon-infra, lendo .env.remote do próprio projeto.

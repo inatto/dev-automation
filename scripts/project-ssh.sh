@@ -114,6 +114,8 @@ REMOTE_USER_SOURCE=""
 REMOTE_HOST_SOURCE=""
 SSH_KEY_SOURCE=""
 SSH_PORT_SOURCE=""
+REMOTE_APP_DIR_SOURCE=""
+REMOTE_APP_DIR_MODE=""
 SEARCHED_PROJECT_FILES=()
 AMAZON_INFRA_ROOT=""
 AMAZON_SELECTED_FILE=""
@@ -139,6 +141,10 @@ resolve_from_project_files() {
     if [[ -z "$SSH_PORT" ]]; then
       value="$(extract_assignment "$file" SSH_PORT 2>/dev/null || true)"
       if [[ -n "$value" ]]; then SSH_PORT="$value"; SSH_PORT_SOURCE="$file"; fi
+    fi
+    if [[ -z "$REMOTE_APP_DIR" ]]; then
+      value="$(extract_assignment "$file" REMOTE_APP_DIR DEPLOY_REMOTE_APP_DIR REMOTE_DIR 2>/dev/null || true)"
+      if [[ -n "$value" ]]; then REMOTE_APP_DIR="$value"; REMOTE_APP_DIR_SOURCE="$file"; REMOTE_APP_DIR_MODE="configuração do projeto"; fi
     fi
 
     value="$(extract_assignment "$file" SITE_URL REMOTE_URL PUBLIC_URL APP_URL 2>/dev/null || true)"
@@ -204,6 +210,20 @@ resolve_from_amazon_infra() {
     if [[ -n "$value" ]]; then SSH_KEY="$(expand_known_path "$value")"; SSH_KEY_SOURCE="$best_file"; fi
   fi
   selected_host="$REMOTE_HOST"
+
+  if [[ -z "$REMOTE_APP_DIR" ]]; then
+    value="$(extract_assignment "$best_file" REMOTE_APP_DIR DEPLOY_REMOTE_APP_DIR REMOTE_DIR 2>/dev/null || true)"
+    if [[ -n "$value" ]]; then
+      if [[ "$value" == */"$PROJECT_REL" ]]; then
+        REMOTE_APP_DIR="$value"
+        REMOTE_APP_DIR_MODE="configuração da infra"
+      elif [[ "$value" == */apps/* ]]; then
+        REMOTE_APP_DIR="${value%%/apps/*}/apps/$PROJECT_REL"
+        REMOTE_APP_DIR_MODE="inferido do padrão /apps/<projeto>"
+      fi
+      if [[ -n "$REMOTE_APP_DIR" ]]; then REMOTE_APP_DIR_SOURCE="$best_file"; fi
+    fi
+  fi
 
   # Mostra todos os sites atuais que apontam para o mesmo projeto e servidor.
   for file in "${files[@]}"; do
@@ -294,6 +314,7 @@ REMOTE_USER=""
 REMOTE_HOST=""
 SSH_KEY=""
 SSH_PORT=""
+REMOTE_APP_DIR=""
 SITE_URLS=()
 SSH_ARGS=()
 
@@ -311,6 +332,10 @@ if [[ "$REMOTE_HOST" == *@* ]]; then
   REMOTE_HOST="${REMOTE_HOST#*@}"
 fi
 [[ -n "$REMOTE_USER" ]] || REMOTE_USER="ubuntu"
+if [[ -z "$REMOTE_APP_DIR" ]]; then
+  REMOTE_APP_DIR="/home/$REMOTE_USER/apps/$PROJECT_REL"
+  REMOTE_APP_DIR_MODE="padrão remoto"
+fi
 [[ "$SSH_PORT" =~ ^[0-9]*$ ]] || fail "SSH_PORT inválida: $SSH_PORT"
 
 destination="$REMOTE_USER@$REMOTE_HOST"
@@ -326,6 +351,8 @@ fi
 log "procurado no projeto: $PROJECT_DIR/deploy/remote, $PROJECT_DIR/config/remote, $PROJECT_DIR/config/production"
 [[ -z "$AMAZON_INFRA_ROOT" ]] || log "procurado na infra: $AMAZON_INFRA_ROOT"
 [[ -z "$AMAZON_SELECTED_FILE" ]] || log "config remota selecionada: $AMAZON_SELECTED_FILE"
+log "pasta remota do projeto: $REMOTE_APP_DIR${REMOTE_APP_DIR_MODE:+ ($REMOTE_APP_DIR_MODE)}"
+[[ -z "$REMOTE_APP_DIR_SOURCE" ]] || log "origem da pasta remota: $REMOTE_APP_DIR_SOURCE"
 
 if ((${#SITE_URLS[@]} > 0)); then
   for site in "${SITE_URLS[@]}"; do
@@ -337,5 +364,8 @@ fi
 
 build_ssh_args
 remote_preflight "$destination"
-log "abrindo sessão SSH interativa..."
-exec ssh "${SSH_ARGS[@]}" "$destination"
+log "abrindo sessão SSH interativa em: $REMOTE_APP_DIR"
+printf -v remote_dir_q '%q' "$REMOTE_APP_DIR"
+printf -v remote_dir_msg_q '%q' "$REMOTE_APP_DIR"
+remote_shell_cmd="if [ -d $remote_dir_q ]; then cd -- $remote_dir_q; else printf '[%s] AVISO: pasta remota não existe: %s; abrindo HOME\n' '$COMMAND_NAME' $remote_dir_msg_q >&2; cd -- \"\$HOME\"; fi; exec \"\${SHELL:-/bin/bash}\" -l"
+exec ssh -t "${SSH_ARGS[@]}" "$destination" "$remote_shell_cmd"
