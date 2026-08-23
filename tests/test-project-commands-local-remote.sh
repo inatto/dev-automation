@@ -23,6 +23,7 @@ HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" PROJECTS_FILE="
   "$ROOT/deploy/local/install-project-commands.sh" >/dev/null
 [[ -x "$TARGET_DIR/sample-app" ]]
 [[ -x "$TARGET_DIR/remote-sample-app" ]]
+[[ -x "$TARGET_DIR/ssh-sample-app" ]]
 [[ "$($TARGET_DIR/sample-app | tail -n 1)" == 'local:setup:' ]]
 [[ "$($TARGET_DIR/sample-app start | tail -n 1)" == 'local:start:' ]]
 [[ "$($TARGET_DIR/remote-sample-app | tail -n 1)" == 'remote:setup:' ]]

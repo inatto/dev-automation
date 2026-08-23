@@ -8,7 +8,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 CONTEXT_LIB="$PROJECT_ROOT/scripts/workspace-project-context.sh"
 CHROMES_COMMAND="${CHROMES_COMMAND:-$PROJECT_ROOT/scripts/chromes.sh}"
 DESKTOPS_COMMAND="${DESKTOPS_COMMAND:-$PROJECT_ROOT/scripts/desktops.sh}"
-DESKTOP_DELAY_SECONDS=2
+DESKTOP_DELAY_SECONDS=1
 
 [[ -f "$CONTEXT_LIB" ]] || { printf '[chromes-all] ERRO: contexto ausente: %s\n' "$CONTEXT_LIB" >&2; exit 1; }
 source "$CONTEXT_LIB"

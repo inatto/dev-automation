@@ -10,6 +10,7 @@ AUTO_SOURCE="$PROJECT_ROOT/scripts/auto-code-manager.sh"
 AUTO_TARGET="$TARGET_DIR/auto-code-manager"
 PROJECT_INSTALLER="$PROJECT_ROOT/deploy/local/install-project-commands.sh"
 PROJECT_RUNNER="$PROJECT_ROOT/scripts/project-command.sh"
+PROJECT_SSH_RUNNER="$PROJECT_ROOT/scripts/project-ssh.sh"
 PROJECT_ALL_RUNNER="$PROJECT_ROOT/scripts/project-all-command.sh"
 ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
@@ -95,6 +96,7 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$AUTO_SOURCE" ]] || fail "script não encontrado: $AUTO_SOURCE"
 [[ -f "$PROJECT_INSTALLER" ]] || fail "instalador não encontrado: $PROJECT_INSTALLER"
 [[ -f "$PROJECT_RUNNER" ]] || fail "executor de projetos não encontrado: $PROJECT_RUNNER"
+[[ -f "$PROJECT_SSH_RUNNER" ]] || fail "executor SSH de projetos não encontrado: $PROJECT_SSH_RUNNER"
 [[ -f "$PROJECT_ALL_RUNNER" ]] || fail "executor geral de projetos não encontrado: $PROJECT_ALL_RUNNER"
 [[ -d "$ORACLE_MONITOR_DIR" ]] || fail "aplicação não encontrada: $ORACLE_MONITOR_DIR"
 [[ -f "$CHROMES_SOURCE" ]] || fail "script não encontrado: $CHROMES_SOURCE"
@@ -118,7 +120,7 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER

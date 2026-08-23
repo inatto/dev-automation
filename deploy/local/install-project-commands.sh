@@ -9,6 +9,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 source "$PROJECT_ROOT/scripts/lib/project-config.sh"
 PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 COMMAND_RUNNER="${COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-command.sh}"
+SSH_COMMAND_RUNNER="${SSH_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-ssh.sh}"
 ALL_COMMAND_RUNNER="${ALL_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-all-command.sh}"
 PROJECT_NAMES_LIB="${PROJECT_NAMES_LIB:-$PROJECT_ROOT/scripts/project-names.sh}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
@@ -20,6 +21,7 @@ fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 
 [[ -f "$PROJECTS_FILE" ]] || fail "arquivo de projetos não encontrado: $PROJECTS_FILE"
 [[ -f "$COMMAND_RUNNER" ]] || fail "executor não encontrado: $COMMAND_RUNNER"
+[[ -f "$SSH_COMMAND_RUNNER" ]] || fail "executor SSH não encontrado: $SSH_COMMAND_RUNNER"
 [[ -f "$ALL_COMMAND_RUNNER" ]] || fail "executor geral não encontrado: $ALL_COMMAND_RUNNER"
 [[ -f "$PROJECT_NAMES_LIB" ]] || fail "biblioteca de nomes não encontrada: $PROJECT_NAMES_LIB"
 
@@ -27,7 +29,7 @@ fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 source "$PROJECT_NAMES_LIB"
 validate_project_global_names "$PROJECTS_FILE" || fail "corrija nomes duplicados/ambíguos em $PROJECTS_FILE antes de instalar comandos"
 
-chmod +x "$COMMAND_RUNNER" "$ALL_COMMAND_RUNNER"
+chmod +x "$COMMAND_RUNNER" "$SSH_COMMAND_RUNNER" "$ALL_COMMAND_RUNNER"
 mkdir -p "$TARGET_DIR"
 
 if [[ -f "$MANIFEST_FILE" ]]; then
@@ -60,6 +62,23 @@ EOF_WRAPPER
   chmod +x "$target"
   printf '%s\n' "$command_name" >> "$new_manifest"
   log "criado: $command_name -> $project_dir/deploy/$deploy_mode"
+  ((created += 1))
+}
+
+create_ssh_command() {
+  local command_name="$1"
+  local project_dir="$2"
+  local project_rel="$3"
+  local target="$TARGET_DIR/$command_name"
+
+  cat > "$target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-project-commands
+exec bash "$SSH_COMMAND_RUNNER" "$command_name" "$project_dir" "$project_rel" "$CODE_ROOT" "\$@"
+EOF_WRAPPER
+  chmod +x "$target"
+  printf '%s\n' "$command_name" >> "$new_manifest"
+  log "criado: $command_name -> SSH remoto de $project_rel"
   ((created += 1))
 }
 
@@ -104,6 +123,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   fi
   if [[ -f "$project_dir/deploy/remote/setup.sh" ]]; then
     create_command "remote-$project_name" "$project_dir" remote
+    create_ssh_command "ssh-$project_name" "$project_dir" "$line"
     found=1
   fi
 

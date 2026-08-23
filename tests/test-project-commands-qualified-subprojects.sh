@@ -51,7 +51,11 @@ for command_name in \
   amazon-infra \
   amazon-infra--monitor-app \
   remote-amazon-infra \
-  remote-amazon-infra--monitor-app; do
+  remote-amazon-infra--monitor-app \
+  ssh-dev-automation \
+  ssh-dev-automation--exec-agent \
+  ssh-amazon-infra \
+  ssh-amazon-infra--monitor-app; do
   [[ -x "$TARGET_DIR/$command_name" ]] || {
     printf 'FALHOU: comando esperado ausente: %s\n' "$command_name" >&2
     cat "$TMP/install.log" >&2
