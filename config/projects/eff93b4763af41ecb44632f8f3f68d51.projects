@@ -6,5 +6,6 @@
 #social/murm-app
 bots/dev-automation
 bots/god-app
+bots/dma-vault
 infra/amazon-infra
 infra/amazon-infra/apps/monitor-app
