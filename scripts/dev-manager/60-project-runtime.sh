@@ -97,17 +97,42 @@ download_zip_has_purpose() {
   download_zip_purpose "$zip_name" "$project" >/dev/null
 }
 
-configured_download_zip_exists() {
-  local downloads zip_file
+windows_download_polling_enabled() {
+  local primary windows
+  is_wsl_runtime || return 1
+  primary="$(download_inbox_dir)"
+  windows="$(windows_download_inbox_dir)"
+  [ -n "$windows" ] || return 1
+  [ "$windows" != "$primary" ] || return 1
+  [ -d "$windows" ]
+}
 
-  downloads="$(download_inbox_dir)"
-  [ -n "$downloads" ] && [ -d "$downloads" ] || return 1
+windows_configured_download_zip_exists() {
+  local windows zip_file
+  windows_download_polling_enabled || return 1
+  windows="$(windows_download_inbox_dir)"
 
   while IFS= read -r -d '' zip_file; do
     if download_zip_is_configured "$zip_file"; then
       return 0
     fi
-  done < <(find "$downloads" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)
+  done < <(find "$windows" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)
+
+  return 1
+}
+
+configured_download_zip_exists() {
+  local zip_file
+  local -a downloads=()
+
+  mapfile -t downloads < <(download_inbox_existing_dirs)
+  [ "${#downloads[@]}" -gt 0 ] || return 1
+
+  while IFS= read -r -d '' zip_file; do
+    if download_zip_is_configured "$zip_file"; then
+      return 0
+    fi
+  done < <(find "${downloads[@]}" -maxdepth 1 -type f -iname '*.zip' -print0 2>/dev/null)
 
   return 1
 }
@@ -117,22 +142,29 @@ configured_download_zip_exists() {
 
 finalize_import_zip() {
   local zip_file="$1"
-  local downloads zip_parent downloads_real
+  local downloads downloads_real zip_parent
+  local from_downloads=false
 
   [ -f "$zip_file" ] || return 0
-  downloads="$(download_inbox_dir)"
   zip_parent="$(cd -- "$(dirname -- "$zip_file")" && pwd -P)" || return 1
-  downloads_real="$(cd -- "$downloads" 2>/dev/null && pwd -P || printf '%s' "$downloads")"
 
-  # Regra local: ZIP reconhecido só some depois da importação inteira ter sido
-  # confirmada. Falha nunca chama esta função, portanto o arquivo fica em
-  # Downloads para inspeção/correção. ZIP desconhecido nem entra no pipeline.
+  while IFS= read -r downloads || [ -n "$downloads" ]; do
+    [ -n "$downloads" ] || continue
+    downloads_real="$(cd -- "$downloads" 2>/dev/null && pwd -P || printf '%s' "$downloads")"
+    if [ "$zip_parent" = "$downloads_real" ]; then
+      from_downloads=true
+      break
+    fi
+  done < <(download_inbox_dirs)
+
+  # ZIP reconhecido só some depois da importação inteira ter sido confirmada.
+  # Vale igualmente para ~/Downloads e para o Downloads montado do Windows.
   if ! rm -f -- "$zip_file" || [ -e "$zip_file" ]; then
     log "ERRO: importação foi aplicada, mas o ZIP não pôde ser removido: $zip_file"
     return 1
   fi
 
-  if [ "$zip_parent" = "$downloads_real" ]; then
+  if [ "$from_downloads" = true ]; then
     log "ZIP PROCESSADO E REMOVIDO DE DOWNLOADS: $(basename -- "$zip_file")"
   else
     log "ZIP PROCESSADO E REMOVIDO: $zip_file"

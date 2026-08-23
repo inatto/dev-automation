@@ -3,20 +3,75 @@
 
 
 download_inbox_dir() {
+  # Compatibilidade: este nome continua representando a caixa principal Linux.
   printf '%s\n' "${DOWNLOADS_DIR:-$HOME/Downloads}"
 }
 
+windows_download_inbox_dir() {
+  printf '%s\n' "${WINDOWS_DOWNLOADS_DIR:-/mnt/c/Users/daniel/Downloads}"
+}
+
+download_inbox_dirs() {
+  local primary windows
+  primary="$(download_inbox_dir)"
+  [ -n "$primary" ] && printf '%s\n' "$primary"
+
+  if is_wsl_runtime; then
+    windows="$(windows_download_inbox_dir)"
+    if [ -n "$windows" ] && [ "$windows" != "$primary" ]; then
+      printf '%s\n' "$windows"
+    fi
+  fi
+}
+
+download_inbox_existing_dirs() {
+  local dir
+  while IFS= read -r dir || [ -n "$dir" ]; do
+    [ -n "$dir" ] || continue
+    [ -d "$dir" ] && printf '%s\n' "$dir"
+  done < <(download_inbox_dirs)
+}
+
+download_inbox_summary() {
+  local dir summary=""
+  while IFS= read -r dir || [ -n "$dir" ]; do
+    [ -n "$dir" ] || continue
+    if [ -z "$summary" ]; then
+      summary="$dir"
+    else
+      summary="$summary + $dir"
+    fi
+  done < <(download_inbox_dirs)
+  printf '%s\n' "$summary"
+}
+
 ensure_download_inbox() {
-  local downloads
-  downloads="$(download_inbox_dir)"
-  [ -n "$downloads" ] || {
+  local primary dir parent
+  primary="$(download_inbox_dir)"
+  [ -n "$primary" ] || {
     echo "ERRO: pasta Downloads não pôde ser determinada." >&2
     return 1
   }
-  mkdir -p -- "$downloads" || {
-    echo "ERRO: não foi possível preparar Downloads: $downloads" >&2
+
+  mkdir -p -- "$primary" || {
+    echo "ERRO: não foi possível preparar Downloads: $primary" >&2
     return 1
   }
+
+  # Em WSL, acompanha também o Downloads do Windows. Não criamos uma árvore
+  # /mnt/c falsa se a unidade/perfil não estiver montado; nesse caso o Linux
+  # continua funcionando e o diretório passa a ser usado quando existir.
+  if is_wsl_runtime; then
+    dir="$(windows_download_inbox_dir)"
+    if [ -n "$dir" ] && [ "$dir" != "$primary" ]; then
+      parent="$(dirname -- "$dir")"
+      if [ -d "$parent" ]; then
+        mkdir -p -- "$dir" || {
+          echo "AVISO: não foi possível preparar Downloads do Windows: $dir" >&2
+        }
+      fi
+    fi
+  fi
 }
 
 archive_output_dir() {

@@ -284,26 +284,27 @@ import_one_zip() {
 }
 
 import_downloads() {
-  local downloads zip_file selected_zip
+  local zip_file selected_zip
   local imported=0 failed=0 processed=0
+  local -a downloads=()
   local -A attempted=()
 
-  downloads="$(download_inbox_dir)"
+  mapfile -t downloads < <(download_inbox_existing_dirs)
 
-  if [ -z "$downloads" ] || [ ! -d "$downloads" ]; then
+  if [ "${#downloads[@]}" -eq 0 ]; then
     log "Downloads não encontrado."
     return 0
   fi
 
-  log "Verificando Downloads: $downloads"
+  log "Verificando Downloads: $(download_inbox_summary)"
 
-  # Downloads é uma fila drenável, não apenas um snapshot. Depois de cada ZIP
-  # processado, varremos novamente a pasta. Assim, ZIPs que terminarem de baixar
-  # enquanto uma importação está em andamento entram no MESMO ciclo antes de o
-  # monitor voltar a dormir no inotify.
+  # As duas caixas de entrada formam uma única fila drenável no WSL:
+  # ~/Downloads + /mnt/c/Users/daniel/Downloads. Depois de cada ZIP processado,
+  # ambas são varridas novamente, então um download que terminar no outro lado
+  # durante uma importação entra no mesmo ciclo.
   #
   # ZIP desconhecido continua invisível. ZIP que falhar é tentado apenas uma vez
-  # nesta drenagem e permanece em Downloads para inspeção/correção, evitando loop.
+  # nesta drenagem e permanece no diretório de origem para inspeção/correção.
   while true; do
     selected_zip=""
 
@@ -313,7 +314,7 @@ import_downloads() {
       selected_zip="$zip_file"
       break
     done < <(
-      find "$downloads" \
+      find "${downloads[@]}" \
         -maxdepth 1 \
         -type f \
         -iname "*.zip" \
@@ -349,4 +350,3 @@ import_downloads() {
   LOG_CONTEXT=download_done log "FILA DE DOWNLOADS DRENADA: $imported sucesso(s), $failed falha(s), $processed processado(s)."
   [ "$failed" -eq 0 ]
 }
-

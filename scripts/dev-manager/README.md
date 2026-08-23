@@ -11,7 +11,7 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `40-files-safety.sh`: saída local dos ZIPs e segurança
 - `50-project-registry.sh`: catálogo de projetos/agregadores
 - `60-project-runtime.sh`: helpers de importação/ZIP
-- `70-imports.sh`: importação local de Downloads
+- `70-imports.sh`: importação local de Downloads; no WSL drena `~/Downloads` e `/mnt/c/Users/daniel/Downloads` como uma única fila
 - `80-backup-filters.sh`: filtros rsync
 - `90-sql-zip.sh`: ZIPs SQL somente por comando manual
 - `110-removal-markers.sh`: validação/aplicação de `.remover`

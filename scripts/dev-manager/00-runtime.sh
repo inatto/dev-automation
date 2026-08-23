@@ -16,6 +16,7 @@ PAUSE_FILE="$STATE_DIR/dev-manager.paused"
 SOUND_DISABLED_FILE="$STATE_DIR/dev-manager.sound-disabled"
 RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
 DOWNLOADS_DIR="${DOWNLOADS_DIR:-$HOME/Downloads}"
+WINDOWS_DOWNLOADS_DIR="${WINDOWS_DOWNLOADS_DIR:-/mnt/c/Users/daniel/Downloads}"
 
 # Valores padrão. Podem ser sobrescritos em auto-code-manager.env.
 # Backup local direto em /home/daniel/Code. O modo padrão é inotify para

@@ -148,13 +148,13 @@ if [ "$TUI_ACTIVE" = true ]; then
   TUI_LAST_ACTION="Auto Code Manager $SCRIPT_VERSION"
   tui_refresh
   LOG_CONTEXT=wait log "Auto Code Manager $SCRIPT_VERSION iniciado."
-  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(download_inbox_dir) · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
+  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(download_inbox_summary) · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
 else
   line
   echo "Auto Code Manager - $SCRIPT_VERSION"
   line
   echo "CODE_ROOT:     $CODE_ROOT"
-  echo "Downloads:     $(download_inbox_dir)"
+  echo "Downloads:     $(download_inbox_summary)"
   echo "ZIP_DIR:       $(archive_output_dir)"
   echo "ENV:           $ENV_FILE"
   echo "Modo:          ${AUTO_CODE_MONITOR_MODE:-inotify} (eventos do filesystem)"
@@ -198,7 +198,7 @@ taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
   LOG_CONTEXT=wait log "IDLE leve: sem inotify; somente metadados dos projetos configurados a cada ${LIGHT_SCAN_INTERVAL}s."
 else
-  LOG_CONTEXT=wait log "IDLE event-driven: projetos geram ZIP local em $CODE_ROOT; ZIP reconhecido que chega em $(download_inbox_dir) é importado e removido após confirmação."
+  LOG_CONTEXT=wait log "IDLE event-driven: projetos geram ZIP local em $CODE_ROOT; ZIP reconhecido que chega em $(download_inbox_summary) é importado e removido após confirmação."
 fi
 
 while true; do
@@ -213,6 +213,12 @@ while true; do
       taskbar_status error "Monitor leve falhou"
       LOG_CONTEXT=error log "ERRO: monitor leve falhou."
       exit 1
+    fi
+
+    if configured_download_zip_exists; then
+      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
+        LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
+      fi
     fi
 
     if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
@@ -256,6 +262,15 @@ while true; do
     local_timeout="$remaining"
   fi
 
+  # WSL2 pode não emitir inotify quando o Chrome/Explorer do Windows grava em
+  # /mnt/c. Mantemos o loop bloqueante, mas acordamos no máximo a cada 1s apenas
+  # para uma varredura rasa do Downloads do Windows.
+  if windows_download_polling_enabled; then
+    if [ -z "$local_timeout" ] || [ "$local_timeout" -gt 1 ]; then
+      local_timeout=1
+    fi
+  fi
+
   if [ -n "$local_timeout" ]; then
     if IFS=$'\t' read -r -t "$local_timeout" -u "$WATCH_FD" events event_path; then
       handle_watch_event "$events" "$event_path"
@@ -267,6 +282,10 @@ while true; do
         if ! start_backup_watcher; then
           taskbar_status error "Watcher inotify falhou"
           exit 1
+        fi
+      elif windows_configured_download_zip_exists; then
+        if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido no Downloads do Windows; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
+          LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
         fi
       fi
     fi

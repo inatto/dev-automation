@@ -86,12 +86,16 @@ start_backup_watcher() {
     done < <(watch_excluded_directories "$root")
   done
 
-  # Downloads: observado somente no primeiro nível. Subpastas não entram na
-  # fila; só ZIPs fechados/renomeados diretamente em ~/Downloads interessam.
+  # ~/Downloads usa inotify normal. O Downloads do Windows é varrido de
+  # forma rasa no loop principal: alterações feitas por programas Windows em
+  # /mnt/c não são entregues de forma confiável ao inotify do WSL2.
   downloads="$(download_inbox_dir)"
   if [ -n "$downloads" ] && [ -d "$downloads" ] && ! path_is_covered_by_roots "$downloads" "${roots[@]}"; then
     append_nonrecursive_watch_root "$downloads"
     roots+=("$downloads")
+    watched_aux=$((watched_aux + 1))
+  fi
+  if windows_download_polling_enabled; then
     watched_aux=$((watched_aux + 1))
   fi
 
@@ -136,7 +140,11 @@ start_backup_watcher() {
     return 1
   fi
 
-  log "Monitor event-driven ativo via inotify: ${#roots[@]} raiz(es), $watched_aux raiz(es) auxiliar(es); sem polling de pastas."
+  if windows_download_polling_enabled; then
+    log "Monitor event-driven ativo: projetos e ~/Downloads via inotify; Downloads Windows ($(windows_download_inbox_dir)) por varredura rasa de 1s."
+  else
+    log "Monitor event-driven ativo via inotify: ${#roots[@]} raiz(es), $watched_aux raiz(es) auxiliar(es); sem polling de projetos."
+  fi
   return 0
 }
 
@@ -154,11 +162,15 @@ event_finished_write() {
 path_is_download_zip() {
   local event_path="$1"
   local downloads
-  downloads="$(download_inbox_dir)"
-  [ -n "$downloads" ] || return 1
-  path_is_within_absolute "$event_path" "$downloads" || return 1
-  [ "$(dirname -- "$event_path")" = "$downloads" ] || return 1
-  [[ "${event_path,,}" == *.zip ]]
+
+  [[ "${event_path,,}" == *.zip ]] || return 1
+  while IFS= read -r downloads || [ -n "$downloads" ]; do
+    [ -n "$downloads" ] || continue
+    if [ "$(dirname -- "$event_path")" = "$downloads" ]; then
+      return 0
+    fi
+  done < <(download_inbox_dirs)
+  return 1
 }
 
 mark_all_projects_dirty() {
