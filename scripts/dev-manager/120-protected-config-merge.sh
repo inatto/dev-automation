@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Contexto: merge seguro de configs sanitizadas recebidas do chat.
-# Regra: o ZIP nunca é fonte de segredo. Chaves sensíveis preservam o valor local.
-# *** (3 ou mais asteriscos) também significa preservar o valor local.
+# Regra: quando já existe segredo local, ele sempre vence o valor recebido no ZIP.
+# Quando não existe correspondente local, o ZIP é aplicado com AVISO em vez de abortar
+# a importação (inclusive valor vazio/placeholder), permitindo bootstrap em máquina nova.
 # Nenhum .external é persistido no projeto.
 
 materialize_changed_protected_configs() {
@@ -76,13 +77,15 @@ def values(text: str):
     return out
 
 
+def warn(message: str) -> None:
+    print(f"AVISO CONFIG PROTEGIDO: {message}", file=sys.stderr)
+
+
 def replace_url_password_with_local(incoming: str, local: str) -> str:
     inc = url_password.search(incoming)
     loc = url_password.search(local)
-    if inc is None:
+    if inc is None or loc is None:
         return incoming
-    if loc is None:
-        raise ValueError("URL recebida contém credencial, mas não existe senha local correspondente")
     return incoming[:inc.start("password")] + loc.group("password") + incoming[inc.end("password"):]
 
 
@@ -90,19 +93,23 @@ incoming_text = decode(incoming_path)
 mode = stat.S_IMODE(incoming_path.stat().st_mode)
 
 if not local_path.exists():
-    # Config protegido novo pode entrar somente se não trouxer segredo nem máscara.
+    # Bootstrap em máquina nova: não existe segredo local para preservar.
+    # O arquivo recebido entra como veio e qualquer campo sensível gera apenas aviso.
+    warned = False
     for line in incoming_text.splitlines(keepends=True):
         m = assignment.match(line)
         if not m:
             if masked_token.search(line):
-                raise ValueError(f"config novo contém segredo mascarado sem valor local: {incoming_path}")
+                warn(f"{local_path}: placeholder sem correspondente local; mantendo valor recebido")
+                warned = True
             continue
         key, value = m.group("key"), m.group("value")
         if secret_key.search(key) or masked_token.search(value) or url_password.search(value):
-            raise ValueError(f"config novo contém segredo/credencial sem valor local: {incoming_path}:{key}")
+            warn(f"{local_path}:{key}: sem correspondente local; mantendo valor recebido")
+            warned = True
     out_path.write_text(incoming_text, encoding="utf-8", newline="")
     os.chmod(out_path, mode)
-    print("new-safe")
+    print("new-warning" if warned else "new-safe")
     raise SystemExit(0)
 
 if not local_path.is_file():
@@ -117,7 +124,7 @@ for line in incoming_text.splitlines(keepends=True):
     m = assignment.match(line)
     if not m:
         if masked_token.search(line):
-            raise ValueError(f"placeholder fora de KEY=VALUE; merge recusado: {incoming_path}")
+            warn(f"{local_path}: placeholder fora de KEY=VALUE; mantendo linha recebida")
         output.append(line)
         continue
 
@@ -126,24 +133,31 @@ for line in incoming_text.splitlines(keepends=True):
     incoming_value = m.group("value")
     local_value = local_values.get(key)
 
-    # Nunca aceite segredo do ZIP/chat. Para chave sensível, o local sempre vence.
+    # Se já existe valor local sensível, ele continua vencendo. Se a chave é nova
+    # nesta máquina, aceita o valor recebido e apenas alerta; isso é necessário para
+    # bootstrap de configs/bancos ainda não existentes.
     if secret_key.search(key):
         if local_value is None:
-            raise ValueError(f"chave sensível recebida sem correspondente local: {local_path}:{key}")
-        value = local_value
+            warn(f"{local_path}:{key}: chave sensível nova sem correspondente local; mantendo valor recebido")
+            value = incoming_value
+        else:
+            value = local_value
     elif masked_token.search(incoming_value):
         if local_value is None:
-            raise ValueError(f"segredo mascarado sem correspondente local: {local_path}:{key}")
+            warn(f"{local_path}:{key}: placeholder sem correspondente local; mantendo valor recebido")
+            value = incoming_value
         # URL mascarada: permite host/path/query novos, mas recupera a senha local.
-        if re.search(r":\*{3,}@", incoming_value):
+        elif re.search(r":\*{3,}@", incoming_value):
             value = replace_url_password_with_local(incoming_value, local_value)
         else:
             value = local_value
     elif url_password.search(incoming_value):
         if local_value is None:
-            raise ValueError(f"URL com credencial recebida sem correspondente local: {local_path}:{key}")
-        # Mesmo que o ZIP traga uma senha real, ela é descartada e a senha local vence.
-        value = replace_url_password_with_local(incoming_value, local_value)
+            warn(f"{local_path}:{key}: URL com credencial sem correspondente local; mantendo valor recebido")
+            value = incoming_value
+        else:
+            # Mesmo que o ZIP traga uma senha real, ela é descartada e a senha local vence.
+            value = replace_url_password_with_local(incoming_value, local_value)
     else:
         value = incoming_value
 
@@ -159,7 +173,7 @@ for line in local_text.splitlines(keepends=True):
 
 merged_text = "".join(output)
 if masked_token.search(merged_text):
-    raise ValueError(f"placeholder de segredo permaneceu após merge: {local_path}")
+    warn(f"{local_path}: placeholder permaneceu porque não havia valor local correspondente")
 
 out_path.write_text(merged_text, encoding="utf-8", newline="")
 os.chmod(out_path, mode)
@@ -172,7 +186,7 @@ PY_MERGE
     fi
 
     changed=$((changed + 1))
-    log "CONFIG PROTEGIDO: $rel -> ${result:-merge seguro}; segredo local preservado"
+    log "CONFIG PROTEGIDO: $rel -> ${result:-merge concluído}"
   done < <(find "$source_root" -type f -printf '%P\0')
 
   log "Configs protegidos: $changed reconciliado(s), $unchanged sem mudança, $redacted preservado(s) sem merge; nenhum .external persistido."
