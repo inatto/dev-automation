@@ -99,8 +99,17 @@ start_backup_watcher() {
     watched_aux=$((watched_aux + 1))
   fi
 
-  # SQL não possui mais automação implícita. Arquivos .sql são tratados como
-  # qualquer outro arquivo do projeto e apenas sujam o backup normal.
+  # Pastas DDL explicitamente configuradas também podem ficar fora de um
+  # projeto registrado. Nesse caso entram como raiz auxiliar do inotify.
+  while IFS= read -r sql_folder || [ -n "$sql_folder" ]; do
+    [ -n "$sql_folder" ] || continue
+    [ -d "$sql_folder" ] || continue
+    if ! path_is_covered_by_roots "$sql_folder" "${roots[@]}"; then
+      printf '%s\n' "$sql_folder" >> "$WATCH_LIST"
+      roots+=("$sql_folder")
+      watched_aux=$((watched_aux + 1))
+    fi
+  done < <(configured_sql_watch_folders)
 
   # Bootstrap do FIFO: abre R/W só durante a partida para evitar deadlock.
   # Depois trocamos por um FD somente-leitura; assim, se o inotify morrer, o
@@ -192,7 +201,7 @@ mark_all_projects_dirty() {
 handle_watch_event() {
   local events="$1"
   local event_path="$2"
-  local owner
+  local owner sql_watch_folder
 
   [ -n "$event_path" ] || return 0
 
@@ -215,6 +224,8 @@ handle_watch_event() {
     elif [ "$event_path" = "$PROJECTS_FILE" ] || [ "$event_path" = "$IGNORE_ZIP_FILE" ]; then
       WATCH_RELOAD_REQUESTED=true
       FORCE_FULL_BACKUP_AFTER_RELOAD=true
+    elif [ "$event_path" = "$FOLDER_SQL_WATCH_FILE" ]; then
+      WATCH_RELOAD_REQUESTED=true
     fi
   fi
 
@@ -231,6 +242,15 @@ handle_watch_event() {
       fi
     fi
     return 0
+  fi
+
+  # DDL automático: somente após a gravação terminar. O snapshot é adiado pelo
+  # mesmo debounce do backup para agrupar exportações que escrevem vários SQLs.
+  if event_finished_write "$events" && [ -f "$event_path" ]; then
+    sql_watch_folder="$(configured_sql_watch_folder_for_path "$event_path" 2>/dev/null || true)"
+    if [ -n "$sql_watch_folder" ]; then
+      mark_sql_snapshot_dirty "$sql_watch_folder"
+    fi
   fi
 
   if [ -n "${INOTIFY_DIR_EXCLUDE_REGEX:-}" ] && [[ "$event_path" =~ $INOTIFY_DIR_EXCLUDE_REGEX ]]; then

@@ -10,6 +10,7 @@ source "$PROJECT_ROOT/scripts/lib/project-config.sh"
 PROJECTS_FILE="${DEV_MANAGER_PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
+FOLDER_SQL_WATCH_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-watch"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
 PROTECTED_CONFIG_BASELINES_DIR="$STATE_DIR/protected-config-baselines"
 PAUSE_FILE="$STATE_DIR/dev-manager.paused"
@@ -58,6 +59,8 @@ declare -A LIGHT_IGNORE_SIGNATURES=()
 MONITOR_LOCK_FILE="$STATE_DIR/auto-code-manager.monitor.lock"
 MONITOR_LOCK_FD=""
 declare -A DIRTY_BACKUP_TARGETS=()
+declare -A DIRTY_SQL_SNAPSHOT_FOLDERS=()
+SQL_SNAPSHOT_SIGNATURES_FILE="$STATE_DIR/sql-snapshot-signatures.tsv"
 
 # Detecção de plataforma centralizada. Zone.Identifier é resíduo de Windows/WSL;
 # no Linux nativo não deve gerar scans, etapas ou eventos especiais.

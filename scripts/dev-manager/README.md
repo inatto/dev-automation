@@ -13,7 +13,7 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `60-project-runtime.sh`: helpers de importação/ZIP
 - `70-imports.sh`: importação local de Downloads; no WSL drena `~/Downloads` e `/mnt/c/Users/daniel/Downloads` como uma única fila
 - `80-backup-filters.sh`: filtros rsync
-- `90-sql-zip.sh`: ZIPs SQL somente por comando manual
+- `90-sql-zip.sh`: ZIP SQL manual legado + snapshots DDL automáticos não destrutivos e espelhados em `CODE_ROOT`
 - `110-removal-markers.sh`: validação/aplicação de `.remover`
 - `130-backups.sh`: geração de backups
 - `140-light-monitor.sh`: monitor leve

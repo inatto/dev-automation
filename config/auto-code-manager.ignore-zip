@@ -2,6 +2,7 @@
 *.iml
 *.log
 *.tmp
+exports/ddl/*-ddl-*.zip
 *:Zone.Identifier
 .astro/
 .cache/

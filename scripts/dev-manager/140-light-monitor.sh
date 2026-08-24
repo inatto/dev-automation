@@ -26,7 +26,7 @@ watch_root_projects() {
 
 light_config_signature() {
   local path
-  for path in "$ENV_FILE" "$PROJECTS_FILE" "$IGNORE_ZIP_FILE"; do
+  for path in "$ENV_FILE" "$PROJECTS_FILE" "$IGNORE_ZIP_FILE" "$FOLDER_SQL_WATCH_FILE"; do
     if [ -e "$path" ]; then
       stat -c '%n\t%Y\t%s' -- "$path" 2>/dev/null || true
     else

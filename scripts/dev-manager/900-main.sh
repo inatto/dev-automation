@@ -93,6 +93,20 @@ if [ "${1:-}" = "--import-one" ]; then
   exit 1
 fi
 
+if [ "${1:-}" = "--sql-snapshot-once" ]; then
+  if [ ! -d "$CODE_ROOT" ]; then
+    echo "ERRO: diretório não existe: $CODE_ROOT" >&2
+    exit 1
+  fi
+
+  if reconcile_configured_sql_snapshots; then
+    taskbar_status done "Snapshots SQL reconciliados"
+    exit 0
+  fi
+  taskbar_status error "Falha nos snapshots SQL"
+  exit 1
+fi
+
 if [ "${1:-}" = "--sql-zip-once" ]; then
   if [ ! -d "$CODE_ROOT" ]; then
     echo "ERRO: diretório não existe: $CODE_ROOT" >&2
@@ -193,6 +207,7 @@ if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
 fi
 run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
+run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia uma vez as pastas DDL monitoradas; só cria novo ZIP quando o conteúdo SQL mudou desde o último snapshot válido." reconcile_configured_sql_snapshots || true
 
 taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
@@ -221,12 +236,12 @@ while true; do
       fi
     fi
 
-    if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
+    if pending_change_work && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
       now="$(date +%s)"
       if [ $((now - LAST_SOURCE_CHANGE)) -ge "$BACKUP_EVERY" ]; then
         taskbar_status backup "Backup inteligente"
-        stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente projetos alterados e agregadores dependentes."
-        if LOG_CONTEXT=backup backup_dirty_targets; then
+        stage backup start "BACKUP INTELIGENTE — INÍCIO" "Gera snapshot DDL pendente quando necessário e compacta somente projetos alterados/agregadores dependentes."
+        if LOG_CONTEXT=backup process_dirty_work; then
           stage backup end "BACKUP INTELIGENTE — CONCLUÍDO"
           taskbar_status idle "Aguardando alterações"
         else
@@ -243,13 +258,13 @@ while true; do
 
   # Se existe backup pendente, read -t funciona como debounce bloqueante. Sem
   # backup pendente, o read fica bloqueado indefinidamente até chegar um evento.
-  if [ "${#DIRTY_BACKUP_TARGETS[@]}" -gt 0 ] && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
+  if pending_change_work && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
     now="$(date +%s)"
     remaining=$((BACKUP_EVERY - (now - LAST_SOURCE_CHANGE)))
     if [ "$remaining" -le 0 ]; then
       taskbar_status backup "Backup inteligente"
-      stage backup start "BACKUP INTELIGENTE — INÍCIO" "Compacta somente projetos alterados e agregadores dependentes."
-      if LOG_CONTEXT=backup backup_dirty_targets; then
+      stage backup start "BACKUP INTELIGENTE — INÍCIO" "Gera snapshot DDL pendente quando necessário e compacta somente projetos alterados/agregadores dependentes."
+      if LOG_CONTEXT=backup process_dirty_work; then
         stage backup end "BACKUP INTELIGENTE — CONCLUÍDO"
         taskbar_status idle "Aguardando eventos"
       else

@@ -1,0 +1,2 @@
+# Pasta SQL monitorada automaticamente; snapshot não destrutivo + cópia em $CODE_ROOT.
+$CODE_ROOT/infra/oracle-infra/exports/ddl/
