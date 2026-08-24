@@ -1,0 +1,14 @@
+[Unit]
+Description=Voice Commands - comandos locais por microfone
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Code/bots/dev-automation/apps/voice-commands
+ExecStart=%h/Code/bots/dev-automation/apps/voice-commands/.venv/bin/python %h/Code/bots/dev-automation/apps/voice-commands/voice_commands.py
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

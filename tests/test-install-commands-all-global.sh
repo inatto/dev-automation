@@ -46,6 +46,7 @@ commands=(
   local-nginx
   dev-status
   oracle-monitor
+  voice-commands
   sample-app
   local-all
   remote-all
@@ -60,5 +61,6 @@ for command_name in "${commands[@]}"; do
 done
 
 grep -Fq 'criado: oracle-monitor' "$LOG_FILE"
+grep -Fq 'criado: voice-commands' "$LOG_FILE"
 grep -Fq 'criado: sample-app' "$LOG_FILE"
 printf 'OK: instalador principal atualiza comandos fixos, oracle-monitor e comandos dos projetos\n'

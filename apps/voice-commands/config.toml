@@ -1,0 +1,54 @@
+[audio]
+sample_rate = 16000
+block_seconds = 0.25
+utterance_max_seconds = 3.5
+silence_to_finish_seconds = 0.65
+speech_rms_threshold = 0.012
+
+[recognition]
+model = "tiny"
+language = "pt"
+compute_type = "int8"
+device = "auto"
+minimum_similarity = 0.82
+cooldown_seconds = 0.90
+
+[action]
+backend = "auto"
+
+[commands.next_desktop]
+phrases = [
+  "vai",
+  "pode ir",
+  "avança",
+  "avancar",
+  "pode avançar",
+  "pode avancar",
+  "pra frente",
+  "para frente",
+  "continua",
+  "continue",
+  "próximo desktop",
+  "proximo desktop",
+  "avança desktop",
+  "avancar desktop"
+]
+
+[commands.previous_desktop]
+phrases = [
+  "volta",
+  "pode voltar",
+  "recua",
+  "recuar",
+  "pra trás",
+  "pra tras",
+  "para trás",
+  "para tras",
+  "desktop anterior",
+  "volta desktop",
+  "recuar desktop",
+  "recua desktop"
+]
+
+[ui]
+max_history = 200
