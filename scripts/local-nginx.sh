@@ -17,6 +17,7 @@ TLS_HOSTS_FILE="$TLS_DIR/hosts.txt"
 NGINX_BIN="${NGINX_BIN:-nginx}"
 MKCERT_BIN="${MKCERT_BIN:-mkcert}"
 CLIENT_MAX_BODY_SIZE="${CLIENT_MAX_BODY_SIZE:-32m}"
+TENANT_GATEWAY_HOST="${TENANT_GATEWAY_HOST:-admin.localhost}"
 
 log() { printf '[local-nginx] %s\n' "$*"; }
 fail() { printf '[local-nginx] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -151,13 +152,27 @@ collect_hosts() {
   awk -F';' 'NR > 1 && !seen[$5]++ {print $5}' "$SERVICES_FILE"
 }
 
+collect_tls_hosts() {
+  collect_hosts
+
+  if awk -F';' -v host="$TENANT_GATEWAY_HOST" 'NR > 1 && $5 == host {found=1} END {exit !found}' "$SERVICES_FILE"; then
+    printf '*.%s\n' "$TENANT_GATEWAY_HOST"
+  fi
+}
+
 emit_proxy_headers() {
+  local tenant_header="${1:-}"
+
   cat <<'EOF_HEADERS'
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
 EOF_HEADERS
+
+  if [[ -n "$tenant_header" ]]; then
+    printf '        proxy_set_header X-Tenant %s;\n' "$tenant_header"
+  fi
 }
 
 emit_static_locations_for_host() {
@@ -189,29 +204,75 @@ EOF_STATIC
   done < "$STATIC_LOCATIONS_FILE"
 }
 
-generate_config() {
-  validate_client_max_body_size
-  validate_services
-  validate_static_locations
+emit_locations_for_host() {
+  local target_host="$1"
+  local tenant_header="${2:-}"
+  local application type web_port api_port row_host path extra
 
-  local host application type web_port api_port row_host path extra
-  local -a hosts=()
-  mapfile -t hosts < <(collect_hosts)
+  while IFS=';' read -r application type web_port api_port row_host path extra; do
+    [[ "$application" == 'application' ]] && continue
 
-  for host in "${hosts[@]}"; do
-    cat <<EOF_REDIRECT
+    web_port="$(trim "$web_port")"
+    api_port="$(trim "$api_port")"
+    row_host="$(trim "$row_host")"
+    path="$(trim "$path")"
+    [[ "$row_host" == "$target_host" ]] || continue
+
+    if [[ "$path" == '/' ]]; then
+      cat <<EOF_LOCATION
+    location = /api {
+        return 308 /api/;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:$api_port/;
+$(emit_proxy_headers "$tenant_header")
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:$web_port;
+$(emit_proxy_headers "$tenant_header")
+    }
+
+EOF_LOCATION
+      continue
+    fi
+
+    cat <<EOF_LOCATION
+    location $path/api/ {
+        proxy_pass http://127.0.0.1:$api_port/api/;
+$(emit_proxy_headers "$tenant_header")
+    }
+
+    location $path/ {
+        proxy_pass http://127.0.0.1:$web_port;
+$(emit_proxy_headers "$tenant_header")
+    }
+
+EOF_LOCATION
+  done < "$SERVICES_FILE"
+
+  emit_static_locations_for_host "$target_host"
+}
+
+emit_gateway() {
+  local route_host="$1"
+  local server_name_expression="$2"
+  local tenant_header="${3:-}"
+
+  cat <<EOF_REDIRECT
 # generated-by: dev-automation/local-nginx.sh
 server {
     listen 80;
     listen [::]:80;
-    server_name $host;
+    server_name $server_name_expression;
     return 301 https://\$host\$request_uri;
 }
 
 server {
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name $host;
+    server_name $server_name_expression;
 
     ssl_certificate $TLS_CERT_FILE;
     ssl_certificate_key $TLS_KEY_FILE;
@@ -219,53 +280,27 @@ server {
 
 EOF_REDIRECT
 
-    while IFS=';' read -r application type web_port api_port row_host path extra; do
-      [[ "$application" == 'application' ]] && continue
+  emit_locations_for_host "$route_host" "$tenant_header"
+  printf '}\n\n'
+}
 
-      web_port="$(trim "$web_port")"
-      api_port="$(trim "$api_port")"
-      row_host="$(trim "$row_host")"
-      path="$(trim "$path")"
-      [[ "$row_host" == "$host" ]] || continue
+generate_config() {
+  validate_client_max_body_size
+  validate_services
+  validate_static_locations
 
-      if [[ "$path" == '/' ]]; then
-        cat <<EOF_LOCATION
-    location = /api {
-        return 308 /api/;
-    }
+  local host tenant_host_regex
+  local -a hosts=()
+  mapfile -t hosts < <(collect_hosts)
 
-    location /api/ {
-        proxy_pass http://127.0.0.1:$api_port/;
-$(emit_proxy_headers)
-    }
-
-    location / {
-        proxy_pass http://127.0.0.1:$web_port;
-$(emit_proxy_headers)
-    }
-
-EOF_LOCATION
-        continue
-      fi
-
-      cat <<EOF_LOCATION
-    location $path/api/ {
-        proxy_pass http://127.0.0.1:$api_port/api/;
-$(emit_proxy_headers)
-    }
-
-    location $path/ {
-        proxy_pass http://127.0.0.1:$web_port;
-$(emit_proxy_headers)
-    }
-
-EOF_LOCATION
-    done < "$SERVICES_FILE"
-
-    emit_static_locations_for_host "$host"
-
-    printf '}\n\n'
+  for host in "${hosts[@]}"; do
+    emit_gateway "$host" "$host"
   done
+
+  if printf '%s\n' "${hosts[@]}" | grep -Fxq "$TENANT_GATEWAY_HOST"; then
+    tenant_host_regex="${TENANT_GATEWAY_HOST//./\\.}"
+    emit_gateway "$TENANT_GATEWAY_HOST" "~^(?<tenant>[A-Za-z0-9-]+)\\.${tenant_host_regex}$" '$tenant'
+  fi
 }
 
 as_root() {
@@ -321,7 +356,7 @@ ensure_tls_certificate() {
   trust_local_ca
 
   local desired_hosts temp_dir temp_cert temp_key regenerate=0
-  desired_hosts="$(collect_hosts)"
+  desired_hosts="$(collect_tls_hosts)"
 
   if [[ ! -f "$TLS_CERT_FILE" || ! -f "$TLS_KEY_FILE" || ! -f "$TLS_HOSTS_FILE" ]]; then
     regenerate=1

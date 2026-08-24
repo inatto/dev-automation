@@ -12,10 +12,10 @@ orbital-ui;module;4109;8109;admin.localhost;/orbital-ui
 orbital-vouchers;module;4110;8110;admin.localhost;/orbital-vouchers
 orbital-legal;module;4111;8111;admin.localhost;/orbital-legal
 orbital-ai;module;4112;8112;admin.localhost;/orbital-ai
+orbital-tasks;module;4114;8114;admin.localhost;/orbital-tasks
 station-app;base;4002;8002;painel.localhost;/
 site-inst;base;4003;8003;anpprev.localhost;/
 site-inst;base;4003;8003;sinproprev.localhost;/
 asaclub-app;base;4004;8004;asaclub.localhost;/
 amazon-infra-monitor;base;4005;8005;monitor.amazon-infra.localhost;/
 general-crawler;base;4113;8113;general.localhost;/
-orbital-tasks;module;4114;8114;admin.localhost;/orbital-tasks

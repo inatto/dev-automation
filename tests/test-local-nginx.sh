@@ -38,19 +38,21 @@ cmp -s "$config_one" "$config_two" || fail 'render repetido não é idempotente'
 
 # Cada host cadastrado deve gerar exatamente um gateway HTTP + HTTPS.
 host_count="$(awk -F';' 'NR > 1 && !seen[$5]++ {count++} END {print count+0}' "$SERVICES")"
+tenant_gateway_count=1
+gateway_count=$((host_count + tenant_gateway_count))
 while IFS= read -r host; do
   grep -Fq "server_name $host;" "$config_one" || fail "$host ausente"
 done < <(awk -F';' 'NR > 1 && !seen[$5]++ {print $5}' "$SERVICES")
 ! grep -Fq 'server_name site-inst.localhost;' "$config_one" || fail 'alias tecnico site-inst.localhost permaneceu publico'
-[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
-[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
-[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
-[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
-[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
-[[ "$(grep -c '^    location = /api {$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve normalizar /api para /api/'
-[[ "$(grep -c '^        return 308 /api/;$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve preservar o redirect /api do remoto'
-[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq "$host_count" ]] || fail 'cada gateway HTTPS deve usar certificado'
-[[ "$(grep -c '^    location / {$' "$config_one")" -eq "$host_count" ]] || fail 'cada app-base deve ter exatamente um location /'
+[[ "$(grep -c '^    listen 80;$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway deve escutar IPv4 na porta 80'
+[[ "$(grep -c '^    listen \[::\]:80;$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway deve escutar IPv6 na porta 80'
+[[ "$(grep -c '^    listen 443 ssl;$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway deve escutar HTTPS IPv4 na porta 443'
+[[ "$(grep -c '^    listen \[::\]:443 ssl;$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway deve escutar HTTPS IPv6 na porta 443'
+[[ "$(grep -c 'return 301 https://\$host\$request_uri;' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway deve redirecionar HTTP para HTTPS'
+[[ "$(grep -c '^    location = /api {$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada app-base deve normalizar /api para /api/'
+[[ "$(grep -c '^        return 308 /api/;$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada app-base deve preservar o redirect /api do remoto'
+[[ "$(grep -c '^    ssl_certificate ' "$config_one")" -eq "$gateway_count" ]] || fail 'cada gateway HTTPS deve usar certificado'
+[[ "$(grep -c '^    location / {$' "$config_one")" -eq "$gateway_count" ]] || fail 'cada app-base deve ter exatamente um location /'
 
 # Orbital é o foco do admin.localhost.
 admin_block="$TEMP_ROOT/admin.conf"
@@ -67,6 +69,18 @@ grep -Fq 'proxy_pass http://127.0.0.1:8111/api/;' "$admin_block" || fail 'API do
 awk '/location \/ \{/{getline; print; exit}' "$admin_block" | grep -Fq '127.0.0.1:4001' || fail 'admin / não pertence ao orbital-app'
 ! grep -Fq '4002' "$admin_block" || fail 'station-app vazou para admin.localhost'
 ! grep -Fq '4003' "$admin_block" || fail 'site-inst vazou para admin.localhost'
+! grep -Fq 'proxy_set_header X-Tenant' "$admin_block" || fail 'admin.localhost canônico não deve forçar tenant'
+
+# Qualquer <tenant>.admin.localhost replica o gateway admin sem cadastrar tenant.
+tenant_admin_block="$TEMP_ROOT/tenant-admin.conf"
+awk '/server_name ~\^\(\?<tenant>/{count++; if (count == 2) on=1} on{print} on && /^}$/{exit}' "$config_one" > "$tenant_admin_block"
+grep -Fq 'server_name ~^(?<tenant>[A-Za-z0-9-]+)\.admin\.localhost$;' "$tenant_admin_block" || fail 'gateway dinâmico de tenant ausente'
+grep -Fq 'proxy_pass http://127.0.0.1:4001;' "$tenant_admin_block" || fail 'tenant admin não usa Web orbital-app 4001'
+grep -Fq 'proxy_pass http://127.0.0.1:8001/;' "$tenant_admin_block" || fail 'tenant admin não usa API orbital-app 8001'
+grep -Fq 'proxy_pass http://127.0.0.1:4114;' "$tenant_admin_block" || fail 'tenant admin não replica orbital-tasks 4114'
+grep -Fq 'proxy_pass http://127.0.0.1:8114/api/;' "$tenant_admin_block" || fail 'tenant admin não replica API orbital-tasks 8114'
+grep -Fq 'proxy_set_header X-Tenant $tenant;' "$tenant_admin_block" || fail 'tenant capturado não é enviado em X-Tenant'
+grep -Fq 'location ^~ /tenants/ {' "$tenant_admin_block" || fail 'tenant admin não replica publicação estática do admin'
 
 module_count="$(awk -F';' 'NR > 1 && $2 == "module" {count++} END {print count+0}' "$SERVICES")"
 generated_module_count="$(grep -Ec '^    location /orbital-[^/]+/ \{$' "$admin_block")"
@@ -230,6 +244,7 @@ TLS_DIR="$TEMP_ROOT/tls" \
 cmp -s "$installed_one" "$available/dev-automation-local.conf" || fail 'instalação repetida alterou configuração'
 [[ -L "$enabled/dev-automation-local.conf" ]] || fail 'symlink gerenciado não foi criado'
 [[ -s "$TEMP_ROOT/tls/cert.pem" && -s "$TEMP_ROOT/tls/key.pem" ]] || fail 'certificado HTTPS local não foi gerado'
+grep -Fxq '*.admin.localhost' "$TEMP_ROOT/tls/hosts.txt" || fail 'certificado não inclui wildcard *.admin.localhost'
 grep -Eq '(^| )-t( |$)' "$nginx_log" || fail 'nginx -t não foi executado quando disponível'
 
 rollback_available="$TEMP_ROOT/rollback-available"

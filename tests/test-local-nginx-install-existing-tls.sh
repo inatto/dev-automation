@@ -54,6 +54,7 @@ printf 'test-ca\n' > "$TLS_DIR/ca/rootCA.pem"
 printf 'existing-cert\n' > "$TLS_DIR/cert.pem"
 printf 'existing-key\n' > "$TLS_DIR/key.pem"
 awk -F';' 'NR > 1 && !seen[$5]++ {print $5}' "$PROJECT_ROOT/config/services.csv" > "$TLS_DIR/hosts.txt"
+printf '*.admin.localhost\n' >> "$TLS_DIR/hosts.txt"
 
 PATH="$BIN_DIR:$PATH" \
 NGINX_AVAILABLE_DIR="$AVAILABLE_DIR" \
