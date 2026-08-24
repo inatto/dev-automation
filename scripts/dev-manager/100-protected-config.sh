@@ -4,7 +4,7 @@
 
 protected_config_relpath() {
   case "$1" in
-    config/local/*|config/remote/*|config/production/*|*/config/local/*|*/config/remote/*|*/config/production/*) return 0 ;;
+    config/local/*|config/remote/*|config/production/*|*/config/local/*|*/config/remote/*|*/config/production/*|.config/*|*/.config/*) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -55,6 +55,8 @@ def rel_parts(path: Path):
 
 def protected(path: Path) -> bool:
     parts = rel_parts(path)
+    if any(part.lower() == ".config" for part in parts[:-1]):
+        return True
     for i in range(len(parts) - 2):
         if parts[i].lower() == "config" and parts[i + 1].lower() in {"local", "remote", "production"}:
             return True

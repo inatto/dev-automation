@@ -192,9 +192,11 @@ import_one_zip() {
     echo "- **/config/remote/***"
     echo "- /config/production/***"
     echo "- **/config/production/***"
+    echo "- /.config/***"
+    echo "- **/.config/***"
   } >> "$unzip_filter_file"
 
-  log "Protegendo no unzip: config/local, config/remote e config/production entram somente por merge seguro."
+  log "Protegendo no unzip: config/local, config/remote, config/production e .config entram somente por merge seguro."
   log "Aplicando regras de ignore-unzip..."
   if ! rsync -a --filter="merge $unzip_filter_file" -- "$source_dir/" "$filtered_dir/"; then
     log "ERRO: falha ao aplicar ignore-unzip. O ZIP foi mantido."
