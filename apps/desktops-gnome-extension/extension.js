@@ -16,8 +16,9 @@ const TERMINALS_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.reque
 const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']);
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
+const TERMINALS_PROJECTS_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.projects.tsv']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 12;
+const EXTENSION_VERSION = 13;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -95,11 +96,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         const terminalRequest = this._readRequest(TERMINALS_REQUEST_PATH);
         if (terminalRequest.token && terminalRequest.token !== this._lastTerminalsRequestToken) {
             this._lastTerminalsRequestToken = terminalRequest.token;
-            this._prepareTerminals(
-                terminalRequest.token,
-                terminalRequest.fields.action || 'status',
-                this._positiveInteger(terminalRequest.fields.count)
-            );
+            this._prepareTerminals(terminalRequest.token, terminalRequest.fields);
         }
 
         const now = nowSeconds();
@@ -148,7 +145,9 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _prepareTerminals(token, action, projectCount) {
+    _prepareTerminals(token, fields = {}) {
+        const action = fields.action || 'status';
+        const projectCount = this._positiveInteger(fields.count);
         const monitor = this._rightmostMonitor();
         const target = Math.min(projectCount, Math.max(0, global.workspace_manager.n_workspaces - 1));
         const status = this._terminalStatus(target);
@@ -157,15 +156,22 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
 
         switch (action) {
         case 'status':
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
-            this._writeTerminalResult(token, status.managed.length, status.managed.length, true);
+            this._writeTerminalReady(token, action, target, status, monitor);
+            this._writeTerminalResult(token, status.assignments.size, status.assignments.size, true);
             return;
 
         case 'open': {
-            const missing = Math.max(0, target - status.managed.length);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
-            if (missing === 0) {
-                this._writeTerminalResult(token, 0, 0, true);
+            const requestedProject = Number.parseInt(String(fields.project ?? ''), 10);
+            if (!Number.isInteger(requestedProject) || requestedProject < 0 || requestedProject >= target) {
+                this._writeTerminalReady(token, action, target, status, monitor);
+                this._writeTerminalResult(token, 0, 1, false);
+                return;
+            }
+
+            this._writeTerminalReady(token, action, target, status, monitor);
+            if (status.assignments.has(requestedProject)) {
+                // Outra janela pode ter aparecido entre status e open. Não duplica.
+                this._writeTerminalResult(token, 1, 1, true);
                 this._terminalSession = null;
                 return;
             }
@@ -178,47 +184,40 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             this._terminalSession = {
                 token,
                 target,
-                expected: missing,
+                projectIndex: requestedProject,
+                expected: 1,
                 captured: 0,
                 complete: false,
-                managedSequences: status.managed.map(window => this._stableSequence(window)),
-                overflowSequences: status.overflow.map(window => this._stableSequence(window)),
+                overflowSequences: [...status.overflowSequences],
                 seenSequences: existingSequences,
-                expiresAt: nowSeconds() + Math.max(45, missing * 5),
+                expiresAt: nowSeconds() + 45,
+                monitor,
             };
-            this._writeTerminalResult(token, 0, missing, false);
+            this._writeTerminalResult(token, 0, 1, false);
             return;
         }
 
         case 'reconcile': {
-            const missing = Math.max(0, target - status.managed.length);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
-            if (missing > 0) {
-                this._writeTerminalResult(token, status.managed.length, target, false);
+            this._writeTerminalReady(token, action, target, status, monitor);
+            if (status.missingIndices.length > 0) {
+                this._writeTerminalResult(token, status.assignments.size, target, false);
                 return;
             }
 
-            const assignments = this._terminalAssignments(status.managed, target);
-            for (const [workspaceIndex, window] of assignments)
-                this._scheduleTerminalPlacement(window, workspaceIndex, monitor, 12);
+            for (const [projectIndex, window] of status.assignments)
+                this._scheduleTerminalPlacement(window, projectIndex + 1, monitor, 12);
 
-            // Fecha apenas excedentes comprovadamente criados pelo lote. Terminais
-            // manuais não gerenciados continuam preservados.
+            // Somente excedentes explicitamente capturados pelo próprio lote são
+            // fechados. Terminais manuais sem projeto reconhecido são preservados.
             this._closeTerminalWindows(status.overflow);
-            this._writeTerminalBatch(
-                assignments.map(([, window]) => this._stableSequence(window)),
-                []
-            );
-            this._writeTerminalResult(token, assignments.length, target, assignments.length === target);
+            this._writeTerminalBatch(status.assignments, []);
+            this._writeTerminalResult(token, status.assignments.size, target, status.assignments.size === target);
             return;
         }
 
         case 'managed-reset': {
-            // Usado automaticamente quando a lista/ordem de projetos muda.
-            // Fecha SOMENTE o lote que o próprio `terminals` gerencia; terminais
-            // manuais existentes nos workspaces continuam intocados.
-            const targets = new Set([...status.managed, ...status.overflow]);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
+            const targets = new Set([...status.assignments.values(), ...status.overflow]);
+            this._writeTerminalReady(token, action, target, status, monitor);
             this._writeTerminalResult(token, targets.size, targets.size, true);
             this._removeFile(TERMINALS_BATCH_PATH);
             this._terminalSession = null;
@@ -227,10 +226,10 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
 
         case 'reset': {
-            const targets = new Set([...status.managed, ...status.overflow]);
+            const targets = new Set([...status.assignments.values(), ...status.overflow]);
             for (const window of this._projectTerminalWindows(target))
                 targets.add(window);
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
+            this._writeTerminalReady(token, action, target, status, monitor);
             this._writeTerminalResult(token, targets.size, targets.size, true);
             this._removeFile(TERMINALS_BATCH_PATH);
             this._terminalSession = null;
@@ -239,7 +238,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
 
         default:
-            this._writeTerminalReady(token, action, target, status.managed.length, status.untracked, status.overflow.length, monitor);
+            this._writeTerminalReady(token, action, target, status, monitor);
             this._writeTerminalResult(token, 0, target, false);
         }
     }
@@ -258,20 +257,25 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 terminalSession.seenSequences.add(sequence);
                 this._handledWindows.add(window);
 
+                const batch = this._readTerminalBatch();
                 if (terminalSession.captured < terminalSession.expected) {
-                    terminalSession.managedSequences.push(sequence);
+                    batch.projects.set(terminalSession.projectIndex, sequence);
                     terminalSession.captured += 1;
+                    // Já nasce no desktop correto. A reconciliação final repete a
+                    // operação para absorver ajustes assíncronos do terminal/Mutter.
+                    this._scheduleTerminalPlacement(
+                        window,
+                        terminalSession.projectIndex + 1,
+                        terminalSession.monitor,
+                        12
+                    );
                 } else {
-                    // Ptyxis pode criar mais de uma janela durante uma inicialização
-                    // concorrente. O excedente fica marcado para fechamento seguro na
-                    // próxima fase, em vez de ser deixado espalhado pelos workspaces.
+                    // Um backend pode criar uma janela extra. Marca somente essa
+                    // janela como overflow do lote; terminais manuais não são tocados.
                     terminalSession.overflowSequences.push(sequence);
                 }
 
-                this._writeTerminalBatch(
-                    terminalSession.managedSequences,
-                    terminalSession.overflowSequences
-                );
+                this._writeTerminalBatch(batch.projects, terminalSession.overflowSequences);
                 terminalSession.complete = terminalSession.captured >= terminalSession.expected;
                 this._writeTerminalResult(
                     terminalSession.token,
@@ -318,56 +322,145 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
     _terminalStatus(target) {
         const allTerminals = this._allTerminalWindows();
         const bySequence = new Map(allTerminals.map(window => [this._stableSequence(window), window]));
+        const projects = this._readTerminalProjects(target);
         const batch = this._readTerminalBatch();
-        const managed = [];
+        const assignments = new Map();
+        const usedSequences = new Set();
         const overflow = [];
-        const managedSet = new Set();
-        const overflowSet = new Set();
+        const overflowSequences = new Set();
 
-        for (const sequence of batch.managed) {
-            const window = bySequence.get(sequence);
-            if (!window)
-                continue;
-            if (managed.length < target) {
-                managed.push(window);
-                managedSet.add(sequence);
-            } else if (!overflowSet.has(sequence)) {
-                overflow.push(window);
-                overflowSet.add(sequence);
-            }
+        const assign = (projectIndex, window) => {
+            if (!window || projectIndex < 0 || projectIndex >= target || assignments.has(projectIndex))
+                return false;
+            const sequence = this._stableSequence(window);
+            if (!sequence || usedSequences.has(sequence))
+                return false;
+            assignments.set(projectIndex, window);
+            usedSequences.add(sequence);
+            return true;
+        };
+
+        // 1) Verdade principal: a pasta real exibida pelo terminal. Isso permite
+        // reparar uma janela movida para o desktop errado e também adotar um
+        // terminal aberto manualmente dentro da pasta de um projeto.
+        for (const window of allTerminals) {
+            const projectIndex = this._terminalProjectIndex(window, projects);
+            if (projectIndex >= 0)
+                assign(projectIndex, window);
         }
+
+        // 2) Vínculo persistido. Necessário para lrdp1/lrdp2 (HOME não distingue
+        // os dois) e como fallback quando o backend não expõe cwd/título útil.
+        for (const [projectIndex, sequence] of batch.projects) {
+            if (assignments.has(projectIndex))
+                continue;
+            const window = bySequence.get(sequence);
+            if (!window || usedSequences.has(sequence))
+                continue;
+            const detectedProject = this._terminalProjectIndex(window, projects);
+            if (detectedProject >= 0 && detectedProject !== projectIndex)
+                continue; // mudou de pasta: a pasta vence o vínculo antigo.
+            assign(projectIndex, window);
+        }
+
+        // 3) Upgrade transparente do formato antigo (v12): a ordem do lote era a
+        // identidade. Só usamos esse fallback quando a pasta não contradiz a ordem.
+        for (let projectIndex = 0; projectIndex < Math.min(target, batch.managed.length); projectIndex++) {
+            if (assignments.has(projectIndex))
+                continue;
+            const sequence = batch.managed[projectIndex];
+            const window = bySequence.get(sequence);
+            if (!window || usedSequences.has(sequence))
+                continue;
+            const detectedProject = this._terminalProjectIndex(window, projects);
+            if (detectedProject >= 0 && detectedProject !== projectIndex)
+                continue;
+            assign(projectIndex, window);
+        }
+
         for (const sequence of batch.overflow) {
             const window = bySequence.get(sequence);
-            if (!window || managedSet.has(sequence) || overflowSet.has(sequence))
+            if (!window || usedSequences.has(sequence) || overflowSequences.has(sequence))
                 continue;
             overflow.push(window);
-            overflowSet.add(sequence);
+            overflowSequences.add(sequence);
         }
 
-        // Somente janelas capturadas explicitamente pelo lote de `terminals`
-        // podem ser gerenciadas. Um terminal manual já aberto em algum workspace
-        // nunca conta como projeto, pois isso deslocava toda a lista em +1/-1.
+        const missingIndices = [];
+        for (let projectIndex = 0; projectIndex < target; projectIndex++) {
+            if (!assignments.has(projectIndex))
+                missingIndices.push(projectIndex);
+        }
 
-        this._writeTerminalBatch(
-            managed.map(window => this._stableSequence(window)),
-            overflow.map(window => this._stableSequence(window))
-        );
-        const untracked = this._projectTerminalWindows(target)
-            .filter(window => {
-                const sequence = this._stableSequence(window);
-                return !managedSet.has(sequence) && !overflowSet.has(sequence);
-            }).length;
-        return {managed, overflow, untracked};
+        const untracked = this._projectTerminalWindows(target).filter(window => {
+            const sequence = this._stableSequence(window);
+            return !usedSequences.has(sequence) && !overflowSequences.has(sequence);
+        }).length;
+
+        // Regrava sempre no formato novo, já reparado por identidade de pasta.
+        this._writeTerminalBatch(assignments, [...overflowSequences]);
+        return {
+            assignments,
+            overflow,
+            overflowSequences: [...overflowSequences],
+            untracked,
+            missingIndices,
+        };
     }
 
-    _terminalAssignments(managed, target) {
-        // `managed` já vem na ordem persistida pelo lote, que é exatamente a
-        // ordem em que terminals.sh abriu os projetos. Workspace do GNOME é
-        // zero-based: índice 0 = LAZER; projeto 0 = workspace índice 1.
-        // Nunca inferimos a identidade do projeto pela posição atual da janela.
-        return managed
-            .slice(0, target)
-            .map((window, projectIndex) => [projectIndex + 1, window]);
+    _readTerminalProjects(target) {
+        const projects = [];
+        try {
+            const [ok, bytes] = GLib.file_get_contents(TERMINALS_PROJECTS_PATH);
+            if (!ok)
+                return projects;
+            const text = new TextDecoder('utf-8').decode(bytes);
+            for (const raw of text.split(/\n/)) {
+                if (!raw.trim())
+                    continue;
+                const parts = raw.split('\t');
+                if (parts.length < 3)
+                    continue;
+                const index = Number.parseInt(parts[0], 10);
+                if (!Number.isInteger(index) || index < 0 || index >= target)
+                    continue;
+                const name = parts[1] || '';
+                const path = parts.slice(2).join('\t').trim();
+                projects.push({index, name, path: path === '-' ? '' : path.replace(/\/+$/, '')});
+            }
+        } catch (_) {
+            return [];
+        }
+        return projects.sort((a, b) => b.path.length - a.path.length || a.index - b.index);
+    }
+
+    _terminalProjectIndex(window, projects) {
+        const title = String(window.get_title?.() ?? '');
+        let cwd = '';
+        try {
+            const pid = Number(window.get_pid?.() ?? 0);
+            if (pid > 0)
+                cwd = String(GLib.file_read_link(`/proc/${pid}/cwd`) ?? '').replace(/\/+$/, '');
+        } catch (_) {
+            cwd = '';
+        }
+
+        const home = GLib.get_home_dir().replace(/\/+$/, '');
+        for (const project of projects) {
+            const path = project.path;
+            if (!path)
+                continue;
+
+            if (cwd && (cwd === path || cwd.startsWith(`${path}/`)))
+                return project.index;
+
+            const titlePaths = [path];
+            if (home && path.startsWith(`${home}/`))
+                titlePaths.push(`~/${path.slice(home.length + 1)}`);
+            if (titlePaths.some(value => title.includes(value)))
+                return project.index;
+        }
+        return -1;
     }
 
     _allTerminalWindows() {
@@ -545,13 +638,14 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _writeTerminalReady(token, action, target, managed, untracked, overflow, monitor) {
+    _writeTerminalReady(token, action, target, status, monitor) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
-            const missing = Math.max(0, target - managed);
+            const managed = status.assignments.size;
+            const missingIndices = status.missingIndices.join(',');
             GLib.file_set_contents(
                 TERMINALS_READY_PATH,
-                `${token}\taction=${action}\tcount=${target}\tmanaged=${managed}\tmissing=${missing}\tuntracked=${untracked}\toverflow=${overflow}\tfirst_workspace=2\tmonitor=${monitor}\n`
+                `${token}\taction=${action}\tcount=${target}\tmanaged=${managed}\tmissing=${status.missingIndices.length}\tmissing_indices=${missingIndices}\tuntracked=${status.untracked}\toverflow=${status.overflow.length}\tfirst_workspace=2\tmonitor=${monitor}\n`
             );
         } catch (error) {
             console.error(`[workspace-controller] falha ao preparar terminals: ${error}`);
@@ -606,47 +700,69 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         try {
             const [ok, bytes] = GLib.file_get_contents(TERMINALS_BATCH_PATH);
             if (!ok)
-                return {managed: [], overflow: []};
+                return {managed: [], projects: new Map(), overflow: []};
             const lines = new TextDecoder('utf-8').decode(bytes).split(/\n/);
             if ((lines.shift() || '').trim() !== `shell=${shell}`) {
                 this._removeFile(TERMINALS_BATCH_PATH);
-                return {managed: [], overflow: []};
+                return {managed: [], projects: new Map(), overflow: []};
             }
 
             const managed = [];
+            const projects = new Map();
             const overflow = [];
             for (const raw of lines) {
                 const line = raw.trim();
                 if (!line)
                     continue;
+                let match = line.match(/^project=(\d+):(\d+)$/);
+                if (match) {
+                    projects.set(Number(match[1]), Number(match[2]));
+                    continue;
+                }
                 if (/^managed=\d+$/.test(line)) {
                     managed.push(Number(line.slice('managed='.length)));
                 } else if (/^overflow=\d+$/.test(line)) {
                     overflow.push(Number(line.slice('overflow='.length)));
                 } else if (/^\d+$/.test(line)) {
-                    // Compatibilidade com o formato v9: números puros eram
-                    // sequências gerenciadas.
+                    // Compatibilidade v9: números puros eram sequências gerenciadas.
                     managed.push(Number(line));
                 }
             }
             return {
                 managed: [...new Set(managed.filter(value => Number.isInteger(value) && value > 0))],
+                projects: new Map([...projects].filter(([index, sequence]) =>
+                    Number.isInteger(index) && index >= 0 && Number.isInteger(sequence) && sequence > 0)),
                 overflow: [...new Set(overflow.filter(value => Number.isInteger(value) && value > 0))],
             };
         } catch (_) {
-            return {managed: [], overflow: []};
+            return {managed: [], projects: new Map(), overflow: []};
         }
     }
 
-    _writeTerminalBatch(managedSequences, overflowSequences) {
+    _writeTerminalBatch(projectAssignments, overflowSequences) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
-            const managed = [...new Set(managedSequences.filter(value => Number.isInteger(value) && value > 0))];
-            const overflow = [...new Set(overflowSequences.filter(value => Number.isInteger(value) && value > 0))]
-                .filter(value => !managed.includes(value));
+            const pairs = projectAssignments instanceof Map
+                ? [...projectAssignments.entries()]
+                : [];
+            const normalizedPairs = pairs
+                .map(([projectIndex, value]) => {
+                    const sequence = typeof value === 'number' ? value : this._stableSequence(value);
+                    return [Number(projectIndex), Number(sequence)];
+                })
+                .filter(([projectIndex, sequence]) =>
+                    Number.isInteger(projectIndex) && projectIndex >= 0 && Number.isInteger(sequence) && sequence > 0)
+                .sort((a, b) => a[0] - b[0]);
+            const managedSequences = normalizedPairs.map(([, sequence]) => sequence);
+            const managedSet = new Set(managedSequences);
+            const overflow = [...new Set((overflowSequences ?? [])
+                .map(value => Number(value))
+                .filter(value => Number.isInteger(value) && value > 0 && !managedSet.has(value)))];
             const shell = this._shellProcessId();
             const rows = [
-                ...managed.map(value => `managed=${value}`),
+                ...normalizedPairs.map(([projectIndex, sequence]) => `project=${projectIndex}:${sequence}`),
+                // Mantém as linhas managed para rollback/compatibilidade com v12.
+                ...managedSequences.map(value => `managed=${value}`),
                 ...overflow.map(value => `overflow=${value}`),
             ];
             const body = rows.length ? `${rows.join('\n')}\n` : '';

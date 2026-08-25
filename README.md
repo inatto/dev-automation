@@ -207,21 +207,23 @@ A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-mana
 
 ### `terminals`
 
-No Ubuntu/GNOME/Wayland, abre um terminal por projeto configurado. O workspace
-1 (`LAZER`) e os dois últimos (`lrdp1`/`lrdp2`) ficam fora.
+No Ubuntu/GNOME/Wayland, mantém um terminal por projeto configurado. O workspace
+1 (`LAZER`) é preservado; os projetos ocupam os workspaces seguintes e `lrdp1`/
+`lrdp2` ficam nos dois últimos.
 
-O fluxo é deliberadamente dividido em duas chamadas para não disputar com o
-startup assíncrono do terminal:
+`terminals` é idempotente em uma única chamada: identifica terminais existentes
+pela pasta do projeto (cwd/título), move cada um para o workspace correto, abre
+somente os projetos realmente ausentes e maximiza no monitor direito. Se uma
+janela for parar no desktop errado, basta executar de novo:
 
 ```bash
-terminals   # 1ª chamada: abre somente o que falta, uma janela por vez
-terminals   # 2ª chamada: move para o monitor direito e maximiza
+terminals
 ```
 
-Cada nova janela só é solicitada depois que o controlador GNOME confirma a
-anterior. Repetições posteriores apenas reconciliam posição e maximização, sem
-criar outro lote. Para fechar o lote e limpar terminais extras dos workspaces de
-projeto:
+A associação é `projeto/pasta -> janela`, não a posição em que a janela apareceu.
+Por isso fechar um terminal no meio da lista, reordenar projetos ou mover uma
+janela manualmente não desloca os demais em +1/-1. Para fechar o lote e limpar
+terminais extras dos workspaces de projeto:
 
 ```bash
 terminals --reset
