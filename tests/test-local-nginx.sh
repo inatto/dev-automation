@@ -65,6 +65,8 @@ grep -Fq 'proxy_pass http://127.0.0.1:4108;' "$admin_block" || fail 'Web do repo
 grep -Fq 'proxy_pass http://127.0.0.1:8108/api/;' "$admin_block" || fail 'API do reports não usa 8108'
 grep -Fq 'proxy_pass http://127.0.0.1:4111;' "$admin_block" || fail 'Web do legal não usa 4111'
 grep -Fq 'proxy_pass http://127.0.0.1:8111/api/;' "$admin_block" || fail 'API do legal não usa 8111'
+grep -Fq 'proxy_pass http://127.0.0.1:4115;' "$admin_block" || fail 'Web do benefit não usa 4115'
+grep -Fq 'proxy_pass http://127.0.0.1:8115/api/;' "$admin_block" || fail 'API do benefit não usa 8115'
 [[ "$(grep -c '^    location / {$' "$admin_block")" -eq 1 ]] || fail 'admin deve ter exatamente um location /'
 awk '/location \/ \{/{getline; print; exit}' "$admin_block" | grep -Fq '127.0.0.1:4001' || fail 'admin / não pertence ao orbital-app'
 ! grep -Fq '4002' "$admin_block" || fail 'station-app vazou para admin.localhost'
@@ -79,6 +81,8 @@ grep -Fq 'proxy_pass http://127.0.0.1:4001;' "$tenant_admin_block" || fail 'tena
 grep -Fq 'proxy_pass http://127.0.0.1:8001/;' "$tenant_admin_block" || fail 'tenant admin não usa API orbital-app 8001'
 grep -Fq 'proxy_pass http://127.0.0.1:4114;' "$tenant_admin_block" || fail 'tenant admin não replica orbital-tasks 4114'
 grep -Fq 'proxy_pass http://127.0.0.1:8114/api/;' "$tenant_admin_block" || fail 'tenant admin não replica API orbital-tasks 8114'
+grep -Fq 'proxy_pass http://127.0.0.1:4115;' "$tenant_admin_block" || fail 'tenant admin não replica orbital-benefit 4115'
+grep -Fq 'proxy_pass http://127.0.0.1:8115/api/;' "$tenant_admin_block" || fail 'tenant admin não replica API orbital-benefit 8115'
 grep -Fq 'proxy_set_header X-Tenant $tenant;' "$tenant_admin_block" || fail 'tenant capturado não é enviado em X-Tenant'
 grep -Fq 'location ^~ /tenants/ {' "$tenant_admin_block" || fail 'tenant admin não replica publicação estática do admin'
 

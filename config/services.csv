@@ -13,6 +13,7 @@ orbital-vouchers;module;4110;8110;admin.localhost;/orbital-vouchers
 orbital-legal;module;4111;8111;admin.localhost;/orbital-legal
 orbital-ai;module;4112;8112;admin.localhost;/orbital-ai
 orbital-tasks;module;4114;8114;admin.localhost;/orbital-tasks
+orbital-benefit;module;4115;8115;admin.localhost;/orbital-benefit
 station-app;base;4002;8002;painel.localhost;/
 site-inst;base;4003;8003;anpprev.localhost;/
 site-inst;base;4003;8003;sinproprev.localhost;/
