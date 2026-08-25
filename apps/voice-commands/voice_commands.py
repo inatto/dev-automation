@@ -665,6 +665,7 @@ class VoiceTUI:
     PAGE_COMMANDS = "commands"
     PAGE_DESKTOPS = "desktops"
     PAGE_DIAGNOSTICS = "diagnostics"
+    CTRL_F = 6
 
     def __init__(self, cfg: dict, catalog: CommandCatalog, dry_run: bool = False, config_only: bool = False):
         self.cfg = cfg
@@ -819,6 +820,27 @@ class VoiceTUI:
         self.saved_revision += 1
         self._flash(f"Salvo em {self.catalog.user_path.name}")
 
+    def _save_and_return_live(self) -> None:
+        if self.pending:
+            try:
+                self.catalog.save()
+            except Exception as exc:
+                self._flash(f"Falha ao salvar: {exc}", 4.0)
+                return
+            self.pending = False
+            self.saved_revision += 1
+            message = f"Salvo em {self.catalog.user_path.name} · F1 ao vivo novamente."
+        else:
+            message = "Nenhuma alteração pendente · F1 ao vivo novamente."
+
+        if not self.config_only:
+            self.page = self.PAGE_LIVE
+            self.focus = "items"
+        self.exit_armed_until = 0.0
+        self.flash = message
+        self.flash_until = time.monotonic() + 2.8
+        self.render()
+
     def _reset_selected(self) -> None:
         command_id = self._selected_command_id()
         if not command_id:
@@ -826,7 +848,7 @@ class VoiceTUI:
         self.catalog.reset_command(command_id)
         self.phrase_index[self.page] = 0
         self._mark_pending()
-        self._flash("Palavras restauradas para o padrão; F10 salva.")
+        self._flash("Palavras restauradas para o padrão; Ctrl+F salva e volta ao F1.")
 
     def _start_editor(self, mode: str) -> None:
         command_id = self._selected_command_id()
@@ -862,7 +884,7 @@ class VoiceTUI:
             else:
                 self.catalog.add_phrase(command_id, text)
             self._mark_pending()
-            self._flash("Palavra alterada; F10 salva.")
+            self._flash("Palavra alterada; Ctrl+F salva e volta ao F1.")
             self.editor = None
             try:
                 curses.curs_set(0)
@@ -883,7 +905,7 @@ class VoiceTUI:
         removed = self.catalog.remove_phrase(command_id, idx)
         self.phrase_index[self.page] = max(0, min(idx, len(phrases) - 2))
         self._mark_pending()
-        self._flash(f"Removido: {removed} · F10 salva.")
+        self._flash(f"Removido: {removed} · Ctrl+F salva e volta ao F1.")
 
     def _handle_editor_key(self, key) -> bool:
         if not self.editor:
@@ -929,12 +951,21 @@ class VoiceTUI:
         if self.screen is None:
             return True
         try:
-            key = self.screen.get_wch()
+            raw_key = self.screen.get_wch()
         except curses.error:
             return True
+
+        key = self._key_code(raw_key)
+        if key == self.CTRL_F:
+            if self.editor:
+                self._commit_editor()
+                if self.editor is not None:
+                    return True
+            self._save_and_return_live()
+            return True
+
         if self.editor:
-            return self._handle_editor_key(key)
-        key = self._key_code(key)
+            return self._handle_editor_key(raw_key)
         if key == -1:
             return True
 
@@ -954,7 +985,7 @@ class VoiceTUI:
         elif key in (ord("q"), ord("Q")):
             if self.pending and time.monotonic() > self.exit_armed_until:
                 self.exit_armed_until = time.monotonic() + 3.0
-                self._flash("Há alterações sem salvar. F10 salva; Q novamente descarta.", 3.0)
+                self._flash("Há alterações sem salvar. Ctrl+F salva e volta ao F1; Q novamente descarta.", 3.0)
                 return True
             return False
         elif key == 27:
@@ -964,19 +995,11 @@ class VoiceTUI:
             elif self.config_only:
                 if self.pending and time.monotonic() > self.exit_armed_until:
                     self.exit_armed_until = time.monotonic() + 3.0
-                    self._flash("Há alterações sem salvar. F10 salva; Esc novamente descarta.", 3.0)
+                    self._flash("Há alterações sem salvar. Ctrl+F salva e volta ao F1; Esc novamente descarta.", 3.0)
                     return True
                 return False
             else:
                 return False
-        elif key == curses.KEY_F10:
-            if self.pending:
-                try:
-                    self._save()
-                except Exception as exc:
-                    self._flash(f"Falha ao salvar: {exc}", 4.0)
-            else:
-                self._flash("Nenhuma alteração pendente.")
         elif self.page in {self.PAGE_COMMANDS, self.PAGE_DESKTOPS}:
             items = self._current_items()
             phrases = self._selected_phrases()
@@ -1260,7 +1283,7 @@ class VoiceTUI:
 
         self._line(footer_top, 0, w - 1, attr=self._color(6))
         if self.page in {self.PAGE_COMMANDS, self.PAGE_DESKTOPS}:
-            help_line = "↑/↓ escolher  Tab/←/→ painel  Enter editar  A adicionar  Del/X remover  R padrão  F10 salvar"
+            help_line = "↑/↓ escolher  Tab/←/→ painel  Enter editar  A adicionar  Del/X remover  R padrão  Ctrl+F salvar + F1"
         else:
             help_line = "F1 ao vivo  F2 comandos  F3 desktops  F4 diagnóstico  Q sair"
         self._add(footer_top + 1, 2, help_line, self._color(6), width=w - 4)

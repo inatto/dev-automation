@@ -18,10 +18,10 @@ A TUI abre em tela cheia e continua ouvindo no painel **F1 AO VIVO**. As página
 - `Enter`/`E` — edita a palavra selecionada.
 - `Del` ou `X` — remove a palavra selecionada.
 - `R` — restaura as palavras padrão daquele comando.
-- `F10` — salva.
+- `Ctrl+F` — salva e volta imediatamente para **F1 AO VIVO**.
 - `Q` — sai. Se houver alteração sem salvar, exige uma segunda confirmação.
 
-`Tab`, `←` e `→` alternam o foco entre a lista de comandos/desktops e a lista de palavras. `↑`/`↓` navegam como uma BIOS.
+`Tab`, `←` e `→` alternam o foco entre a lista de comandos/desktops e a lista de palavras. `↑`/`↓` navegam como uma BIOS. `F10` não é usado, evitando o atalho/menu do terminal.
 
 Para abrir só a configuração sem carregar o Whisper:
 
