@@ -6,12 +6,16 @@ silence_to_finish_seconds = 0.65
 speech_rms_threshold = 0.012
 
 [recognition]
-model = "tiny"
+model = "medium"
 language = "pt"
 compute_type = "int8"
-device = "auto"
+device = "cpu"
 minimum_similarity = 0.82
 cooldown_seconds = 0.90
+
+[logging]
+enabled = true
+directory = "logs"
 
 [action]
 backend = "auto"

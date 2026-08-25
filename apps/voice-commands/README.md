@@ -33,6 +33,21 @@ Em terminal interativo a TUI é aberta automaticamente. Ela mostra:
 - modelo, device e compute type atuais;
 - histórico navegável com setas para cima/baixo.
 
+## Precisão e gravação de diagnóstico
+
+A configuração padrão usa `medium`, português fixo (`pt`), CPU `int8` e busca por feixe (`beam_size=5`). Isso melhora bastante a transcrição em relação ao `tiny` sem reintroduzir a dependência quebrada de CUDA/cuBLAS.
+
+Toda fala que gerar texto é persistida automaticamente em uma pasta por dia:
+
+```text
+apps/voice-commands/logs/YYYY-MM-DD/
+  HH-MM-SS-micros.wav
+  events.jsonl
+  transcriptions.tsv
+```
+
+O WAV é exatamente o trecho entregue ao Whisper. `events.jsonl` guarda transcrição, comando casado, similaridade e resultado; `transcriptions.tsv` é uma visão simples para leitura. A pasta `logs/` fica fora do Git.
+
 Teclas: `Q`/`Esc` encerra, `↑`/`↓` percorre o histórico e `End` volta ao evento mais recente.
 
 Para log simples, útil em systemd ou depuração:

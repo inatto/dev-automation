@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import curses
+eimport json
 import math
 import os
 import re
@@ -11,6 +12,7 @@ import sys
 import time
 import tomllib
 import unicodedata
+import wave
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,6 +43,65 @@ class LogEvent:
     kind: str
     heard: str
     detail: str = ""
+
+
+class DailyVoiceLogger:
+    """Persist every non-empty transcription with the exact captured utterance."""
+
+    def __init__(self, cfg: dict):
+        log_cfg = cfg.get("logging", {})
+        self.enabled = bool(log_cfg.get("enabled", True))
+        configured = Path(str(log_cfg.get("directory", "logs"))).expanduser()
+        self.root = configured if configured.is_absolute() else APP_DIR / configured
+
+    @staticmethod
+    def _write_wav(path: Path, samples, sample_rate: int) -> None:
+        import numpy as np
+
+        pcm = np.asarray(samples, dtype=np.float32)
+        pcm = np.clip(pcm, -1.0, 1.0)
+        pcm16 = (pcm * 32767.0).astype(np.int16)
+        with wave.open(str(path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(pcm16.tobytes())
+
+    def log(
+        self,
+        samples,
+        sample_rate: int,
+        text: str,
+        kind: str,
+        detail: str = "",
+        match: Match | None = None,
+    ) -> Path | None:
+        if not self.enabled or not text.strip():
+            return None
+        now = datetime.now()
+        day_dir = self.root / now.strftime("%Y-%m-%d")
+        day_dir.mkdir(parents=True, exist_ok=True)
+        stem = now.strftime("%H-%M-%S-%f")
+        wav_path = day_dir / f"{stem}.wav"
+        self._write_wav(wav_path, samples, sample_rate)
+
+        payload = {
+            "timestamp": now.isoformat(timespec="milliseconds"),
+            "audio": wav_path.name,
+            "text": text,
+            "kind": kind,
+            "detail": detail,
+            "command": match.command if match else None,
+            "matched_phrase": match.phrase if match else None,
+            "similarity": round(match.score, 6) if match else None,
+        }
+        with (day_dir / "events.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        safe_text = text.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+        safe_detail = detail.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+        with (day_dir / "transcriptions.tsv").open("a", encoding="utf-8") as fh:
+            fh.write(f"{payload['timestamp']}\t{wav_path.name}\t{kind}\t{safe_text}\t{safe_detail}\n")
+        return wav_path
 
 
 class CommandMatcher:
@@ -156,28 +217,67 @@ class DesktopController:
 
 
 class WhisperRecognizer:
+    CUDA_RUNTIME_MARKERS = (
+        "libcublas",
+        "libcudnn",
+        "cuda",
+        "cublas",
+        "cudnn",
+    )
+
     def __init__(self, model_name: str, language: str, compute_type: str, device: str = "auto"):
         try:
             from faster_whisper import WhisperModel
         except ImportError as exc:
             raise RuntimeError("Dependências ausentes. Rode ./install.sh") from exc
+        self._WhisperModel = WhisperModel
         self.language = language
         self.model_name = model_name
+        self.requested_device = device
         self.device = device
         self.compute_type = compute_type
-        self.model = WhisperModel(model_name, device=device, compute_type=compute_type)
+        self.model = self._load_model(device)
 
-    def transcribe(self, samples, sample_rate: int) -> str:
-        segments, _ = self.model.transcribe(
+    @classmethod
+    def _is_cuda_runtime_error(cls, exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in cls.CUDA_RUNTIME_MARKERS)
+
+    def _load_model(self, device: str):
+        try:
+            return self._WhisperModel(self.model_name, device=device, compute_type=self.compute_type)
+        except Exception as exc:
+            if device != "auto" or not self._is_cuda_runtime_error(exc):
+                raise
+            self.device = "cpu"
+            return self._WhisperModel(self.model_name, device="cpu", compute_type=self.compute_type)
+
+    def _transcribe(self, samples):
+        return self.model.transcribe(
             samples,
             language=self.language,
             initial_prompt="Comandos curtos: vai, avança, pra frente, continua, volta, recua, pra trás, desktop anterior.",
-            beam_size=1,
-            best_of=1,
+            beam_size=5,
+            best_of=5,
             temperature=0.0,
             vad_filter=False,
             condition_on_previous_text=False,
+            repetition_penalty=1.05,
+            no_repeat_ngram_size=3,
         )
+
+    def transcribe(self, samples, sample_rate: int) -> str:
+        try:
+            segments, _ = self._transcribe(samples)
+            # faster-whisper may defer CUDA library loading until segments are consumed.
+            segments = list(segments)
+        except Exception as exc:
+            if self.requested_device != "auto" or self.device == "cpu" or not self._is_cuda_runtime_error(exc):
+                raise
+            self.device = "cpu"
+            self.model = self._WhisperModel(self.model_name, device="cpu", compute_type=self.compute_type)
+            segments, _ = self._transcribe(samples)
+            segments = list(segments)
         return " ".join(seg.text.strip() for seg in segments).strip()
 
 
@@ -461,6 +561,7 @@ def _microphone_loop(cfg: dict, dry_run: bool, tui: VoiceTUI | None) -> int:
     )
     matcher = build_matcher(cfg)
     controller = DesktopController(cfg["action"].get("backend", "auto"), dry_run=dry_run, verbose=tui is None)
+    voice_logger = DailyVoiceLogger(cfg)
     cooldown = float(rec_cfg.get("cooldown_seconds", 0.9))
     last_action_at = 0.0
 
@@ -531,6 +632,7 @@ def _microphone_loop(cfg: dict, dry_run: bool, tui: VoiceTUI | None) -> int:
             match = matcher.match(text)
             if not match:
                 detail = "nenhum comando compatível"
+                voice_logger.log(samples, rate, text, "ignored", detail)
                 if tui:
                     tui.log("ignored", text, detail)
                     tui.set_status("ESCUTANDO")
@@ -541,6 +643,7 @@ def _microphone_loop(cfg: dict, dry_run: bool, tui: VoiceTUI | None) -> int:
             now = time.monotonic()
             if now - last_action_at < cooldown:
                 detail = f"{command_label(match.command)} · {match.score:.0%} · ignorado por cooldown"
+                voice_logger.log(samples, rate, text, "cooldown", detail, match)
                 if tui:
                     tui.log("cooldown", text, detail)
                     tui.set_status("ESCUTANDO")
@@ -551,6 +654,7 @@ def _microphone_loop(cfg: dict, dry_run: bool, tui: VoiceTUI | None) -> int:
             try:
                 action = execute_match(match, controller)
                 detail = f"{command_label(match.command)} · {match.score:.0%} · {action}"
+                voice_logger.log(samples, rate, text, "ok", detail, match)
                 if tui:
                     tui.log("ok", text, detail)
                 else:
@@ -558,6 +662,7 @@ def _microphone_loop(cfg: dict, dry_run: bool, tui: VoiceTUI | None) -> int:
                 last_action_at = now
             except Exception as exc:
                 detail = f"{command_label(match.command)} · falhou: {exc}"
+                voice_logger.log(samples, rate, text, "error", detail, match)
                 if tui:
                     tui.log("error", text, detail)
                 else:
@@ -587,6 +692,8 @@ def doctor(cfg: dict) -> int:
     print(f"Whisper model: {rec_cfg.get('model', 'tiny')}")
     print(f"Whisper device: {rec_cfg.get('device', 'auto')}")
     print(f"Whisper compute: {rec_cfg.get('compute_type', 'int8')}")
+    logger = DailyVoiceLogger(cfg)
+    print(f"Voice logs: {logger.root} ({'ativo' if logger.enabled else 'desativado'})")
     try:
         import sounddevice as sd
         print("sounddevice: OK")
