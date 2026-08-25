@@ -12,9 +12,11 @@ grep -Fq 'exec bash "$SOURCE"' "$ROOT/deploy/local/install-dev-manager.sh"
 grep -Fq 'exec bash "$lrdp_source"' "$ROOT/deploy/local/install-commands.sh"
 
 # O instalador continua restaurando +x nos scripts de origem como autorreparo.
-grep -Fq 'chmod +x "$G512_RGB_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
+grep -Fq '"$G512_RGB_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
 grep -Fq '"$PROJECT_RUNNER"' "$ROOT/deploy/local/install-commands.sh"
 grep -Fq '"$DESKTOPS_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
-grep -Fq '"$LRDP1_SOURCE" "$LRDP2_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
+grep -Fq '"$LRDP_TUI_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
+grep -Fq '"$LRDP1_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
+grep -Fq '"$LRDP2_SOURCE"' "$ROOT/deploy/local/install-commands.sh"
 
 echo 'OK: dev-manager autorrepara comandos e wrappers shell toleram perda de +x interno'

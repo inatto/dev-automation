@@ -3,34 +3,52 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/bin"
+mkdir -p "$TMP/bin" "$TMP/state"
 cat > "$TMP/bin/xfreerdp3" <<'EOT'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "/list:monitor" ]]; then
+  cat <<'MON'
+  [0] 1920x1080 +1920+0
+* [1] 1920x1080 +0+0
+  [2] 3840x2160 +3840+0
+MON
+  exit 0
+fi
 printf '%s\n' "$@"
 EOT
 chmod +x "$TMP/bin/xfreerdp3"
 
 for name in lrdp1 lrdp2; do
-  src="$ROOT/apps/lrdp/$name"
-  testscript="$TMP/$name"
-  cp "$src" "$testscript"
-  python3 - "$testscript" <<'PY'
-from pathlib import Path
-import sys
-p=Path(sys.argv[1])
-s=p.read_text()
-needle='LOGIN_PROFILES=(\n'
-s=s.replace(needle, needle+'  "Secundário|segundo.usuario|senha_teste"\n', 1)
-p.write_text(s)
-PY
-  chmod +x "$testscript"
+  rm -rf "$TMP/state/$name"
+  mkdir -p "$TMP/state/$name"
+  script_path="$ROOT/apps/lrdp/$name"
 
-  output="$(printf '1\nn\n' | script -qfec "PATH='$TMP/bin':\$PATH '$testscript'" /dev/null | tr -d '\r')"
-  grep -Fq 'Login RDP:' <<<"$output"
-  grep -Fq 'Secundário (segundo.usuario)' <<<"$output"
-  grep -Fq '/u:segundo.usuario' <<<"$output"
-  grep -Fq '/p:senha_teste' <<<"$output"
-  grep -Fq '/audio-mode:server' <<<"$output"
+  # Configuração inicial: login Gov, áudio local, microfone, monitor 1 como principal.
+  output="$(printf '2\n1\ns\n1\n' | script -qfec "PATH='$TMP/bin':\$PATH LRDP_STATE_ROOT='$TMP/state/$name' '$script_path'" /dev/null | tr -d '\r')"
+  grep -Fq 'Monitores detectados pelo FreeRDP:' <<<"$output"
+  grep -Fq '[1] 1920x1080 +0+0' <<<"$output"
+  grep -Fq 'IDs detectados: 0 1 2' <<<"$output"
+  grep -Fq 'Esquerda -> direita: [1] [0] [2]' <<<"$output"
+  grep -Fq '/u:govbr' <<<"$output"
+  grep -Fq '/audio-mode:redirect' <<<"$output"
+  grep -Fq '/microphone' <<<"$output"
+  grep -Fq '/monitors:1,0,2' <<<"$output"
+
+  state="$TMP/state/$name/$name.conf"
+  [[ -f "$state" ]]
+  grep -Fxq 'login_index=2' "$state"
+  grep -Fxq 'audio_mode=redirect' "$state"
+  grep -Fxq 'microphone=yes' "$state"
+  grep -Fxq 'primary_monitor=1' "$state"
+
+  # Segunda execução: Enter aceita toda a última configuração, sem reconfigurar.
+  output="$(printf '\n' | script -qfec "PATH='$TMP/bin':\$PATH LRDP_STATE_ROOT='$TMP/state/$name' '$script_path'" /dev/null | tr -d '\r')"
+  grep -Fq "Última configuração de $name:" <<<"$output"
+  grep -Fq 'Usar essa configuração? [S/n]:' <<<"$output"
+  grep -Fq '/u:govbr' <<<"$output"
+  grep -Fq '/audio-mode:redirect' <<<"$output"
+  grep -Fq '/microphone' <<<"$output"
+  grep -Fq '/monitors:1,0,2' <<<"$output"
 done
 
-printf 'OK: lrdp1/lrdp2 permitem múltiplos logins e seleção ao iniciar\n'
+printf 'OK: lrdp1/lrdp2 persistem login, áudio, microfone e monitor principal\n'

@@ -4,28 +4,32 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
-cat > "$TMP/bin/xfreerdp3" <<'EOF'
+cat > "$TMP/bin/xfreerdp3" <<'EOT'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "/list:monitor" ]]; then
+  printf '%s\n' '* [0] 1920x1080 +0+0' '  [1] 1920x1080 +1920+0'
+  exit 0
+fi
 printf '%s\n' "$@"
-EOF
+EOT
 chmod +x "$TMP/bin/xfreerdp3"
 
 for name in lrdp1 lrdp2; do
-  script="$ROOT/apps/lrdp/$name"
-  grep -Fq "Quer alterar a configuração? [s/N]:" "$script"
-  grep -Fq "'/audio-mode:redirect'" "$script"
-  grep -Fq "'/audio-mode:server'" "$script"
-  grep -Fq "'/audio-mode:none'" "$script"
+  state="$TMP/state-$name"
+  mkdir -p "$state"
+  script_path="$ROOT/apps/lrdp/$name"
 
-  # N: abre direto usando áudio remoto, sem entrar no menu.
-  output="$(printf 'n\n' | script -qfec "PATH='$TMP/bin':\$PATH '$script'" /dev/null | tr -d '\r')"
+  # Escolhe áudio remoto, sem microfone e monitor 0.
+  output="$(printf '1\n2\nn\n0\n' | script -qfec "PATH='$TMP/bin':\$PATH LRDP_STATE_ROOT='$state' '$script_path'" /dev/null | tr -d '\r')"
   grep -Fq '/audio-mode:server' <<<"$output"
-  ! grep -Fq 'Áudio RDP:' <<<"$output"
+  ! grep -Fxq '/microphone' <<<"$output"
+  grep -Fq '/monitors:0,1' <<<"$output"
 
-  # S: exibe opções; 1 escolhe áudio local.
-  output="$(printf 's\n1\n' | script -qfec "PATH='$TMP/bin':\$PATH '$script'" /dev/null | tr -d '\r')"
-  grep -Fq 'Áudio RDP:' <<<"$output"
-  grep -Fq '/audio-mode:redirect' <<<"$output"
+  # Reconfigura a partir do salvo: N, mantém login, escolhe sem áudio, mic sim, principal 1.
+  output="$(printf 'n\n\n3\ns\n1\n' | script -qfec "PATH='$TMP/bin':\$PATH LRDP_STATE_ROOT='$state' '$script_path'" /dev/null | tr -d '\r')"
+  grep -Fq '/audio-mode:none' <<<"$output"
+  grep -Fq '/microphone' <<<"$output"
+  grep -Fq '/monitors:1,0' <<<"$output"
 done
 
-printf 'OK: lrdp1/lrdp2 perguntam antes; N conecta direto e S abre opções de áudio\n'
+printf 'OK: lrdp1/lrdp2 reconfiguram áudio/microfone e ordenam monitor principal\n'

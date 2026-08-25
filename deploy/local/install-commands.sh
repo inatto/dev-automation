@@ -31,8 +31,10 @@ CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 G512_RGB_SOURCE="$PROJECT_ROOT/scripts/g512-rgb.sh"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
-LRDP1_SOURCE="${LRDP1_SOURCE:-$PROJECT_ROOT/apps/lrdp/lrdp1}"
-LRDP2_SOURCE="${LRDP2_SOURCE:-$PROJECT_ROOT/apps/lrdp/lrdp2}"
+LRDP_DIR="${LRDP_DIR:-$PROJECT_ROOT/apps/lrdp}"
+LRDP_TUI_SOURCE="${LRDP_TUI_SOURCE:-$LRDP_DIR/lrdp}"
+LRDP1_SOURCE="${LRDP1_SOURCE:-$LRDP_DIR/lrdp1}"
+LRDP2_SOURCE="${LRDP2_SOURCE:-$LRDP_DIR/lrdp2}"
 
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
@@ -117,12 +119,13 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 [[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
 [[ -f "$G512_RGB_SOURCE" ]] || fail "script não encontrado: $G512_RGB_SOURCE"
+[[ -f "$LRDP_TUI_SOURCE" ]] || fail "script não encontrado: $LRDP_TUI_SOURCE"
 [[ -f "$LRDP1_SOURCE" ]] || fail "script não encontrado: $LRDP1_SOURCE"
 [[ -f "$LRDP2_SOURCE" ]] || fail "script não encontrado: $LRDP2_SOURCE"
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$VOICE_COMMANDS_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$VOICE_COMMANDS_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -191,11 +194,34 @@ EOF_WRAPPER
 chmod +x "$ORACLE_MONITOR_TARGET"
 log "criado: oracle-monitor -> $ORACLE_MONITOR_DIR"
 
-for lrdp_name in lrdp1 lrdp2; do
-  case "$lrdp_name" in
-    lrdp1) lrdp_source="$LRDP1_SOURCE" ;;
-    lrdp2) lrdp_source="$LRDP2_SOURCE" ;;
+LRDP_TUI_TARGET="$TARGET_DIR/lrdp"
+rm -f "$LRDP_TUI_TARGET"
+cat > "$LRDP_TUI_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+if [[ ! -f "$LRDP_TUI_SOURCE" ]]; then
+  printf '[lrdp] ERRO: TUI do projeto não encontrada: %s\n' "$LRDP_TUI_SOURCE" >&2
+  exit 1
+fi
+exec bash "$LRDP_TUI_SOURCE" "\$@"
+EOF_WRAPPER
+chmod +x "$LRDP_TUI_TARGET"
+log "criado: lrdp -> $LRDP_TUI_SOURCE"
+
+# lrdp1/lrdp2 continuam atalhos diretos. Qualquer futuro lrdp3/lrdp4...
+# em apps/lrdp também ganha comando global automaticamente.
+declare -a lrdp_sources=("$LRDP1_SOURCE" "$LRDP2_SOURCE")
+while IFS= read -r lrdp_extra; do
+  [[ -n "$lrdp_extra" ]] || continue
+  case "$(basename "$lrdp_extra")" in
+    lrdp1|lrdp2) continue ;;
   esac
+  lrdp_sources+=("$lrdp_extra")
+done < <(find "$LRDP_DIR" -maxdepth 1 -type f -regextype posix-extended -regex '.*/lrdp[0-9]+' -print 2>/dev/null | sort -V)
+
+for lrdp_source in "${lrdp_sources[@]}"; do
+  [[ -f "$lrdp_source" ]] || continue
+  lrdp_name="$(basename "$lrdp_source")"
   lrdp_target="$TARGET_DIR/$lrdp_name"
   rm -f "$lrdp_target"
   cat > "$lrdp_target" <<EOF_WRAPPER
@@ -224,4 +250,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v files\n  command -v files-all\n  command -v terminals\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v oracle-monitor\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v files\n  command -v files-all\n  command -v terminals\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v oracle-monitor\n  command -v lrdp\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'

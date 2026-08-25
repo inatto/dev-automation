@@ -191,6 +191,12 @@ desktops
 
 No Ubuntu/GNOME, `desktops` usa workspaces fixos, mantém os nomes via `gsettings` e não cria indicador visual próprio. Assim, o nome aparece somente na taskbar/painel já configurado. `lrdp1` e `lrdp2` continuam como os dois últimos workspaces. O comando não abre aplicativos.
 
+O comando `lrdp` abre o **LRDP Control Center**, uma TUI fullscreen no padrão do Dev Manager. Ela descobre automaticamente `apps/lrdp/lrdpN`, portanto futuros `lrdp3`, `lrdp4` etc. entram na lista sem alterar a TUI. A tela principal mostra os RDPs, status TCP 3389, sessão FreeRDP ativa, configuração efetiva, mapa proporcional dos monitores, resolução/posição, saídas físicas DRM, IP local, interface, gateway, destino e o comando FreeRDP com a senha ocultada.
+
+Atalhos principais da TUI: `Enter` conecta imediatamente com a configuração salva; `F2` abre a configuração tipo BIOS (login, áudio, microfone e monitor principal); `F3` abre o mapa de monitores e permite escolher o principal; `F4` mostra rede/rotas; `F5` atualiza; `F1` mostra ajuda; `Q` sai. A configuração fica em `~/.config/dev-automation/lrdp/` e os logs de lançamento ficam em `~/.local/state/dev-automation/lrdp/`.
+
+Os comandos `lrdp1`/`lrdp2` continuam disponíveis como atalhos diretos e mantêm o modo de configuração textual legado. A TUI usa `--saved` internamente para conectar sem refazer perguntas.
+
 O mesmo pode ser executado pelo comando geral:
 
 ```bash

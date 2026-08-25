@@ -11,6 +11,7 @@ CODE_ROOT="$TMP/Code"
 mkdir -p "$HOME_DIR" "$CODE_ROOT"
 : > "$HOME_DIR/.bashrc"
 
+[[ -x "$ROOT/apps/lrdp/lrdp" ]]
 for name in lrdp1 lrdp2; do
   [[ -x "$ROOT/apps/lrdp/$name" ]]
 done
@@ -20,10 +21,14 @@ done
 HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" \
   "$ROOT/deploy/local/install-commands.sh" >/dev/null
 
+[[ -x "$TARGET_DIR/lrdp" ]]
+grep -Fq '# generated-by: dev-automation-global-command' "$TARGET_DIR/lrdp"
+grep -Fq "$ROOT/apps/lrdp/lrdp" "$TARGET_DIR/lrdp"
+
 for name in lrdp1 lrdp2; do
   [[ -x "$TARGET_DIR/$name" ]]
   grep -Fq '# generated-by: dev-automation-global-command' "$TARGET_DIR/$name"
   grep -Fq "$ROOT/apps/lrdp/$name" "$TARGET_DIR/$name"
 done
 
-printf 'OK: lrdp1/lrdp2 integrados em dev-automation/apps/lrdp e instalados globalmente\n'
+printf 'OK: lrdp TUI + lrdp1/lrdp2 integrados em dev-automation/apps/lrdp e instalados globalmente\n'
