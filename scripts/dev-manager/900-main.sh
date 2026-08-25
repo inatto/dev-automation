@@ -207,7 +207,7 @@ if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
 fi
 run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
-run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia uma vez as pastas DDL monitoradas; só cria novo ZIP quando o conteúdo SQL mudou desde o último snapshot válido." reconcile_configured_sql_snapshots || true
+run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia os DDLs por arquivo: SQL novo vira baseline sem ZIP; alteração posterior gera 1 ZIP com 1 SQL; na raiz Code fica somente o snapshot mais recente." reconcile_configured_sql_snapshots || true
 
 taskbar_status idle "Aguardando eventos"
 if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then

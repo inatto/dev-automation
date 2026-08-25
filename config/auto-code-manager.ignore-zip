@@ -20,7 +20,6 @@ dist/
 node_modules/
 temp/
 tmp/
-logs/
 venv/
 apps/dev-status/linux/bin/
 apps/dev-status/linux/build/

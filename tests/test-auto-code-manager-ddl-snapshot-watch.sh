@@ -7,82 +7,27 @@ MANAGER="$TEMP/manager"
 CODE_ROOT="$TEMP/Code"
 HOME_DIR="$TEMP/home"
 STATE_DIR="$TEMP/state"
-PROJECT="$CODE_ROOT/infra/oracle-infra"
-DDL="$PROJECT/exports/ddl"
+DDL="$CODE_ROOT/infra/oracle-infra/exports/ddl"
 LOG="$TEMP/manager.log"
-PID=""
-
-cleanup() {
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    kill -TERM "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
-  fi
-  rm -rf -- "$TEMP"
-}
-trap cleanup EXIT
-
-command -v inotifywait >/dev/null 2>&1 || {
-  printf 'SKIP: inotifywait não instalado\n'
-  exit 0
-}
+trap 'rm -rf -- "$TEMP"' EXIT
 
 cp -a -- "$ROOT" "$MANAGER"
 mkdir -p "$DDL" "$HOME_DIR" "$STATE_DIR"
-printf 'infra/oracle-infra\n' > "$MANAGER/config/auto-code-manager.projects"
 : > "$MANAGER/config/auto-code-manager.folder-sql-zip"
 printf '%s\n' "$DDL" > "$MANAGER/config/auto-code-manager.folder-sql-watch"
-cat > "$MANAGER/config/auto-code-manager.ignore-zip" <<'IGNORE'
-.git/
-.venv/
-venv/
-node_modules/
-*.log
-*.tmp
-exports/ddl/*-ddl-*.zip
-*:Zone.Identifier
-IGNORE
-: > "$MANAGER/config/auto-code-manager.ignore-unzip"
 cat > "$MANAGER/config/auto-code-manager.env" <<'ENV'
-BACKUP_EVERY=1
 STABLE_WAIT=1
-LIGHT_SCAN_INTERVAL=1
 BEEP_REPEATS=1
 BEEP_GAP_MS=1
 BEEP_MODE=none
 BEEP_VOLUME=0
 BACKUP_BEEP_ENABLED=false
-BACKUP_BEEP_VOLUME=0
 TASKBAR_STATUS_ENABLED=false
-AUTO_CODE_MONITOR_MODE=inotify
 ENV
 
-start_manager() {
+run_snapshot_once() {
   HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE_DIR" AUTO_CODE_TUI=off \
-    "$MANAGER/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
-  PID=$!
-}
-
-stop_manager() {
-  if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
-    kill -TERM "$PID" 2>/dev/null || true
-    wait "$PID" 2>/dev/null || true
-  fi
-  PID=""
-}
-
-wait_until() {
-  local description="$1"
-  shift
-  local i
-  for i in $(seq 1 240); do
-    if "$@"; then
-      return 0
-    fi
-    sleep 0.1
-  done
-  printf 'FALHOU: %s\n' "$description" >&2
-  cat "$LOG" >&2
-  exit 1
+    "$MANAGER/scripts/auto-code-manager.sh" --sql-snapshot-once >>"$LOG" 2>&1
 }
 
 snapshot_count_local() {
@@ -93,53 +38,98 @@ snapshot_count_root() {
   find "$CODE_ROOT" -maxdepth 1 -type f -name 'oracle-infra-ddl-*.zip' | wc -l | tr -d ' '
 }
 
-start_manager
-wait_until 'manager entrou em idle' grep -Fq 'IDLE event-driven' "$LOG"
+latest_local_zip() {
+  find "$DDL" -maxdepth 1 -type f -name 'oracle-infra-ddl-*.zip' -printf '%T@\t%p\n' | sort -nr | head -n1 | cut -f2-
+}
 
+assert_one_sql_zip() {
+  local zip_file="$1"
+  local expected_entry="$2"
+  local entries
+
+  unzip -tq "$zip_file" >/dev/null
+  entries="$(unzip -Z1 "$zip_file" | sed '/\/$/d')"
+  [ "$(printf '%s\n' "$entries" | sed '/^$/d' | wc -l | tr -d ' ')" -eq 1 ]
+  printf '%s\n' "$entries" | grep -Fx "$expected_entry" >/dev/null
+}
+
+# 1) SQL novo e preenchido: apenas baseline, sem ZIP.
 printf 'create table a (id number);\n' > "$DDL/a.sql"
-wait_until 'snapshot local após novo SQL' bash -c '[ "$(find "$1" -maxdepth 1 -type f -name "oracle-infra-ddl-*.zip" | wc -l)" -ge 1 ]' _ "$DDL"
-wait_until 'snapshot espelhado no CODE_ROOT' bash -c '[ "$(find "$1" -maxdepth 1 -type f -name "oracle-infra-ddl-*.zip" | wc -l)" -ge 1 ]' _ "$CODE_ROOT"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 0 ]
+[ "$(snapshot_count_root)" -eq 0 ]
+grep -Fq "$DDL/a.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
 
-local_zip="$(find "$DDL" -maxdepth 1 -type f -name 'oracle-infra-ddl-*.zip' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-root_zip="$CODE_ROOT/$(basename -- "$local_zip")"
-test -f "$DDL/a.sql"
-cmp -s -- "$local_zip" "$root_zip"
-unzip -tq "$local_zip" >/dev/null
-unzip -Z1 "$local_zip" | grep -Fx 'a.sql' >/dev/null
-
-before="$(snapshot_count_local)"
+# 2) Alteração posterior: 1 ZIP, contendo somente a.sql.
 printf 'create table a (id number, name varchar2(30));\n' > "$DDL/a.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 1 ]
+[ "$(snapshot_count_root)" -eq 1 ]
+zip_a="$(latest_local_zip)"
+root_a="$CODE_ROOT/$(basename -- "$zip_a")"
+assert_one_sql_zip "$zip_a" 'a.sql'
+cmp -s -- "$zip_a" "$root_a"
+
+# 3) Outro SQL novo não gera ZIP na primeira aparição.
 printf 'create table b (id number);\n' > "$DDL/b.sql"
-wait_until 'novo snapshot após alteração DDL' bash -c '[ "$(find "$1" -maxdepth 1 -type f -name "oracle-infra-ddl-*.zip" | wc -l)" -gt "$2" ]' _ "$DDL" "$before"
-wait_until 'snapshot espelhado após alteração' test -f "$CODE_ROOT/$(basename -- "$(find "$DDL" -maxdepth 1 -type f -name 'oracle-infra-ddl-*.zip' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)")"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 1 ]
+[ "$(snapshot_count_root)" -eq 1 ]
 
-latest="$(find "$DDL" -maxdepth 1 -type f -name 'oracle-infra-ddl-*.zip' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
-latest_root="$CODE_ROOT/$(basename -- "$latest")"
-test -f "$DDL/a.sql"
-test -f "$DDL/b.sql"
-cmp -s -- "$latest" "$latest_root"
-unzip -Z1 "$latest" | grep -Fx 'a.sql' >/dev/null
-unzip -Z1 "$latest" | grep -Fx 'b.sql' >/dev/null
-unzip -p "$latest" a.sql | grep -Fq 'name varchar2(30)'
+# 4) Depois de alterado, b.sql ganha seu próprio ZIP; Code continua com apenas o mais recente.
+printf 'create table b (id number, note varchar2(20));\n' > "$DDL/b.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 2 ]
+[ "$(snapshot_count_root)" -eq 1 ]
+zip_b="$(latest_local_zip)"
+root_b="$CODE_ROOT/$(basename -- "$zip_b")"
+assert_one_sql_zip "$zip_b" 'b.sql'
+cmp -s -- "$zip_b" "$root_b"
+[ ! -e "$root_a" ]
 
-# O backup normal do projeto não incorpora snapshots DDL, evitando ZIP dentro de ZIP.
-wait_until 'backup normal atualizado' test -s "$CODE_ROOT/oracle-infra.zip"
-! unzip -Z1 "$CODE_ROOT/oracle-infra.zip" | grep -E '^exports/ddl/oracle-infra-ddl-.*\.zip$' >/dev/null
+# 5) Vazio/whitespace nunca gera ZIP nem baseline novo.
+printf '   \n\t\n' > "$DDL/c.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 2 ]
+! grep -Fq "$DDL/c.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
 
-# Reiniciar sem alterar SQL não cria snapshot duplicado: assinatura persistida.
-stop_manager
-count_before_restart="$(snapshot_count_local)"
-: > "$LOG"
-start_manager
-wait_until 'manager reiniciado em idle' grep -Fq 'IDLE event-driven' "$LOG"
-sleep 2
-[ "$(snapshot_count_local)" = "$count_before_restart" ]
-[ "$(snapshot_count_root)" = "$count_before_restart" ]
+# Primeiro conteúdo real de c.sql ainda é baseline de arquivo novo.
+printf 'create table c (id number);\n' > "$DDL/c.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 2 ]
+grep -Fq "$DDL/c.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
 
-if grep -Fq 'OK SQL SNAPSHOT:' "$LOG"; then
-  printf 'FALHOU: reinício sem mudança gerou snapshot novo\n' >&2
-  cat "$LOG" >&2
-  exit 1
-fi
+# Segunda gravação de c.sql gera ZIP individual.
+printf 'create table c (id number, enabled number(1));\n' > "$DDL/c.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 3 ]
+[ "$(snapshot_count_root)" -eq 1 ]
+zip_c="$(latest_local_zip)"
+root_c="$CODE_ROOT/$(basename -- "$zip_c")"
+assert_one_sql_zip "$zip_c" 'c.sql'
+cmp -s -- "$zip_c" "$root_c"
+[ ! -e "$root_b" ]
 
-printf 'OK: DDL novo/alterado gera snapshot não destrutivo na pasta e cópia idêntica em CODE_ROOT; reinício sem mudança é idempotente\n'
+# 6) Apagado + reconciliado + recriado = arquivo novo de novo, sem ZIP.
+rm -f -- "$DDL/b.sql"
+run_snapshot_once
+! grep -Fq "$DDL/b.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
+printf 'create table b (id number, recreated number(1));\n' > "$DDL/b.sql"
+run_snapshot_once
+[ "$(snapshot_count_local)" -eq 3 ]
+grep -Fq "$DDL/b.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
+
+# 7) Mesmo se houver lixo antigo na raiz Code, uma reconciliação deixa só o ZIP válido mais recente.
+cp -f -- "$root_c" "$CODE_ROOT/oracle-infra-ddl-lixo-antigo.zip"
+[ "$(snapshot_count_root)" -eq 2 ]
+run_snapshot_once
+[ "$(snapshot_count_root)" -eq 1 ]
+cmp -s -- "$zip_c" "$root_c"
+
+# 8) Repetir sem alteração é idempotente: não cria novos ZIPs.
+count_before="$(snapshot_count_local)"
+run_snapshot_once
+[ "$(snapshot_count_local)" = "$count_before" ]
+[ "$(snapshot_count_root)" -eq 1 ]
+
+printf 'OK: Oracle DDL = baseline por arquivo; novo/vazio sem ZIP; alteração = 1 ZIP/1 SQL; Code = somente o ZIP mais recente\n'

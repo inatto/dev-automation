@@ -244,11 +244,13 @@ handle_watch_event() {
     return 0
   fi
 
-  # DDL automático: somente após a gravação terminar. O snapshot é adiado pelo
-  # mesmo debounce do backup para agrupar exportações que escrevem vários SQLs.
-  if event_finished_write "$events" && [ -f "$event_path" ]; then
-    sql_watch_folder="$(configured_sql_watch_folder_for_path "$event_path" 2>/dev/null || true)"
-    if [ -n "$sql_watch_folder" ]; then
+  # DDL automático: cada SQL tem baseline próprio. Arquivo novo não gera ZIP;
+  # alteração posterior gera um ZIP contendo somente aquele SQL.
+  sql_watch_folder="$(configured_sql_watch_folder_for_path "$event_path" 2>/dev/null || true)"
+  if [ -n "$sql_watch_folder" ]; then
+    if event_has "$events" DELETE || event_has "$events" MOVED_FROM; then
+      forget_sql_snapshot_signature "$event_path" || true
+    elif event_finished_write "$events" && [ -f "$event_path" ]; then
       mark_sql_snapshot_dirty "$sql_watch_folder"
     fi
   fi

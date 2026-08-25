@@ -64,52 +64,27 @@ configured_sql_watch_folder_for_path() {
   return 1
 }
 
-sql_folder_snapshot_signature() {
-  local folder="$1"
+sql_file_has_content() {
+  local sql_file="$1"
 
-  [ -d "$folder" ] || {
-    printf 'missing\n'
-    return 0
-  }
+  [ -f "$sql_file" ] || return 1
+  LC_ALL=C grep -q '[^[:space:]]' -- "$sql_file" 2>/dev/null
+}
 
-  python3 - "$folder" <<'PY_SQL_SIGNATURE'
-import hashlib
-import os
-import sys
+sql_file_snapshot_signature() {
+  local sql_file="$1"
 
-root = os.path.abspath(sys.argv[1])
-h = hashlib.sha256()
-count = 0
-for current, dirs, files in os.walk(root):
-    dirs.sort()
-    files.sort()
-    for name in files:
-        if not name.lower().endswith('.sql') or name.endswith(':Zone.Identifier'):
-            continue
-        full = os.path.join(current, name)
-        rel = os.path.relpath(full, root).replace(os.sep, '/')
-        try:
-            with open(full, 'rb') as fh:
-                digest = hashlib.sha256(fh.read()).hexdigest()
-        except OSError:
-            continue
-        h.update(rel.encode('utf-8', errors='surrogateescape'))
-        h.update(b'\0')
-        h.update(digest.encode('ascii'))
-        h.update(b'\n')
-        count += 1
-print(f'{count}:{h.hexdigest()}')
-PY_SQL_SIGNATURE
+  sha256sum -- "$sql_file" 2>/dev/null | awk '{print $1}'
 }
 
 sql_snapshot_saved_signature() {
-  local folder="$1"
+  local sql_file="$1"
   [ -f "$SQL_SNAPSHOT_SIGNATURES_FILE" ] || return 0
-  awk -F '\t' -v wanted="$folder" '$1 == wanted { value=$2 } END { if (value != "") print value }' "$SQL_SNAPSHOT_SIGNATURES_FILE"
+  awk -F '\t' -v wanted="$sql_file" '$1 == wanted { value=$2 } END { if (value != "") print value }' "$SQL_SNAPSHOT_SIGNATURES_FILE"
 }
 
 save_sql_snapshot_signature() {
-  local folder="$1"
+  local sql_file="$1"
   local signature="$2"
   local temp_file
 
@@ -117,9 +92,48 @@ save_sql_snapshot_signature() {
   temp_file="$(mktemp "$STATE_DIR/sql-snapshot-signatures-XXXXXX")" || return 1
 
   if [ -f "$SQL_SNAPSHOT_SIGNATURES_FILE" ]; then
-    awk -F '\t' -v wanted="$folder" '$1 != wanted' "$SQL_SNAPSHOT_SIGNATURES_FILE" > "$temp_file"
+    awk -F '\t' -v wanted="$sql_file" '$1 != wanted' "$SQL_SNAPSHOT_SIGNATURES_FILE" > "$temp_file"
   fi
-  printf '%s\t%s\n' "$folder" "$signature" >> "$temp_file"
+  printf '%s\t%s\n' "$sql_file" "$signature" >> "$temp_file"
+  mv -f -- "$temp_file" "$SQL_SNAPSHOT_SIGNATURES_FILE"
+}
+
+forget_sql_snapshot_signature() {
+  local sql_file="$1"
+  local temp_file
+
+  [ -f "$SQL_SNAPSHOT_SIGNATURES_FILE" ] || return 0
+  mkdir -p "$STATE_DIR" || return 1
+  temp_file="$(mktemp "$STATE_DIR/sql-snapshot-signatures-XXXXXX")" || return 1
+  awk -F '\t' -v wanted="$sql_file" '$1 != wanted' "$SQL_SNAPSHOT_SIGNATURES_FILE" > "$temp_file"
+  mv -f -- "$temp_file" "$SQL_SNAPSHOT_SIGNATURES_FILE"
+}
+
+prune_missing_sql_snapshot_signatures() {
+  local folder="$1"
+  local temp_file key signature
+
+  [ -f "$SQL_SNAPSHOT_SIGNATURES_FILE" ] || return 0
+  mkdir -p "$STATE_DIR" || return 1
+  temp_file="$(mktemp "$STATE_DIR/sql-snapshot-signatures-XXXXXX")" || return 1
+
+  while IFS=$'\t' read -r key signature || [ -n "$key" ]; do
+    [ -n "$key" ] || continue
+
+    if [ "$key" = "$folder" ]; then
+      # Remove a assinatura legada da pasta inteira. A regra atual é por arquivo.
+      continue
+    fi
+
+    if [[ "$key" == "$folder/"* ]] && [[ "${key,,}" == *.sql ]]; then
+      # Arquivo apagado/renomeado deixa de ter baseline. Se reaparecer, é novo e
+      # não gera ZIP na primeira gravação.
+      [ -f "$key" ] || continue
+    fi
+
+    printf '%s\t%s\n' "$key" "$signature" >> "$temp_file"
+  done < "$SQL_SNAPSHOT_SIGNATURES_FILE"
+
   mv -f -- "$temp_file" "$SQL_SNAPSHOT_SIGNATURES_FILE"
 }
 
@@ -137,135 +151,221 @@ sql_snapshot_archive_prefix() {
   fi
 }
 
-latest_sql_snapshot_path() {
+sql_snapshot_file_token() {
   local folder="$1"
-  local prefix
-  prefix="$(sql_snapshot_archive_prefix "$folder")"
-  find "$folder" -maxdepth 1 -type f -name "${prefix}-*.zip" -printf '%f\n' 2>/dev/null | sort | tail -n1 | sed "s#^#$folder/#"
+  local sql_file="$2"
+  local rel token
+
+  rel="${sql_file#"$folder"/}"
+  rel="${rel%.*}"
+  token="$(printf '%s' "$rel" | sed -E 's#[/\\]+#-#g; s/[^[:alnum:]_.-]+/-/g; s/^-+//; s/-+$//')"
+  [ -n "$token" ] || token="sql"
+  printf '%s\n' "$token"
 }
 
-ensure_existing_sql_snapshot_pair() {
-  local folder="$1"
-  local local_zip mirror_zip
+sql_snapshot_zip_is_single_sql() {
+  local zip_file="$1"
+  local entry count entry_line
 
-  local_zip="$(latest_sql_snapshot_path "$folder")"
-  [ -n "$local_zip" ] && [ -s "$local_zip" ] || return 1
-  unzip -tq "$local_zip" >/dev/null 2>&1 || return 1
+  [ -s "$zip_file" ] || return 1
+  unzip -tq "$zip_file" >/dev/null 2>&1 || return 1
 
-  mirror_zip="$CODE_ROOT/$(basename -- "$local_zip")"
-  if [ ! -s "$mirror_zip" ] || ! cmp -s -- "$local_zip" "$mirror_zip" || ! unzip -tq "$mirror_zip" >/dev/null 2>&1; then
-    ensure_archive_output_dir || return 1
-    cp -f -- "$local_zip" "$mirror_zip" || return 1
-    cmp -s -- "$local_zip" "$mirror_zip" || return 1
-    unzip -tq "$mirror_zip" >/dev/null 2>&1 || return 1
-    log "OK SQL SNAPSHOT MIRROR: restaurado em $mirror_zip"
-  fi
+  count=0
+  entry=""
+  while IFS= read -r entry_line || [ -n "$entry_line" ]; do
+    [[ "$entry_line" == */ ]] && continue
+    count=$((count + 1))
+    entry="$entry_line"
+    [ "$count" -le 1 ] || return 1
+  done < <(unzip -Z1 "$zip_file" 2>/dev/null)
 
-  return 0
+  [ "$count" -eq 1 ] || return 1
+  [[ "${entry,,}" == *.sql ]]
 }
 
 next_sql_snapshot_path() {
   local folder="$1"
-  local prefix stamp candidate suffix=0
+  local sql_file="$2"
+  local prefix token stamp candidate suffix=0
 
   prefix="$(sql_snapshot_archive_prefix "$folder")"
+  token="$(sql_snapshot_file_token "$folder" "$sql_file")"
   stamp="$(date '+%Y%m%d-%H%M%S')"
-  candidate="$folder/${prefix}-${stamp}.zip"
+  candidate="$folder/${prefix}-${token}-${stamp}.zip"
 
   while [ -e "$candidate" ] || [ -e "$CODE_ROOT/$(basename -- "$candidate")" ]; do
     suffix=$((suffix + 1))
-    candidate="$folder/${prefix}-${stamp}-$(printf '%02d' "$suffix").zip"
+    candidate="$folder/${prefix}-${token}-${stamp}-$(printf '%02d' "$suffix").zip"
   done
 
   printf '%s\n' "$candidate"
 }
 
+latest_valid_sql_snapshot_path() {
+  local folder="$1"
+  local prefix candidate
+  prefix="$(sql_snapshot_archive_prefix "$folder")"
+
+  while IFS= read -r candidate || [ -n "$candidate" ]; do
+    [ -n "$candidate" ] || continue
+    if sql_snapshot_zip_is_single_sql "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(
+    find "$folder" -maxdepth 1 -type f -name "${prefix}-*.zip" -printf '%T@\t%p\n' 2>/dev/null |
+      sort -nr | cut -f2-
+  )
+
+  return 1
+}
+
+mirror_sql_snapshot_as_latest() {
+  local folder="$1"
+  local local_zip="$2"
+  local prefix mirror_zip temp_mirror root_count
+
+  ensure_archive_output_dir || return 1
+  prefix="$(sql_snapshot_archive_prefix "$folder")"
+  mirror_zip="$CODE_ROOT/$(basename -- "$local_zip")"
+
+  # Se já existe exatamente a cópia correta no Code, não toca no arquivo.
+  root_count="$(find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" | wc -l | tr -d ' ')"
+  if [ "$root_count" -eq 1 ] && [ -s "$mirror_zip" ] && cmp -s -- "$local_zip" "$mirror_zip" && sql_snapshot_zip_is_single_sql "$mirror_zip"; then
+    return 0
+  fi
+
+  temp_mirror="$(mktemp "$CODE_ROOT/.auto-code-ddl-latest-XXXXXX.zip")" || return 1
+  if ! cp -p -- "$local_zip" "$temp_mirror" || ! sql_snapshot_zip_is_single_sql "$temp_mirror"; then
+    rm -f -- "$temp_mirror"
+    return 1
+  fi
+
+  # Regra do Code: somente UM snapshot DDL deste projeto, sempre o mais recente.
+  find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" -delete 2>/dev/null || true
+  if ! mv -f -- "$temp_mirror" "$mirror_zip"; then
+    rm -f -- "$temp_mirror"
+    return 1
+  fi
+
+  cmp -s -- "$local_zip" "$mirror_zip" || return 1
+  sql_snapshot_zip_is_single_sql "$mirror_zip" || return 1
+  return 0
+}
+
+sync_latest_sql_snapshot_to_code_root() {
+  local folder="$1"
+  local prefix latest
+  prefix="$(sql_snapshot_archive_prefix "$folder")"
+
+  latest="$(latest_valid_sql_snapshot_path "$folder" 2>/dev/null || true)"
+  if [ -z "$latest" ]; then
+    # Não deixa snapshot antigo/múltiplo na raiz Code contrariar a regra nova.
+    find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" -delete 2>/dev/null || true
+    return 0
+  fi
+
+  mirror_sql_snapshot_as_latest "$folder" "$latest"
+}
+
+snapshot_sql_file() {
+  local folder="$1"
+  local sql_file="$2"
+  local signature saved_signature final_zip mirror_zip temp_zip
+
+  [ -f "$sql_file" ] || {
+    forget_sql_snapshot_signature "$sql_file" || true
+    return 0
+  }
+
+  # Arquivo vazio (inclusive só whitespace) nunca gera ZIP e, se ainda não tem
+  # baseline, continua sem baseline. Assim arquivo novo criado vazio e preenchido
+  # logo depois continua sendo tratado como NOVO na primeira gravação útil.
+  if ! sql_file_has_content "$sql_file"; then
+    return 0
+  fi
+
+  signature="$(sql_file_snapshot_signature "$sql_file")" || return 1
+  saved_signature="$(sql_snapshot_saved_signature "$sql_file")"
+
+  # Primeira vez que um SQL preenchido aparece = baseline. Arquivo novo não gera ZIP.
+  if [ -z "$saved_signature" ]; then
+    save_sql_snapshot_signature "$sql_file" "$signature" || return 1
+    LOG_CONTEXT=backup log "DDL novo registrado sem ZIP: $sql_file"
+    return 0
+  fi
+
+  [ "$saved_signature" != "$signature" ] || return 0
+
+  ensure_archive_output_dir || return 1
+  final_zip="$(next_sql_snapshot_path "$folder" "$sql_file")"
+  mirror_zip="$CODE_ROOT/$(basename -- "$final_zip")"
+  temp_zip="$(mktemp '/tmp/auto-code-sql-snapshot-XXXXXX.zip')" || return 1
+
+  taskbar_status zip "$(basename -- "$sql_file")"
+
+  local rel_sql
+  rel_sql="${sql_file#"$folder"/}"
+  rm -f -- "$temp_zip"
+  if ! (
+    cd "$folder" || exit 1
+    zip -q "$temp_zip" -- "$rel_sql"
+  ); then
+    log "ERRO: falha ao gerar snapshot SQL de $sql_file; fonte mantido."
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  if ! sql_snapshot_zip_is_single_sql "$temp_zip"; then
+    log "ERRO: snapshot SQL não contém exatamente um SQL válido: $sql_file"
+    rm -f -- "$temp_zip"
+    return 1
+  fi
+
+  if ! cp -f -- "$temp_zip" "$final_zip"; then
+    log "ERRO: snapshot SQL não pôde ser gravado em $final_zip; fonte mantido."
+    rm -f -- "$temp_zip" "$final_zip"
+    return 1
+  fi
+  rm -f -- "$temp_zip"
+
+  if ! mirror_sql_snapshot_as_latest "$folder" "$final_zip"; then
+    log "ERRO: snapshot criado localmente, mas não pôde virar o único ZIP DDL em $CODE_ROOT."
+    rm -f -- "$final_zip"
+    return 1
+  fi
+
+  if ! save_sql_snapshot_signature "$sql_file" "$signature"; then
+    log "ERRO: snapshot criado, mas não foi possível salvar a assinatura de idempotência: $sql_file"
+    rm -f -- "$final_zip" "$mirror_zip"
+    return 1
+  fi
+
+  log "OK SQL SNAPSHOT: $final_zip -> $mirror_zip (1 SQL: $(basename -- "$sql_file")); SQL preservado."
+  return 0
+}
+
 snapshot_sql_folder() {
   local folder="$1"
-  local signature saved_signature final_zip mirror_zip temp_zip
-  local sql_count
+  local sql_file failed=0
 
   if [ ! -d "$folder" ]; then
     log "Pasta SQL monitorada ainda não existe: $folder"
     return 0
   fi
 
-  signature="$(sql_folder_snapshot_signature "$folder")" || return 1
-  sql_count="${signature%%:*}"
-  [ "${sql_count:-0}" -gt 0 ] || {
-    save_sql_snapshot_signature "$folder" "$signature" || true
-    return 0
-  }
+  prune_missing_sql_snapshot_signatures "$folder" || return 1
 
-  saved_signature="$(sql_snapshot_saved_signature "$folder")"
-  if [ -n "$saved_signature" ] && [ "$saved_signature" = "$signature" ]; then
-    if ensure_existing_sql_snapshot_pair "$folder"; then
-      return 0
-    fi
-  fi
+  while IFS= read -r -d '' sql_file; do
+    snapshot_sql_file "$folder" "$sql_file" || failed=1
+  done < <(
+    find "$folder" -type f -iname '*.sql' ! -name '*:Zone.Identifier' -print0 2>/dev/null | sort -z
+  )
 
-  ensure_archive_output_dir || return 1
-  final_zip="$(next_sql_snapshot_path "$folder")"
-  mirror_zip="$CODE_ROOT/$(basename -- "$final_zip")"
-  temp_zip="$(mktemp '/tmp/auto-code-sql-snapshot-XXXXXX.zip')" || return 1
-
-  taskbar_status zip "$(basename -- "$folder")"
-
-  if ! python3 - "$folder" "$temp_zip" <<'PY_SQL_SNAPSHOT'
-import os
-import sys
-import zipfile
-
-root = os.path.abspath(sys.argv[1])
-out = sys.argv[2]
-entries = []
-for current, dirs, files in os.walk(root):
-    dirs.sort()
-    files.sort()
-    for name in files:
-        if not name.lower().endswith('.sql') or name.endswith(':Zone.Identifier'):
-            continue
-        full = os.path.join(current, name)
-        rel = os.path.relpath(full, root).replace(os.sep, '/')
-        entries.append((full, rel))
-
-with zipfile.ZipFile(out, 'w', compression=zipfile.ZIP_DEFLATED) as zf:
-    for full, rel in entries:
-        zf.write(full, rel)
-PY_SQL_SNAPSHOT
-  then
-    log "ERRO: falha ao gerar snapshot SQL em $folder; fontes mantidos."
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
-    log "ERRO: validação do snapshot SQL falhou; fontes mantidos: $folder"
-    rm -f -- "$temp_zip"
-    return 1
-  fi
-
-  # Copia os mesmos bytes para os dois destinos; os .sql originais permanecem.
-  if ! cp -f -- "$temp_zip" "$final_zip" || ! cp -f -- "$temp_zip" "$mirror_zip"; then
-    log "ERRO: snapshot SQL não pôde ser gravado nos dois destinos; fontes mantidos."
-    rm -f -- "$final_zip" "$mirror_zip" "$temp_zip"
-    return 1
-  fi
-
-  if ! cmp -s -- "$final_zip" "$mirror_zip" || ! unzip -tq "$final_zip" >/dev/null 2>&1 || ! unzip -tq "$mirror_zip" >/dev/null 2>&1; then
-    log "ERRO: cópias do snapshot SQL divergiram ou ficaram inválidas; fontes mantidos."
-    rm -f -- "$final_zip" "$mirror_zip" "$temp_zip"
-    return 1
-  fi
-
-  rm -f -- "$temp_zip"
-  if ! save_sql_snapshot_signature "$folder" "$signature"; then
-    log "ERRO: snapshot criado, mas não foi possível salvar a assinatura de idempotência: $folder"
-    return 1
-  fi
-
-  log "OK SQL SNAPSHOT: $final_zip -> $mirror_zip (${sql_count} arquivo(s)); SQLs preservados."
-  return 0
+  # Mesmo sem alteração, normaliza a raiz Code para conter somente o snapshot
+  # DDL válido mais recente deste projeto.
+  sync_latest_sql_snapshot_to_code_root "$folder" || failed=1
+  return "$failed"
 }
 
 mark_sql_snapshot_dirty() {

@@ -18,7 +18,7 @@ DESKTOPS_CLOSE_REQUEST="$DESKTOPS_STATE_DIR/close.request"
 DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
 DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
 DESKTOPS_EXTENSION_READY="$DESKTOPS_STATE_DIR/extension.ready"
-GNOME_EXTENSION_VERSION=13
+GNOME_EXTENSION_VERSION=12
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
