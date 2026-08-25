@@ -24,6 +24,7 @@ THEMES = ("classic", "matrix")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BUILD_VERSION_FILE = PROJECT_ROOT / "VERSION"
+DEV_MANAGER_WRAPPER = PROJECT_ROOT / "scripts" / "dev-manager.sh"
 
 
 def read_build_version():
@@ -321,6 +322,7 @@ class Dashboard:
         self.last_draw_at = 0.0
         self.exit_code = None
         self.child_exited = False
+        self.quit_requested = False
         self.colors = {}
         self.windows = {}
         self.layout_size = None
@@ -513,6 +515,31 @@ class Dashboard:
                     os.killpg(self.proc.pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
                     pass
+
+    def stop_registered_manager(self):
+        """Encerra também uma instância anterior que não seja filha desta TUI.
+
+        Isso cobre o caso em que uma segunda TUI abriu, o filho saiu com código
+        3 por causa do flock e o usuário apertou Q/Ctrl+C esperando parar tudo.
+        A rotina shell centraliza validação do PID, fallback INT/TERM/KILL e
+        limpeza de watcher/lock legado.
+        """
+        if not DEV_MANAGER_WRAPPER.is_file():
+            return
+        env = os.environ.copy()
+        env["DEV_MANAGER_STOP_FROM_TUI"] = "1"
+        try:
+            subprocess.run(
+                [str(DEV_MANAGER_WRAPPER), "stop"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=env,
+                timeout=8,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            pass
 
     @staticmethod
     def split_log_context(line):
@@ -806,7 +833,7 @@ class Dashboard:
             self.last_draw_at = now_mono
             return
 
-        footer = "F2/T: tema   Setas/PgUp/PgDn: log   End: seguir   Ctrl+C/Q: sair" if not self.child_exited else "PROCESSO PAROU - veja o LOG acima   Setas/PgUp/PgDn: log   Q: sair"
+        footer = "F2/T: tema   Setas/PgUp/PgDn: log   End: seguir   Ctrl+C/Q: sair" if not self.child_exited else "PROCESSO PAROU - veja o LOG acima   Setas/PgUp/PgDn: log   Ctrl+C/Q: sair"
         # Só atualiza a linha de rodapé; não limpa/redesenha a tela inteira.
         try:
             self.stdscr.move(rows - 1, 0)
@@ -986,6 +1013,7 @@ class Dashboard:
 
     def handle_key(self, key):
         if key in (3, ord("q"), ord("Q")):
+            self.quit_requested = True
             self.running = False
         elif key in (getattr(curses, "KEY_F2", -9999), ord("t"), ord("T")):
             self.toggle_theme()
@@ -1033,15 +1061,13 @@ class Dashboard:
                     self.drain_output()
                     if self.exit_code == 0:
                         self.status = "ENCERRADO"
-                        self.status_detail = "Processo finalizou inesperadamente. Q para sair."
+                        self.status_detail = "Processo finalizou inesperadamente. Ctrl+C/Q para sair."
                     else:
                         self.status = "ERRO"
-                        self.status_detail = f"Processo encerrou com código {self.exit_code}. Q para sair."
-                    self.last_action = "DEV-MANAGER PAROU; a interface permanecerá aberta para preservar o diagnóstico."
+                        self.status_detail = f"Processo encerrou com código {self.exit_code}. Ctrl+C/Q para sair."
+                    self.last_action = "DEV-MANAGER PAROU; Q/Ctrl+C encerra a TUI e qualquer monitor ainda ativo."
                     self.dirty = True
                     self.draw(force=True)
-                    # Não fecha a TUI. Antes ela desaparecia imediatamente e escondia
-                    # justamente as últimas linhas que explicavam a falha.
                 self.draw()
                 try:
                     key = self.stdscr.getch()
@@ -1049,8 +1075,13 @@ class Dashboard:
                     key = -1
                 if key != -1:
                     self.handle_key(key)
+        except KeyboardInterrupt:
+            self.quit_requested = True
+            self.running = False
         finally:
             self.stop_child()
+            if self.quit_requested:
+                self.stop_registered_manager()
             self.drain_output()
         return 0 if self.exit_code in (None, 0, 130, -signal.SIGINT) else int(self.exit_code)
 

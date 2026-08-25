@@ -49,10 +49,13 @@ cat <<'MSG'
 
 Instalado.
 
-Para X11, confirme que xdotool existe:
+Para ir DIRETO a um desktop específico (inclusive GNOME/Wayland):
+  sudo apt install wmctrl
+
+Para avançar/recuar relativamente no X11:
   sudo apt install xdotool
 
-Para Wayland, prefira ydotool (com ydotoold ativo) ou wtype quando suportado:
+Para avançar/recuar relativamente no Wayland, use ydotool (com ydotoold ativo):
   sudo apt install ydotool
 
 Diagnóstico de GPU/Whisper:

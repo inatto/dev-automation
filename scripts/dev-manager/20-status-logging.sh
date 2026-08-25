@@ -147,8 +147,27 @@ taskbar_status() {
   [ "${TASKBAR_STATUS_ENABLED:-true}" = true ] || return 0
   [ -x "$DEV_STATUS_SCRIPT" ] || return 0
 
-  "$DEV_STATUS_SCRIPT" "$state" --pause-file "$PAUSE_FILE" --detail "$detail" \
-    </dev/null >/dev/null 2>&1 || true
+  # O indicador do GNOME pode se daemonizar. Ele NUNCA pode herdar o FD do
+  # flock do monitor; se herdar, o manager morre mas o indicador continua
+  # segurando o lock e o PID gravado vira um falso "monitor ativo".
+  (
+    if [[ "${MONITOR_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+      eval "exec ${MONITOR_LOCK_FD}>&-" 2>/dev/null || true
+    fi
+    exec "$DEV_STATUS_SCRIPT" "$state" --pause-file "$PAUSE_FILE" --detail "$detail"
+  ) </dev/null >/dev/null 2>&1 || true
+}
+
+release_monitor_lock() {
+  [ "${MONITOR_LOCK_OWNED:-false}" = true ] || return 0
+
+  if [[ "${MONITOR_LOCK_FD:-}" =~ ^[0-9]+$ ]]; then
+    flock -u "$MONITOR_LOCK_FD" 2>/dev/null || true
+    eval "exec ${MONITOR_LOCK_FD}>&-" 2>/dev/null || true
+  fi
+  MONITOR_LOCK_FD=""
+  MONITOR_LOCK_OWNED=false
+  rm -f -- "$MONITOR_LOCK_FILE"
 }
 
 acquire_monitor_lock() {
@@ -160,12 +179,27 @@ acquire_monitor_lock() {
 
   exec {MONITOR_LOCK_FD}>>"$MONITOR_LOCK_FILE"
   if ! flock -n "$MONITOR_LOCK_FD"; then
-    local active_pid
-    active_pid="$(head -n 1 "$MONITOR_LOCK_FILE" 2>/dev/null || true)"
-    log "ERRO: já existe um Auto Code Manager ativo${active_pid:+ (PID $active_pid)}."
+    local recorded_pid="" recorded_alive=false
+    recorded_pid="$(head -n 1 "$MONITOR_LOCK_FILE" 2>/dev/null || true)"
+    if [[ "$recorded_pid" =~ ^[0-9]+$ ]] && kill -0 "$recorded_pid" 2>/dev/null; then
+      recorded_alive=true
+    fi
+
+    eval "exec ${MONITOR_LOCK_FD}>&-" 2>/dev/null || true
+    MONITOR_LOCK_FD=""
+    MONITOR_LOCK_OWNED=false
+
+    if [ "$recorded_alive" = true ]; then
+      log "ERRO: já existe um Auto Code Manager ativo (PID $recorded_pid)."
+    elif [[ "$recorded_pid" =~ ^[0-9]+$ ]]; then
+      log "ERRO: lock do Auto Code Manager continua ocupado, mas o PID gravado $recorded_pid já morreu; execute 'dev-manager stop' para limpar o processo auxiliar que herdou o lock."
+    else
+      log "ERRO: lock do Auto Code Manager está ocupado por processo auxiliar/legado; execute 'dev-manager stop'."
+    fi
     return 1
   fi
 
+  MONITOR_LOCK_OWNED=true
   : > "$MONITOR_LOCK_FILE"
   printf '%s\n' "$$" >&"$MONITOR_LOCK_FD"
   return 0

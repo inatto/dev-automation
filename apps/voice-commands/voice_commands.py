@@ -246,22 +246,36 @@ class DesktopController:
         index = max(1, int(index))
         total = max(index, int(total))
         target = label or f"desktop {index}"
+        desktop_zero_based = index - 1
         if self.dry_run:
             if self.verbose:
                 print(f"DRY-RUN: ir diretamente para {target} (índice {index}/{total})", flush=True)
             return f"dry-run · {target} · índice {index}/{total}"
 
-        # X11 possui seleção absoluta barata. Em Wayland usamos um caminho que não
-        # depende de introspecção privada do GNOME: recua até a borda e então avança
-        # até o índice alvo. Como workspaces são fixos, o resultado é determinístico.
+        # `wmctrl -s` envia _NET_CURRENT_DESKTOP e, no GNOME, funciona como
+        # seleção absoluta também em sessões Wayland via XWayland. Para comandos
+        # nomeados nunca fazemos mais a sequência visual "volta tudo + avança N".
+        # Se não houver backend absoluto, falhamos claramente em vez de passear
+        # pelos workspaces e potencialmente disparar efeitos colaterais.
+        if shutil.which("wmctrl"):
+            proc = subprocess.run(
+                ["wmctrl", "-s", str(desktop_zero_based)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=False,
+            )
+            if proc.returncode == 0:
+                return f"wmctrl · {target} · índice {index}/{total}"
+
         if os.environ.get("XDG_SESSION_TYPE", "").lower() == "x11" and shutil.which("xdotool"):
-            self._run(["xdotool", "set_desktop", str(index - 1)])
+            self._run(["xdotool", "set_desktop", str(desktop_zero_based)])
             return f"xdotool · {target} · índice {index}/{total}"
 
-        self.move_steps("previous", total + 1)
-        if index > 1:
-            self.move_steps("next", index - 1)
-        return f"workspace direto · {target} · índice {index}/{total}"
+        raise RuntimeError(
+            "troca direta de desktop indisponível; instale wmctrl (`sudo apt install wmctrl`). "
+            "O Voice Commands não usa mais navegação por etapas para destinos específicos."
+        )
 
 
 class ActionExecutor:
@@ -1215,6 +1229,7 @@ class VoiceTUI:
             ("DISPLAY", os.environ.get("DISPLAY") or "-"),
             ("WAYLAND_DISPLAY", os.environ.get("WAYLAND_DISPLAY") or "-"),
             ("Sessão", os.environ.get("XDG_SESSION_TYPE") or "-"),
+            ("wmctrl (desktop direto)", shutil.which("wmctrl") or "-"),
             ("xdotool", shutil.which("xdotool") or "-"),
             ("ydotool", shutil.which("ydotool") or "-"),
             ("wtype", shutil.which("wtype") or "-"),
@@ -1544,6 +1559,7 @@ def doctor(cfg: dict) -> int:
     print(f"Commands defaults: {catalog.defaults_path}")
     print(f"DISPLAY: {os.environ.get('DISPLAY') or '-'}")
     print(f"WAYLAND_DISPLAY: {os.environ.get('WAYLAND_DISPLAY') or '-'}")
+    print(f"wmctrl: {shutil.which('wmctrl') or '-'}")
     print(f"xdotool: {shutil.which('xdotool') or '-'}")
     print(f"ydotool: {shutil.which('ydotool') or '-'}")
     print(f"wtype: {shutil.which('wtype') or '-'}")

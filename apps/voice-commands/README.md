@@ -67,7 +67,7 @@ A ação **Suspender computador** existe no catálogo, mas começa sem palavra v
 
 ## Como vai para um desktop específico
 
-A lista de projetos é lida do mesmo `scripts/desktops.sh --list` usado pelo dev-automation. Em X11, quando possível, usa seleção absoluta. Em Wayland, sem depender de API privada do GNOME, recua até o primeiro workspace e então avança até o índice desejado. Isso evita exigir logout ou alteração da extensão GNOME apenas para o Voice Commands.
+A lista de projetos é lida do mesmo `scripts/desktops.sh --list` usado pelo dev-automation. Comandos nomeados (`jurídico`, `conteúdo`, `rdp1`, etc.) usam **seleção absoluta** do workspace com `wmctrl -s`, inclusive no GNOME/Wayland. Eles nunca mais recuam ao primeiro desktop e avançam um por um. Se `wmctrl` não estiver disponível, o comando falha com uma mensagem clara em vez de ficar pulando telas. `avançar`, `recuar`, `avançar duas telas` e `recuar duas telas` continuam relativos por definição.
 
 ## Precisão e GPU
 

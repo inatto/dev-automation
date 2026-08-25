@@ -2,7 +2,7 @@
 # Contexto: traps, comandos one-shot, inicialização e loop principal
 
 trap stop INT TERM
-trap tui_cleanup EXIT
+trap manager_exit_cleanup EXIT
 trap tui_on_resize WINCH
 
 ensure_files

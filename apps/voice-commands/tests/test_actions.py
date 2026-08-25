@@ -1,7 +1,9 @@
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 import sys
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from command_catalog import CommandCatalog, DesktopRegistry, DEFAULT_COMMANDS_PATH
@@ -29,6 +31,37 @@ class ActionExecutorTests(unittest.TestCase):
         result = self.executor.execute("workspace::orbital-legal")
         self.assertIn("orbital-legal", result)
         self.assertIn("índice 2/3", result)
+
+
+    def test_specific_workspace_uses_wmctrl_absolute_without_steps(self):
+        executor = ActionExecutor(self.cfg, self.catalog, dry_run=False, verbose=False)
+        with patch("voice_commands.shutil.which") as which, \
+             patch("voice_commands.subprocess.run") as run, \
+             patch.object(self.catalog, "refresh_desktops", return_value=self.catalog.registry.entries), \
+             patch.object(executor.controller, "move_steps") as move_steps:
+            which.side_effect = lambda name: "/usr/bin/wmctrl" if name == "wmctrl" else None
+            run.return_value = MagicMock(returncode=0, stderr="")
+            result = executor.execute("workspace::orbital-legal")
+
+        run.assert_called_once_with(
+            ["wmctrl", "-s", "1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        move_steps.assert_not_called()
+        self.assertIn("wmctrl", result)
+        self.assertIn("orbital-legal", result)
+
+    def test_specific_workspace_never_falls_back_to_relative_steps(self):
+        executor = ActionExecutor(self.cfg, self.catalog, dry_run=False, verbose=False)
+        with patch("voice_commands.shutil.which", return_value=None), \
+             patch.object(self.catalog, "refresh_desktops", return_value=self.catalog.registry.entries), \
+             patch.object(executor.controller, "move_steps") as move_steps:
+            with self.assertRaisesRegex(RuntimeError, "troca direta"):
+                executor.execute("workspace::orbital-legal")
+        move_steps.assert_not_called()
 
     def test_relative_and_system_actions_exist(self):
         self.assertIn("2 passo", self.executor.execute("next_two_desktops"))
