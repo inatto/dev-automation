@@ -3,12 +3,50 @@ set -euo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
+MODE="auto"
+case "${1:-}" in
+  "") ;;
+  --gpu) MODE="gpu" ;;
+  --cpu) MODE="cpu" ;;
+  --auto) MODE="auto" ;;
+  -h|--help)
+    cat <<'MSG'
+Uso: ./install.sh [--gpu|--cpu|--auto]
+
+  --gpu   instala cuBLAS CUDA 12 + cuDNN 9 dentro do .venv
+  --cpu   instala somente as dependências comuns
+  --auto  usa GPU quando nvidia-smi detectar uma NVIDIA (padrão)
+MSG
+    exit 0
+    ;;
+  *)
+    echo "ERRO: opção inválida: $1" >&2
+    exit 2
+    ;;
+esac
+
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
+if [[ "$MODE" == "auto" ]]; then
+  if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+    MODE="gpu"
+  else
+    MODE="cpu"
+  fi
+fi
+
+if [[ "$MODE" == "gpu" ]]; then
+  echo "Instalando runtime GPU local: CUDA 12 cuBLAS + cuDNN 9..."
+  python -m pip install -r requirements-gpu.txt
+else
+  echo "GPU não solicitada/detectada; runtime NVIDIA do venv não será instalado."
+fi
+
 cat <<'MSG'
+
 Instalado.
 
 Para X11, confirme que xdotool existe:
@@ -17,12 +55,14 @@ Para X11, confirme que xdotool existe:
 Para Wayland, prefira ydotool (com ydotoold ativo) ou wtype quando suportado:
   sudo apt install ydotool
 
-Para testar sem executar atalhos:
-  .venv/bin/python voice_commands.py --stdin --dry-run
+Diagnóstico de GPU/Whisper:
+  ./run.sh --doctor
 
-Para diagnóstico:
-  .venv/bin/python voice_commands.py --doctor
+Para testar sem executar atalhos:
+  ./run.sh --stdin --dry-run
 
 Para ouvir o microfone:
-  .venv/bin/python voice_commands.py
+  ./run.sh
 MSG
+
+./run.sh --doctor || true

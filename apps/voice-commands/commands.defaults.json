@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "commands": {
+    "next_desktop": {
+      "phrases": ["vai", "pode ir", "avança", "avancar", "pode avançar", "pra frente", "para frente", "continua", "próximo desktop"]
+    },
+    "previous_desktop": {
+      "phrases": ["volta", "pode voltar", "recua", "recuar", "pra trás", "pra tras", "desktop anterior"]
+    },
+    "next_two_desktops": {
+      "phrases": ["avança duas telas", "avancar duas telas", "pula duas telas", "vai duas telas"]
+    },
+    "previous_two_desktops": {
+      "phrases": ["recua duas telas", "volta duas telas", "recuar duas telas"]
+    },
+    "first_desktop": {
+      "phrases": ["tela 1", "tela um", "desktop 1", "desktop um", "primeira tela"]
+    },
+    "last_desktop": {
+      "phrases": ["última tela", "ultima tela", "último desktop", "ultimo desktop"]
+    },
+    "mute_audio": {
+      "phrases": ["mudo", "silenciar", "silencia", "desliga o som", "sem som"]
+    },
+    "unmute_audio": {
+      "phrases": ["ligar som", "liga o som", "ativar som", "ativa o som"]
+    },
+    "toggle_mute": {
+      "phrases": ["alternar mudo"]
+    },
+    "volume_up": {
+      "phrases": ["aumenta o volume", "mais volume", "volume mais"]
+    },
+    "volume_down": {
+      "phrases": ["diminui o volume", "menos volume", "volume menos"]
+    },
+    "lock_screen": {
+      "phrases": ["bloquear", "bloqueia", "travar", "trava a tela", "suspender"]
+    },
+    "suspend_system": {
+      "phrases": []
+    },
+    "open_calculator": {
+      "phrases": ["calculadora", "abrir calculadora", "abre calculadora"]
+    },
+    "open_text_editor": {
+      "phrases": ["bloco de notas", "abrir bloco de notas", "editor de texto"]
+    },
+    "open_email": {
+      "phrases": ["e-mail", "email", "abrir e-mail", "abrir email"]
+    },
+    "open_terminal": {
+      "phrases": ["terminal", "abrir terminal", "abre terminal"]
+    },
+    "open_files": {
+      "phrases": ["meus arquivos", "abrir arquivos", "gerenciador de arquivos"]
+    },
+    "open_browser": {
+      "phrases": ["navegador", "abrir navegador", "abre navegador"]
+    },
+    "open_settings": {
+      "phrases": ["configurações do sistema", "configuracoes do sistema", "abrir configurações"]
+    }
+  },
+  "desktops": {
+    "LAZER": {"phrases": ["lazer"]},
+    "orbital-legal": {"phrases": ["jurídico", "juridico", "orbital legal"]},
+    "orbital-content": {"phrases": ["conteúdo", "conteudo", "orbital content"]},
+    "lrdp1": {"phrases": ["rdp1", "rdp um", "remoto um"]},
+    "lrdp2": {"phrases": ["rdp2", "rdp dois", "remoto dois"]}
+  }
+}

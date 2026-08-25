@@ -1,0 +1,4 @@
+# Runtime CUDA local ao venv para faster-whisper/CTranslate2 no Linux.
+# O driver NVIDIA continua sendo fornecido pelo sistema.
+nvidia-cublas-cu12>=12,<13
+nvidia-cudnn-cu12>=9,<10

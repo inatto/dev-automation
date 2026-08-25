@@ -8,8 +8,11 @@ speech_rms_threshold = 0.012
 [recognition]
 model = "medium"
 language = "pt"
-compute_type = "int8"
-device = "cpu"
+compute_type = "float16"
+gpu_fallback_compute_type = "int8_float16"
+cpu_compute_type = "int8"
+device = "cuda"
+allow_cpu_fallback = false
 minimum_similarity = 0.82
 cooldown_seconds = 0.90
 
@@ -19,40 +22,7 @@ directory = "logs"
 
 [action]
 backend = "auto"
-
-[commands.next_desktop]
-phrases = [
-  "vai",
-  "pode ir",
-  "avança",
-  "avancar",
-  "pode avançar",
-  "pode avancar",
-  "pra frente",
-  "para frente",
-  "continua",
-  "continue",
-  "próximo desktop",
-  "proximo desktop",
-  "avança desktop",
-  "avancar desktop"
-]
-
-[commands.previous_desktop]
-phrases = [
-  "volta",
-  "pode voltar",
-  "recua",
-  "recuar",
-  "pra trás",
-  "pra tras",
-  "para trás",
-  "para tras",
-  "desktop anterior",
-  "volta desktop",
-  "recuar desktop",
-  "recua desktop"
-]
+workspace_step_delay = 0.07
 
 [ui]
 max_history = 200

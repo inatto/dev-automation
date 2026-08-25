@@ -1,2 +1,4 @@
 .env
 /todo/
+
+/apps/voice-commands/commands.json
