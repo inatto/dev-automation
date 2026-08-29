@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from email.header import decode_header, make_header
 from email.message import Message
-from email.utils import parseaddr
+from email.utils import parseaddr, parsedate_to_datetime
 
 
 @dataclass(frozen=True)
@@ -22,14 +22,34 @@ class Incoming:
     auto_submitted: str
     precedence: str
     list_id: str
+    mail_date: str = ""
+
+
+def _single_line(value: str) -> str:
+    return re.sub(r"[\r\n]+", " ", value.replace("\x00", "")).strip()
 
 
 def _header(msg: Message, name: str) -> str:
     raw = str(msg.get(name, "") or "")
     try:
-        return str(make_header(decode_header(raw))).strip()
+        return _single_line(str(make_header(decode_header(raw))))
     except Exception:
-        return raw.strip()
+        return _single_line(raw)
+
+
+def _mail_date(msg: Message) -> str:
+    raw = str(msg.get("Date", "") or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = parsedate_to_datetime(raw)
+        if parsed is None:
+            return ""
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone()
+        return parsed.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return ""
 
 
 def _plain_body(msg: Message) -> str:
@@ -52,7 +72,7 @@ def _plain_body(msg: Message) -> str:
             payload = msg.get_payload(decode=True) or b""
             candidates.append(payload.decode(msg.get_content_charset() or "utf-8", errors="replace"))
     body = "\n".join(x.strip() for x in candidates if x.strip())
-    # Remove quoted reply sections enough to avoid feeding huge threads to the first version.
+    # Remove trechos citados para não enviar threads enormes à IA.
     body = re.split(r"\nOn .+wrote:\s*\n|\nEm .+escreveu:\s*\n", body, maxsplit=1)[0]
     return body.strip()[:12000]
 
@@ -70,15 +90,16 @@ def parse(raw: bytes) -> Incoming:
     return Incoming(
         message_id=message_id,
         thread_key=thread_seed,
-        sender_name=sender_name,
-        sender_email=sender_email.strip().lower(),
-        recipient=recipient,
+        sender_name=_single_line(sender_name),
+        sender_email=_single_line(sender_email).lower(),
+        recipient=_single_line(recipient),
         subject=subject,
         body=_plain_body(msg),
         references=refs,
         auto_submitted=_header(msg, "Auto-Submitted").lower(),
         precedence=_header(msg, "Precedence").lower(),
         list_id=_header(msg, "List-Id"),
+        mail_date=_mail_date(msg),
     )
 
 
@@ -94,6 +115,5 @@ def should_reply(item: Incoming, own_addresses: set[str]) -> tuple[bool, str]:
     blocked = ("no-reply", "noreply", "mailer-daemon", "postmaster")
     if any(token in local for token in blocked):
         return False, "no-reply/bounce"
-    if not item.body.strip():
-        return False, "sem corpo textual"
+    # Mensagem vazia continua válida: a IA gera uma confirmação genérica.
     return True, "ok"

@@ -4,7 +4,7 @@ import imaplib
 import socket
 import ssl
 import threading
-import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
@@ -34,6 +34,7 @@ class Monitor:
         self.on_event = on_event or (lambda text: None)
         self.states = {a.email: AccountState(a.email) for a in settings.accounts if a.enabled}
         self.stop_event = threading.Event()
+        self.run_lock = threading.Lock()
         self.ai = ReplyGenerator(settings.openai_api_key, settings.openai_model, settings.openai_base_url)
         self.ses = SesSender(settings.aws_profile, settings.aws_region)
         self.own = {a.email.lower() for a in settings.accounts}
@@ -41,14 +42,29 @@ class Monitor:
     def stop(self) -> None:
         self.stop_event.set()
 
-    def _event(self, text: str) -> None:
-        self.on_event(f"{datetime.now().strftime('%H:%M:%S')} {text}")
+    @staticmethod
+    def _preview(text: str, limit: int = 180) -> str:
+        value = " ".join(str(text or "").split())
+        return value if len(value) <= limit else value[:limit - 1] + "…"
+
+    def _event(self, text: str, category: str = "SYSTEM", level: str = "INFO") -> None:
+        stamp = datetime.now().strftime("%H:%M:%S")
+        try:
+            self.store.add_event(category, level, text)
+        except Exception:
+            pass
+        self.on_event(f"{stamp} [{category}] {text}")
 
     def run_account_once(self, account: Account) -> None:
         state = self.states[account.email]
         conn = None
         try:
-            conn = imaplib.IMAP4_SSL(self.settings.imap_host, self.settings.imap_port, ssl_context=ssl.create_default_context())
+            self._event(f"Consultando {account.email} em {self.settings.imap_folder}", "IMAP")
+            conn = imaplib.IMAP4_SSL(
+                self.settings.imap_host,
+                self.settings.imap_port,
+                ssl_context=ssl.create_default_context(),
+            )
             conn.login(account.email, account.password)
             status, _ = conn.select(self.settings.imap_folder, readonly=True)
             if status != "OK":
@@ -59,47 +75,106 @@ class Monitor:
             status, data = conn.uid("search", None, "UNSEEN")
             if status != "OK":
                 raise RuntimeError("falha ao consultar mensagens não lidas")
-            for uid in (data[0].split() if data and data[0] else []):
+            uids = data[0].split() if data and data[0] else []
+            self._event(f"{account.email}: {len(uids)} mensagem(ns) UNSEEN", "IMAP")
+
+            for uid in uids:
+                uid_text = uid.decode("ascii", errors="ignore") if isinstance(uid, bytes) else str(uid)
                 status, parts = conn.uid("fetch", uid, "(RFC822)")
                 if status != "OK" or not parts:
+                    self._event(f"Falha ao baixar UID {uid_text}", "IMAP", "WARN")
                     continue
                 raw = next((part[1] for part in parts if isinstance(part, tuple) and isinstance(part[1], bytes)), b"")
                 if not raw:
+                    self._event(f"UID {uid_text} retornou sem conteúdo", "IMAP", "WARN")
                     continue
                 item = parse(raw)
                 if self.store.seen(account.email, item.message_id):
                     continue
+
                 allowed, reason = should_reply(item, self.own)
                 self.store.add_inbound(
-                    account=account.email, message_id=item.message_id, thread_key=item.thread_key,
-                    sender=item.sender_email, recipient=item.recipient, subject=item.subject,
-                    body=item.body, status="received" if allowed else f"ignored:{reason}",
+                    account=account.email,
+                    message_id=item.message_id,
+                    thread_key=item.thread_key,
+                    sender=item.sender_email,
+                    recipient=item.recipient,
+                    subject=item.subject,
+                    body=item.body,
+                    status="received" if allowed else f"ignored:{reason}",
+                    mail_date=item.mail_date,
+                    imap_uid=uid_text,
+                    imap_folder=self.settings.imap_folder,
                 )
                 state.received += 1
-                self._event(f"RECEBIDO {account.email} <- {item.sender_email} | {item.subject}")
+                self._event(
+                    f"RECEBIDO {account.email} <- {item.sender_email} | {item.subject or '(sem assunto)'}",
+                    "EMAIL",
+                )
                 if self.settings.sound_enabled:
                     notify(self.settings.sound_file)
                 if not allowed or not self.settings.auto_reply_enabled:
-                    self._event(f"IGNORADO {item.sender_email} | {reason if not allowed else 'auto-resposta desativada'}")
+                    status_text = reason if not allowed else "auto-resposta desativada"
+                    self._event(f"IGNORADO {item.sender_email} | {status_text}", "EMAIL", "WARN")
                     continue
+
+                generated_body = ""
                 try:
-                    body = self.ai.generate(item)
-                    local_id, ses_id = self.ses.send_reply(account, item, body)
-                    self.store.add_outbound(
-                        account=account.email, message_id=local_id, thread_key=item.thread_key,
-                        sender=account.email, recipient=item.sender_email,
-                        subject=item.subject, body=body, reply_to=item.message_id,
-                        provider_message_id=ses_id, status="sent",
+                    body_chars = len(item.body or "")
+                    self._event(
+                        f"REQUEST model={self.settings.openai_model} para={item.sender_email} "
+                        f"assunto={self._preview(item.subject or '(sem assunto)', 80)} input={body_chars} chars",
+                        "GPT",
                     )
+                    generated_body = self.ai.generate(item)
+                    self._event(
+                        f"RESPONSE {len(generated_body)} chars | {self._preview(generated_body)}",
+                        "GPT",
+                    )
+                    self._event(
+                        f"SEND para={item.sender_email} assunto={self._preview(item.subject or '(sem assunto)', 90)}",
+                        "SES",
+                    )
+                    local_id, ses_id = self.ses.send_reply(account, item, generated_body)
+                    self.store.add_outbound(
+                        account=account.email,
+                        message_id=local_id,
+                        thread_key=item.thread_key,
+                        sender=account.email,
+                        recipient=item.sender_email,
+                        subject=item.subject,
+                        body=generated_body,
+                        reply_to=item.message_id,
+                        provider_message_id=ses_id,
+                        status="sent",
+                    )
+                    self.store.set_inbound_status(account.email, item.message_id, "replied")
                     state.replied += 1
-                    self._event(f"RESPONDIDO {account.email} -> {item.sender_email} | SES {ses_id[-12:]}")
+                    self._event(f"OK para={item.sender_email} MessageId={ses_id}", "SES")
                 except Exception as exc:
-                    self._event(f"ERRO resposta para {item.sender_email}: {exc}")
+                    self.store.set_inbound_status(account.email, item.message_id, "reply-error")
+                    try:
+                        self.store.add_outbound(
+                            account=account.email,
+                            message_id=f"<error-{uuid.uuid4()}@local>",
+                            thread_key=item.thread_key,
+                            sender=account.email,
+                            recipient=item.sender_email,
+                            subject=item.subject,
+                            body=generated_body,
+                            reply_to=item.message_id,
+                            provider_message_id="",
+                            status="error",
+                            error=str(exc),
+                        )
+                    except Exception:
+                        pass
+                    self._event(f"Resposta para {item.sender_email}: {exc}", "ERROR", "ERROR")
         except (imaplib.IMAP4.error, OSError, socket.error, RuntimeError) as exc:
             state.connected = False
             state.last_error = str(exc)
             state.last_check = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            self._event(f"ERRO {account.email}: {exc}")
+            self._event(f"{account.email}: {exc}", "IMAP", "ERROR")
         finally:
             if conn is not None:
                 try:
@@ -108,9 +183,15 @@ class Monitor:
                     pass
 
     def run_once(self) -> None:
-        for account in self.settings.accounts:
-            if account.enabled and not self.stop_event.is_set():
-                self.run_account_once(account)
+        if not self.run_lock.acquire(blocking=False):
+            self._event("Verificação já está em andamento; nova solicitação ignorada", "SYSTEM", "WARN")
+            return
+        try:
+            for account in self.settings.accounts:
+                if account.enabled and not self.stop_event.is_set():
+                    self.run_account_once(account)
+        finally:
+            self.run_lock.release()
 
     def run_forever(self) -> None:
         while not self.stop_event.is_set():

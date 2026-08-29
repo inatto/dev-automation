@@ -21,10 +21,11 @@ class ReplyGenerator:
         self.model = model
 
     def generate(self, item: Incoming) -> str:
+        content = item.body.strip() or "(mensagem recebida sem corpo textual)"
         prompt = (
             f"Remetente: {item.sender_name or item.sender_email}\n"
-            f"Assunto: {item.subject}\n"
-            f"Mensagem:\n{item.body}"
+            f"Assunto: {item.subject or '(sem assunto)'}\n"
+            f"Mensagem:\n{content}"
         )
         response = self.client.responses.create(
             model=self.model,
