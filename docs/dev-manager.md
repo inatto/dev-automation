@@ -86,9 +86,11 @@ O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
 `/home/daniel/Code` e é a única fonte da verdade para backup.
 
 - `bots/dev-automation` é um projeto e gera `dev-automation.zip`;
-- `bots/dev-automation/apps/exec-agent` é outro projeto e gera `dev-automation--exec-agent.zip`;
-- como o segundo está dentro do primeiro, `apps/exec-agent/` é excluído de
+- `bots/dev-automation/apps/amazon-imap-bot` é outro projeto e gera `dev-automation-amazon-imap-bot.zip`;
+- como o segundo está dentro do primeiro, `apps/amazon-imap-bot/` é excluído de
   `dev-automation.zip` para não existir em dois backups;
+- o ZIP filho mantém a raiz `apps/amazon-imap-bot/`, e o unzip do pai também
+  ignora esse caminho para nunca sobrescrever o subprojeto;
 - `bots/dev-automation/apps.zip` habilita opcionalmente `apps.zip`;
 - `orgs/orbital.zip` habilita opcionalmente `orbital.zip`;
 - `Code.zip` habilita opcionalmente o agregador geral.
@@ -156,4 +158,4 @@ No ícone do Dev Automation, use o botão direito e escolha `Desativar som` ou `
 
 O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
-Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
+Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/amazon-imap-bot` gera `dev-automation.zip` e `dev-automation-amazon-imap-bot.zip`, com os arquivos do filho dentro de `apps/amazon-imap-bot/`.

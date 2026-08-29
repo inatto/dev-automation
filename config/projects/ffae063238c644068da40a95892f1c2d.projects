@@ -9,7 +9,7 @@
 #orgs/sind-vault
 #social/murm-app
 bots/dev-automation
-bots/dev-automation/amazon_imap_bot
+bots/dev-automation/apps/amazon-imap-bot
 bots/general-crawler
 infra/amazon-infra
 infra/amazon-infra/apps/monitor-app

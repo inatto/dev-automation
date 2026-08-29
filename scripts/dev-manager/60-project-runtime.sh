@@ -16,7 +16,8 @@ project_for_zip() {
 
   # Retira apenas a extensão final. Para projetos aninhados, aceita tanto o
   # nome lógico curto (exec-agent.zip) quanto o backup qualificado gerado pelo
-  # manager (dev-automation--exec-agent.zip). O nome lógico é globalmente único.
+  # manager (dev-automation-exec-agent.zip). O formato antigo com "--" também
+  # continua reconhecido. O nome lógico é globalmente único.
   zip_stem="${zip_name:0:${#zip_name}-4}"
   zip_stem_lower="${zip_stem,,}"
 
@@ -36,8 +37,9 @@ project_for_zip() {
       # preservando nomes de arquivos gerados pelo navegador/chat, por exemplo:
       #   exec-agent.zip
       #   exec-agent-incremental.zip
+      #   dev-automation-exec-agent.zip
+      #   dev-automation-exec-agent(2).zip
       #   dev-automation--exec-agent.zip
-      #   dev-automation--exec-agent(2).zip
       if [[ "$zip_stem_lower" == "$alias_lower" ]]; then
         suffix=""
       elif [[ "$zip_stem_lower" == "$alias_lower"* ]]; then

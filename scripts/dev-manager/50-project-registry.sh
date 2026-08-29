@@ -97,7 +97,7 @@ project_archive_name() {
   parent="$(registered_parent_project "$normalized")"
   if [ -n "$parent" ]; then
     parent_name="$(project_logical_name "$parent")"
-    printf '%s--%s\n' "$parent_name" "$logical_name"
+    printf '%s-%s\n' "$parent_name" "$logical_name"
   else
     printf '%s\n' "$logical_name"
   fi
@@ -105,14 +105,24 @@ project_archive_name() {
 
 project_import_names() {
   local project="$1"
-  local canonical logical
+  local canonical logical parent parent_name legacy
 
   canonical="$(project_archive_name "$project")"
   printf '%s\n' "$canonical"
 
   if ! target_is_aggregate "$project"; then
     logical="$(project_logical_name "$project")"
-    if [ "${logical,,}" != "${canonical,,}" ]; then
+    parent="$(registered_parent_project "$project")"
+    legacy=""
+    if [ -n "$parent" ]; then
+      parent_name="$(project_logical_name "$parent")"
+      legacy="$parent_name--$logical"
+      if [ "${legacy,,}" != "${canonical,,}" ]; then
+        printf '%s\n' "$legacy"
+      fi
+    fi
+
+    if [ "${logical,,}" != "${canonical,,}" ] && [ "${logical,,}" != "${legacy,,}" ]; then
       printf '%s\n' "$logical"
     fi
   fi
@@ -231,11 +241,9 @@ registered_subprojects() {
   done < <(backup_targets)
 }
 
-append_registered_subproject_excludes() {
+registered_subproject_relative_paths() {
   local parent="$1"
-  local filter_file="$2"
   local parent_rel child child_rel relative
-  local count=0
 
   parent_rel="$(target_source_rel "$parent")"
   while IFS= read -r child || [ -n "$child" ]; do
@@ -243,12 +251,50 @@ append_registered_subproject_excludes() {
     child_rel="$(target_source_rel "$child")"
     relative="${child_rel#"$parent_rel/"}"
     [ -n "$relative" ] || continue
+    printf '%s\n' "$relative"
+  done < <(registered_subprojects "$parent")
+}
+
+project_relpath_belongs_to_registered_subproject() {
+  local parent="$1"
+  local rel="$2"
+  local child_relative
+
+  while IFS= read -r child_relative || [ -n "$child_relative" ]; do
+    [ -n "$child_relative" ] || continue
+    if [ "$rel" = "$child_relative" ] || [[ "$rel" == "$child_relative/"* ]]; then
+      return 0
+    fi
+  done < <(registered_subproject_relative_paths "$parent")
+
+  return 1
+}
+
+append_registered_subproject_excludes() {
+  local parent="$1"
+  local filter_file="$2"
+  local phase="${3:-backup}"
+  local relative
+  local count=0
+
+  while IFS= read -r relative || [ -n "$relative" ]; do
+    [ -n "$relative" ] || continue
     printf -- '- /%s/***\n' "$relative" >> "$filter_file"
     count=$((count + 1))
-    log "Excluindo subprojeto cadastrado do ZIP pai: $relative/"
-  done < <(registered_subprojects "$parent")
+    if [ "$phase" = "unzip" ]; then
+      log "Protegendo subprojeto cadastrado durante unzip do pai: $relative/"
+    else
+      log "Excluindo subprojeto cadastrado do ZIP pai: $relative/"
+    fi
+  done < <(registered_subproject_relative_paths "$parent")
 
-  [ "$count" -eq 0 ] || log "$count subprojeto(s) cadastrado(s) excluído(s) do backup pai."
+  if [ "$count" -gt 0 ]; then
+    if [ "$phase" = "unzip" ]; then
+      log "$count subprojeto(s) cadastrado(s) isolado(s) da importação do pai."
+    else
+      log "$count subprojeto(s) cadastrado(s) excluído(s) do backup pai."
+    fi
+  fi
 }
 
 backup_order_targets() {

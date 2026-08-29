@@ -9,13 +9,17 @@ materialize_changed_protected_configs() {
   local project="$1"
   local source_root="$2"
   local filtered_root="$3"
-  local project_dir baseline_dir rel baseline destination local_target result changed=0 unchanged=0 redacted=0
+  local project_dir baseline_dir rel baseline destination local_target result changed=0 unchanged=0 redacted=0 isolated=0
 
   project_dir="$(project_path "$project")"
   baseline_dir="$(protected_config_baseline_dir "$project")"
 
   while IFS= read -r -d '' rel; do
     protected_config_relpath "$rel" || continue
+    if project_relpath_belongs_to_registered_subproject "$project" "$rel"; then
+      isolated=$((isolated + 1))
+      continue
+    fi
 
     baseline="$baseline_dir/$rel"
     if [ -f "$baseline" ] && cmp -s -- "$source_root/$rel" "$baseline"; then
@@ -189,6 +193,6 @@ PY_MERGE
     log "CONFIG PROTEGIDO: $rel -> ${result:-merge concluído}"
   done < <(find "$source_root" -type f -printf '%P\0')
 
-  log "Configs protegidos: $changed reconciliado(s), $unchanged sem mudança, $redacted preservado(s) sem merge; nenhum .external persistido."
+  log "Configs protegidos: $changed reconciliado(s), $unchanged sem mudança, $redacted preservado(s) sem merge, $isolated isolado(s) por pertencer a subprojeto; nenhum .external persistido."
   return 0
 }

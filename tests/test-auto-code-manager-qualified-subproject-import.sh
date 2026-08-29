@@ -33,15 +33,25 @@ ENV
 mkdir -p "$TEMP/pkg-short/exec-agent"
 printf 'short\n' > "$TEMP/pkg-short/exec-agent/value.txt"
 (cd "$TEMP/pkg-short" && zip -qr "$INBOX/exec-agent-incremental.zip" exec-agent)
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$INBOX/exec-agent-incremental.zip" >/dev/null
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$INBOX/exec-agent-incremental.zip" >/dev/null
 grep -Fxq 'short' "$CODE_ROOT/bots/dev-automation/apps/exec-agent/value.txt"
 [ ! -e "$INBOX/exec-agent-incremental.zip" ]
 
-mkdir -p "$TEMP/pkg-qualified/dev-automation--exec-agent"
-printf 'qualified\n' > "$TEMP/pkg-qualified/dev-automation--exec-agent/value.txt"
-(cd "$TEMP/pkg-qualified" && zip -qr "$INBOX/dev-automation--exec-agent.zip" dev-automation--exec-agent)
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$INBOX/dev-automation--exec-agent.zip" >/dev/null
+mkdir -p "$TEMP/pkg-qualified/apps/exec-agent"
+printf 'qualified\n' > "$TEMP/pkg-qualified/apps/exec-agent/value.txt"
+(cd "$TEMP/pkg-qualified" && zip -qr "$INBOX/dev-automation-exec-agent.zip" apps/exec-agent)
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$INBOX/dev-automation-exec-agent.zip" >/dev/null
 grep -Fxq 'qualified' "$CODE_ROOT/bots/dev-automation/apps/exec-agent/value.txt"
+[ ! -e "$INBOX/dev-automation-exec-agent.zip" ]
+
+mkdir -p "$TEMP/pkg-legacy/dev-automation--exec-agent"
+printf 'legacy\n' > "$TEMP/pkg-legacy/dev-automation--exec-agent/value.txt"
+(cd "$TEMP/pkg-legacy" && zip -qr "$INBOX/dev-automation--exec-agent.zip" dev-automation--exec-agent)
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-one "$INBOX/dev-automation--exec-agent.zip" >/dev/null
+grep -Fxq 'legacy' "$CODE_ROOT/bots/dev-automation/apps/exec-agent/value.txt"
 [ ! -e "$INBOX/dev-automation--exec-agent.zip" ]
 
-printf 'OK: ZIP curto do chat e ZIP qualificado do backup importam no mesmo subprojeto\n'
+printf 'OK: ZIP curto, hierárquico atual e qualificado legado importam no mesmo subprojeto\n'

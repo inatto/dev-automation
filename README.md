@@ -78,15 +78,17 @@ Uma entrada normal representa um projeto real:
 
 ```text
 bots/dev-automation
-bots/dev-automation/apps/exec-agent
+bots/dev-automation/apps/amazon-imap-bot
 orgs/orbital/orbital-app
 ```
 
 Se um projeto cadastrado estiver fisicamente dentro de outro projeto cadastrado,
 o diretório do filho é excluído do ZIP do pai. Assim `dev-automation.zip` não
-duplica `apps/exec-agent/`, enquanto `exec-agent.zip` é gerado separadamente.
+duplica `apps/amazon-imap-bot/`, enquanto `dev-automation-amazon-imap-bot.zip`
+é gerado separadamente e contém seus arquivos sob `apps/amazon-imap-bot/`.
 Pastas irmãs não cadastradas, como outros utilitários em `apps/`, continuam no ZIP
-do pai.
+do pai. Na importação do ZIP pai, esses mesmos caminhos cadastrados também são
+isolados, mesmo que um pacote recebido os contenha por engano.
 
 Uma entrada terminada em `.zip` habilita explicitamente um agregador da pasta
 correspondente:
@@ -389,7 +391,7 @@ nem observado automaticamente pelo `dev-manager`.
 
 O nome da última pasta de cada projeto normal é sua chave lógica global. Dois projetos cadastrados não podem ter a mesma chave, mesmo sob pais diferentes; o `dev-manager` aborta antes de gerar backups quando encontra duplicidade.
 
-Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/exec-agent` gera `dev-automation.zip` e `dev-automation--exec-agent.zip`.
+Subprojetos cadastrados usam nome qualificado no ZIP para evitar colisões. Exemplo: `bots/dev-automation` + `bots/dev-automation/apps/amazon-imap-bot` gera `dev-automation.zip` e `dev-automation-amazon-imap-bot.zip`; dentro do ZIP filho, a raiz preservada é `apps/amazon-imap-bot/`.
 
 ### Git-crypt no dev-manager
 

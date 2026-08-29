@@ -67,6 +67,7 @@ AUTO_CODE_MONITOR_MODE=inotify
 ENV
 
 DOWNLOADS_DIR="$DOWNLOADS" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$TEMP/state" \
+  DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 
@@ -95,7 +96,7 @@ wait_for_hash_change() {
   exit 1
 }
 
-for zip in dev-automation.zip dev-automation--exec-agent.zip apps.zip Code.zip other.zip; do
+for zip in dev-automation.zip dev-automation-exec-agent.zip apps.zip Code.zip other.zip; do
   wait_for_file "$CODE_ROOT/$zip"
 done
 
@@ -107,13 +108,13 @@ grep -Fxq "@$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules" "$TEMP/
   exit 1
 }
 parent_before="$(sha256sum "$CODE_ROOT/dev-automation.zip" | awk '{print $1}')"
-child_before="$(sha256sum "$CODE_ROOT/dev-automation--exec-agent.zip" | awk '{print $1}')"
+child_before="$(sha256sum "$CODE_ROOT/dev-automation-exec-agent.zip" | awk '{print $1}')"
 apps_before="$(sha256sum "$CODE_ROOT/apps.zip" | awk '{print $1}')"
 code_before="$(sha256sum "$CODE_ROOT/Code.zip" | awk '{print $1}')"
 other_before="$(sha256sum "$CODE_ROOT/other.zip" | awk '{print $1}')"
 
 printf 'child-v2\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/app.txt"
-wait_for_hash_change "$CODE_ROOT/dev-automation--exec-agent.zip" "$child_before"
+wait_for_hash_change "$CODE_ROOT/dev-automation-exec-agent.zip" "$child_before"
 wait_for_hash_change "$CODE_ROOT/apps.zip" "$apps_before"
 wait_for_hash_change "$CODE_ROOT/Code.zip" "$code_before"
 
@@ -129,10 +130,10 @@ other_after="$(sha256sum "$CODE_ROOT/other.zip" | awk '{print $1}')"
 }
 
 # Uma alteração exclusivamente ignorada não pode sujar o backup do filho.
-child_after="$(sha256sum "$CODE_ROOT/dev-automation--exec-agent.zip" | awk '{print $1}')"
+child_after="$(sha256sum "$CODE_ROOT/dev-automation-exec-agent.zip" | awk '{print $1}')"
 printf 'ignored-v2\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules/pkg/cache.txt"
 sleep 4
-child_ignored="$(sha256sum "$CODE_ROOT/dev-automation--exec-agent.zip" | awk '{print $1}')"
+child_ignored="$(sha256sum "$CODE_ROOT/dev-automation-exec-agent.zip" | awk '{print $1}')"
 [ "$child_ignored" = "$child_after" ] || {
   printf 'FALHOU: node_modules disparou backup mesmo estando ignorado\n' >&2
   cat "$LOG" >&2
@@ -168,7 +169,7 @@ done
 
 # Sem qualquer mudança, também não existe backup periódico por relógio.
 sleep 3
-child_idle="$(sha256sum "$CODE_ROOT/dev-automation--exec-agent.zip" | awk '{print $1}')"
+child_idle="$(sha256sum "$CODE_ROOT/dev-automation-exec-agent.zip" | awk '{print $1}')"
 [ "$child_idle" = "$child_after" ] || {
   printf 'FALHOU: ZIP foi refeito sem alteração de fonte\n' >&2
   cat "$LOG" >&2

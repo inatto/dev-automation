@@ -4,7 +4,7 @@
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
-  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest content_prefix
+  local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest content_prefix root_alias
   local total_files checked_files rel destination removal_count=0 runtime_scope="both"
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
@@ -25,10 +25,6 @@ import_one_zip() {
 
   taskbar_status unzip "$zip_name"
   archive_name="$(project_archive_name "$project")"
-  logical_name=""
-  if ! target_is_aggregate "$project"; then
-    logical_name="$(project_logical_name "$project")"
-  fi
   project_dir="$(project_path "$project")"
   temp_dir="$(mktemp -d "/tmp/auto-code-import-${archive_name}-XXXXXX")"
 
@@ -66,15 +62,21 @@ import_one_zip() {
   if [ -n "$content_prefix" ] && [ -d "$temp_dir/$content_prefix" ]; then
     source_dir="$temp_dir/$content_prefix"
     log "Hierarquia do subprojeto identificada no ZIP: $content_prefix/"
-  elif [ -d "$temp_dir/$archive_name" ]; then
-    source_dir="$temp_dir/$archive_name"
-    log "Raiz do ZIP identificada: $archive_name/"
-  elif [ -n "$logical_name" ] && [ -d "$temp_dir/$logical_name" ]; then
-    source_dir="$temp_dir/$logical_name"
-    log "Raiz lógica do projeto identificada: $logical_name/"
   else
-    source_dir="$temp_dir"
-    log "ZIP sem pasta raiz do alvo; usando a raiz do ZIP."
+    source_dir=""
+    while IFS= read -r root_alias || [ -n "$root_alias" ]; do
+      [ -n "$root_alias" ] || continue
+      if [ -d "$temp_dir/$root_alias" ]; then
+        source_dir="$temp_dir/$root_alias"
+        log "Raiz do ZIP identificada: $root_alias/"
+        break
+      fi
+    done < <(project_import_names "$project")
+
+    if [ -z "$source_dir" ]; then
+      source_dir="$temp_dir"
+      log "ZIP sem pasta raiz do alvo; usando a raiz do ZIP."
+    fi
   fi
 
   if target_is_aggregate "$project"; then
@@ -186,6 +188,7 @@ import_one_zip() {
     "$project_dir" \
     "auto-code-manager.ignore-unzip" \
     "$unzip_filter_file"
+  append_registered_subproject_excludes "$project" "$unzip_filter_file" unzip
 
   # Config protegido nunca entra no rsync direto. Primeiro é reconciliado em
   # staging: ********/*** recupera o valor real local; valores não secretos podem mudar.
