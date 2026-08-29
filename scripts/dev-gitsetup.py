@@ -22,7 +22,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CODE_ROOT = Path(os.environ.get("CODE_ROOT", "/home/daniel/Code"))
 PROJECTS_DIR = PROJECT_ROOT / "config" / "projects"
 DEFAULT_PROJECTS_FILE = PROJECTS_DIR / "default.projects"
-LEGACY_PROJECTS_FILE = PROJECT_ROOT / "config" / "auto-code-manager.projects"
 DEFAULT_REPOSITORIES_FILE = PROJECT_ROOT / "config" / "environment.repositories"
 
 
@@ -69,7 +68,7 @@ def resolve_projects_file(explicit: Path | None, *, dry_run: bool) -> tuple[Path
     if machine_file.is_file():
         return machine_file, mid
 
-    source = DEFAULT_PROJECTS_FILE if DEFAULT_PROJECTS_FILE.is_file() else LEGACY_PROJECTS_FILE
+    source = DEFAULT_PROJECTS_FILE
     if not source.is_file():
         fail(f"arquivo default de projetos não encontrado: {DEFAULT_PROJECTS_FILE}")
 

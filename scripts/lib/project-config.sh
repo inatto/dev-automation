@@ -13,21 +13,22 @@ _dev_machine_id() {
 }
 
 dev_projects_file() {
-  local root="$1" machine_id machine_file default_file legacy_file
+  local root="$1" machine_id machine_file default_file tmp
   default_file="$root/config/projects/default.projects"
-  legacy_file="$root/config/auto-code-manager.projects"
 
   if machine_id="$(_dev_machine_id)"; then
     machine_file="$root/config/projects/$machine_id.projects"
-    if [[ -f "$machine_file" ]]; then
-      printf '%s\n' "$machine_file"
-      return 0
+    if [[ ! -f "$machine_file" ]]; then
+      [[ -f "$default_file" ]] || return 1
+      mkdir -p -- "$(dirname -- "$machine_file")" || return 1
+      tmp="$machine_file.tmp.$$"
+      cp -- "$default_file" "$tmp" || { rm -f -- "$tmp"; return 1; }
+      mv -- "$tmp" "$machine_file" || { rm -f -- "$tmp"; return 1; }
     fi
+    printf '%s\n' "$machine_file"
+    return 0
   fi
 
-  if [[ -f "$default_file" ]]; then
-    printf '%s\n' "$default_file"
-  else
-    printf '%s\n' "$legacy_file"
-  fi
+  [[ -f "$default_file" ]] || return 1
+  printf '%s\n' "$default_file"
 }

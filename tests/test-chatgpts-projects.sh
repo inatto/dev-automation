@@ -16,7 +16,7 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   [[ -n "$line" ]] || continue
   [[ "${line,,}" == *.zip ]] && continue
   basename -- "$line"
-done < "$ROOT/config/auto-code-manager.projects" > "$EXPECTED"
+done < "$ROOT/config/projects/default.projects" > "$EXPECTED"
 
 "$ROOT/scripts/chatgpts.sh" --list > "$ACTUAL"
 diff -u "$EXPECTED" "$ACTUAL"

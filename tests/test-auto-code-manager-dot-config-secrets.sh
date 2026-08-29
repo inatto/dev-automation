@@ -17,7 +17,7 @@ SERVICE_ENABLED=true
 SERVICE_PASSWORD=real-service-password
 ENV
 printf 'opaque-real-secret\n' > "$P/.config/tools/private.bin"
-printf 'orgs/alpha-app\n' > "$M/config/auto-code-manager.projects"
+printf 'orgs/alpha-app\n' > "$M/config/projects/default.projects"
 cat > "$M/config/auto-code-manager.env" <<'ENV'
 AUTO_CODE_MONITOR_MODE=inotify
 BACKUP_EVERY=1
@@ -26,7 +26,7 @@ BEEP_MODE=none
 BACKUP_BEEP_ENABLED=false
 TASKBAR_STATUS_ENABLED=false
 ENV
-run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" DEV_MANAGER_PROJECTS_FILE="$M/config/auto-code-manager.projects" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" "$@"; }
+run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" "$@"; }
 
 run --backup-once >/dev/null 2>&1
 Z="$C/alpha-app.zip"

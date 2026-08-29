@@ -29,7 +29,7 @@ cp -a -- "$ROOT" "$TEST_PROJECT"
 mkdir -p "$SQL_DIR"
 printf 'old\n' > "$PROJECT_DIR/value.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha-app
 PROJECTS
 cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'IGNORE'

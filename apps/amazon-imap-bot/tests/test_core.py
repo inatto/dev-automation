@@ -2,8 +2,8 @@ import tempfile
 from pathlib import Path
 from email.message import EmailMessage
 
-from amazon_imap_bot.message import parse, should_reply
-from amazon_imap_bot.store import Store
+from message import parse, should_reply
+from store import Store
 
 
 def test_parse_and_reply_rule():

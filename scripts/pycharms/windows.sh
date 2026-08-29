@@ -23,7 +23,7 @@ Uso:
   pycharms --help   Mostra esta ajuda
 
 Regra:
-  abre os projetos-raiz ativos de auto-code-manager.projects; ignora agregadores *.zip e subprojetos apps/ quando o pai também está ativo
+  abre os projetos-raiz ativos do arquivo `.projects` da máquina; ignora agregadores *.zip e subprojetos apps/ quando o pai também está ativo
 EOF_HELP
 }
 

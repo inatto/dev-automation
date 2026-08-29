@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CONFIG="$ROOT/config/services.csv"
-PROJECTS="$ROOT/config/auto-code-manager.projects"
+PROJECTS="$ROOT/config/projects/default.projects"
 NGINX="$ROOT/scripts/local-nginx.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT

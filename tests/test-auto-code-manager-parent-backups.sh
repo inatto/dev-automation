@@ -84,7 +84,7 @@ ENV
 printf 'compartilhado\n' > "$CODE_ROOT/orgs/orbital/README-parent.txt"
 printf 'inst\n' > "$CODE_ROOT/orgs/inst-app/inst.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/orbital.zip
 Code.zip
 orgs/orbital/orbital-app

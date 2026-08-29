@@ -23,7 +23,7 @@ cp -a -- "$ROOT" "$MANAGER"
 mkdir -p "$APP/apps/api" "$APP/deploy/local" "$HOME_DIR/Downloads" "$STATE"
 touch "$STATE/dev-manager.sound-disabled"
 
-cat > "$MANAGER/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$MANAGER/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha-app
 PROJECTS
 cat > "$MANAGER/config/auto-code-manager.ignore-zip" <<'IGNORE'
@@ -70,7 +70,7 @@ mkdir -p "$TEMP/pkg/apps/api"
 printf 'novo\n' > "$TEMP/pkg/apps/api/main.py"
 (cd "$TEMP/pkg" && zip -qr "$TEMP/alpha-app.zip" .)
 HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
-  DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/auto-code-manager.projects" AUTO_CODE_TUI=off \
+  DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/projects/default.projects" AUTO_CODE_TUI=off \
   "$MANAGER/scripts/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
 
 sleep 0.4

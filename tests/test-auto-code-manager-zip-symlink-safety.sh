@@ -7,7 +7,7 @@ M="$T/manager"; C="$T/Code"; H="$T/home"; D="$H/Downloads"; S="$T/state"; P="$C/
 cp -a -- "$ROOT" "$M"
 mkdir -p "$P" "$D" "$S"
 printf 'old\n' > "$P/app.txt"
-cat > "$M/config/auto-code-manager.projects" <<'CFG'
+cat > "$M/config/projects/default.projects" <<'CFG'
 orgs/alpha-app
 CFG
 cat > "$M/config/auto-code-manager.ignore-zip" <<'CFG'

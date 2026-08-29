@@ -16,7 +16,7 @@ FAKE_BIN="$TMP/fake-bin"
 cp -a -- "$ROOT" "$TEST_PROJECT"
 mkdir -p "$TEST_HOME" "$CODE_ROOT/orgs/sample-app" "$DOWNLOADS_DIR" "$FAKE_BIN"
 printf 'original\n' > "$CODE_ROOT/orgs/sample-app/value.txt"
-printf 'orgs/sample-app\n' > "$TEST_PROJECT/config/auto-code-manager.projects"
+printf 'orgs/sample-app\n' > "$TEST_PROJECT/config/projects/default.projects"
 cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'IGNORE'
 .git/
 .venv/

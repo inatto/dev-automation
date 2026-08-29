@@ -15,7 +15,7 @@ cp -a -- "$ROOT" "$TEST_PROJECT"
 mkdir -p "$DEST/old-dir" "$DOWNLOADS" "$FAKE_BIN"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKE_BIN/powershell.exe"
 chmod +x "$FAKE_BIN/powershell.exe"
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'CFG'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'CFG'
 orgs/sample-app
 CFG
 cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'CFG'

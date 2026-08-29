@@ -29,4 +29,4 @@ bootstrap_venv() {
 
 bootstrap_venv
 export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PYTHON" -m amazon_imap_bot "$@"
+exec "$PYTHON" "$HERE/__main__.py" "$@"

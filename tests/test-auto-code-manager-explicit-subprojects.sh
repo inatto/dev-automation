@@ -23,7 +23,7 @@ printf 'exec\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/exec.txt"
 printf 'status\n' > "$CODE_ROOT/bots/dev-automation/apps/dev-status/status.txt"
 printf 'oracle\n' > "$CODE_ROOT/bots/dev-automation/apps/oracle-monitor/oracle.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 PROJECTS
@@ -35,7 +35,7 @@ node_modules/
 SAFE_IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 
 [ -s "$CODE_ROOT/dev-automation.zip" ]
@@ -48,13 +48,13 @@ unzip -Z1 "$CODE_ROOT/dev-automation.zip" | grep -Fxq 'apps/oracle-monitor/oracl
 unzip -p "$CODE_ROOT/dev-automation-exec-agent.zip" apps/exec-agent/exec.txt | grep -Fxq 'exec'
 
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 bots/dev-automation/apps.zip
 Code.zip
 PROJECTS
-PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 
 [ "$(unzip -Z1 "$CODE_ROOT/apps.zip")" = 'dev-automation-exec-agent.zip' ]

@@ -11,7 +11,7 @@ printf 'machine-local\n' > "$P/machine/value.txt"
 ln -s real "$P/link-filetree"
 ln -s /etc/nginx/sites-available/default "$P/nginx-default"
 ln -s ../machine "$P/linked-dir"
-cat > "$M/config/auto-code-manager.projects" <<'EOF_PROJECTS'
+cat > "$M/config/projects/default.projects" <<'EOF_PROJECTS'
 orgs/alpha-app
 EOF_PROJECTS
 cat > "$M/config/auto-code-manager.ignore-zip" <<'EOF_IGNORE'

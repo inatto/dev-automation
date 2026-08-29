@@ -96,12 +96,19 @@ def resolve_projects_file(root: Path) -> Path:
             machine_id = Path("/etc/machine-id").read_text(encoding="utf-8").strip().lower()
         except OSError:
             machine_id = ""
+    projects_dir = root / "config" / "projects"
+    default = projects_dir / "default.projects"
     if len(machine_id) == 32 and all(char in "0123456789abcdef" for char in machine_id):
-        machine_file = root / "config" / "projects" / f"{machine_id}.projects"
+        machine_file = projects_dir / f"{machine_id}.projects"
         if machine_file.is_file():
             return machine_file
-    default = root / "config" / "projects" / "default.projects"
-    return default if default.is_file() else root / "config" / "auto-code-manager.projects"
+        if default.is_file():
+            machine_file.parent.mkdir(parents=True, exist_ok=True)
+            temp = machine_file.with_name(machine_file.name + f".tmp.{os.getpid()}")
+            temp.write_text(default.read_text(encoding="utf-8-sig"), encoding="utf-8")
+            os.replace(temp, machine_file)
+            return machine_file
+    return default
 
 
 def load_projects(path: Path) -> list[str]:

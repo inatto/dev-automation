@@ -36,7 +36,7 @@ printf 'isto não é zip\n' > "$PACKAGE_DIR/orbital-assets.zip"
   zip -q -0 "$PARENT_ZIP" orbital-app.zip orbital-assets.zip
 )
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/orbital.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets

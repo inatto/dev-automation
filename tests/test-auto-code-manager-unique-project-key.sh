@@ -21,7 +21,7 @@ chmod +x "$FAKE_BIN/powershell.exe"
 printf 'alpha\n' > "$CODE_ROOT/orgs/alpha/apps/exec-agent/a.txt"
 printf 'beta\n' > "$CODE_ROOT/orgs/beta/tools/exec-agent/b.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha/apps/exec-agent
 orgs/beta/tools/exec-agent
 PROJECTS

@@ -14,7 +14,7 @@ LOG_FILE="$TEMP_ROOT/import.log"
 cp -a -- "$PROJECT_ROOT" "$TEST_PROJECT"
 mkdir -p "$CODE_ROOT/orgs/alpha" "$CODE_ROOT/orgs/beta" "$DOWNLOADS_DIR"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha
 orgs/beta
 PROJECTS

@@ -29,7 +29,7 @@ printf 'other-app-original\n' > "$PARENT/apps/gpt-console/ui.txt"
 printf 'child-original\n' > "$CHILD/bot.py"
 printf 'TOKEN=child-local-secret\n' > "$CHILD/config/local/.env"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 bots/dev-automation
 bots/dev-automation/apps/amazon-imap-bot
 PROJECTS
@@ -50,7 +50,7 @@ ENV
 MANAGER_ENV=(
   "PATH=$FAKE_BIN:$PATH"
   "CODE_ROOT=$CODE_ROOT"
-  "DEV_MANAGER_PROJECTS_FILE=$TEST_PROJECT/config/auto-code-manager.projects"
+  "DEV_MANAGER_PROJECTS_FILE=$TEST_PROJECT/config/projects/default.projects"
 )
 
 env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null

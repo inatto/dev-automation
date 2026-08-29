@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bootstrap/synchronize the projects declared by dev-automation.
 
-Source of truth: config/auto-code-manager.projects.
+Source of truth: config/projects/<machine-id>.projects.
 Repository URLs are resolved first from config/environment.repositories and then,
 for unmapped projects, from the repositories accessible to the active GitHub CLI
 account.
@@ -19,9 +19,39 @@ from typing import Iterable
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_CODE_ROOT = Path(os.environ.get("CODE_ROOT", "/home/daniel/Code"))
-DEFAULT_PROJECTS_FILE = PROJECT_ROOT / "config" / "auto-code-manager.projects"
+PROJECTS_DIR = PROJECT_ROOT / "config" / "projects"
+DEFAULT_PROJECTS_FILE = PROJECTS_DIR / "default.projects"
 DEFAULT_REPOSITORIES_FILE = PROJECT_ROOT / "config" / "environment.repositories"
 
+
+def machine_id() -> str:
+    value = os.environ.get("DEV_MACHINE_ID", "").strip()
+    if not value:
+        try:
+            value = Path("/etc/machine-id").read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            fail(f"não foi possível ler /etc/machine-id: {exc}")
+    normalized = value.lower()
+    if len(normalized) != 32 or any(ch not in "0123456789abcdef" for ch in normalized):
+        fail(f"machine-id inválido: {value!r}")
+    return normalized
+
+
+def resolve_projects_file(explicit: Path | None) -> Path:
+    if explicit is not None:
+        return explicit
+    mid = machine_id()
+    machine_file = PROJECTS_DIR / f"{mid}.projects"
+    if machine_file.is_file():
+        return machine_file
+    if not DEFAULT_PROJECTS_FILE.is_file():
+        fail(f"arquivo default de projetos não encontrado: {DEFAULT_PROJECTS_FILE}")
+    machine_file.parent.mkdir(parents=True, exist_ok=True)
+    tmp = machine_file.with_name(machine_file.name + f".tmp.{os.getpid()}")
+    tmp.write_text(DEFAULT_PROJECTS_FILE.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    os.replace(tmp, machine_file)
+    out(f"[dev-automation] Criado: {machine_file} (base: {DEFAULT_PROJECTS_FILE.name})")
+    return machine_file
 
 def out(message: str = "") -> None:
     print(message, flush=True)
@@ -178,7 +208,9 @@ def sync(args: argparse.Namespace) -> int:
     user = ensure_github_auth(args.non_interactive)
     out(f"[dev-automation] GitHub autenticado: {user}")
 
-    projects = active_projects(args.projects_file)
+    projects_file = resolve_projects_file(args.projects_file)
+    out(f"[dev-automation] Projetos: {projects_file}")
+    projects = active_projects(projects_file)
     mapping = repository_map(args.repositories_file)
     project_set = set(projects)
     roots = [project for project in projects if parent_project(project, project_set) is None]
@@ -259,10 +291,10 @@ def sync(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="dev-automation",
-        description="Prepara /home/daniel/Code a partir de config/auto-code-manager.projects.",
+        description="Prepara /home/daniel/Code usando config/projects/<machine-id>.projects.",
     )
     p.add_argument("--code-root", type=Path, default=DEFAULT_CODE_ROOT)
-    p.add_argument("--projects-file", type=Path, default=DEFAULT_PROJECTS_FILE)
+    p.add_argument("--projects-file", type=Path, default=None, help="override explícito; por padrão usa config/projects/<machine-id>.projects")
     p.add_argument("--repositories-file", type=Path, default=DEFAULT_REPOSITORIES_FILE)
     p.add_argument("--dry-run", action="store_true", help="mostra o que faria sem clonar/atualizar")
     p.add_argument("--non-interactive", action="store_true", help="falha em vez de abrir gh auth login")

@@ -70,8 +70,7 @@ ZIPs locais: cada projeto normal configurado é monitorado por `inotify`; após 
 A lista ativa é específica por computador: `config/projects/<machine-id>.projects`,
 onde `<machine-id>` vem automaticamente de `/etc/machine-id`. Na primeira execução
 real do `dev-gitsetup`, o arquivo da máquina é criado a partir de
-`config/projects/default.projects`. `config/auto-code-manager.projects` fica apenas
-como compatibilidade legada. Nenhum `apps.zip`, `orbital.zip`, `Code.zip` ou outro
+`config/projects/default.projects`. O `default.projects` é apenas o modelo para criar um arquivo novo de máquina; não é compatibilidade com formato antigo. Nenhum `apps.zip`, `orbital.zip`, `Code.zip` ou outro
 ZIP de pasta é inferido automaticamente.
 
 Uma entrada normal representa um projeto real:
@@ -162,7 +161,7 @@ dos projetos configurados. Para atualizar sem iniciar o monitor:
 dev-manager commands
 ```
 
-Os mesmos projetos ativos (linhas descomentadas de `config/auto-code-manager.projects`)
+Os mesmos projetos ativos (linhas descomentadas do `config/projects/<machine-id>.projects` ativo)
 podem ser executados em sequência pelos comandos gerais. Cada comando ignora projetos
 sem o respectivo `deploy/<modo>/setup.sh`, preserva a ordem do arquivo e interrompe na
 primeira falha:
@@ -193,7 +192,7 @@ manter em segundo plano.
 ### `desktops`
 
 Sincroniza os desktops virtuais do Windows com os projetos ativos de
-`config/auto-code-manager.projects`. O Desktop 1 é sempre preservado para uso
+`config/projects/<machine-id>.projects`. O Desktop 1 é sempre preservado para uso
 pessoal. A partir do Desktop 2, cada projeto ativo recebe um desktop na mesma
 ordem do arquivo. Linhas comentadas com `#` são ignoradas.
 
@@ -223,7 +222,7 @@ O mesmo pode ser executado pelo comando geral:
 dev-manager desktops
 ```
 
-A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-manager.projects`. Desktops extras existentes não são removidos automaticamente.
+A ordem e os nomes dos projetos vêm apenas do `config/projects/<machine-id>.projects` ativo. Desktops extras existentes não são removidos automaticamente.
 
 ### `terminals`
 
@@ -279,7 +278,7 @@ chromes
 ### `phpstorm-dev`
 
 Abre somente `/home/daniel/Code/bots/dev-automation` no PhpStorm. O comando
-`phpstorms` também inclui esse projeto quando ele estiver ativo em `config/auto-code-manager.projects`.
+`phpstorms` também inclui esse projeto quando ele estiver ativo no `config/projects/<machine-id>.projects`.
 
 ```bash
 phpstorm-dev

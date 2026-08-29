@@ -10,11 +10,11 @@ from datetime import datetime
 from typing import Callable
 
 from .ai import ReplyGenerator
-from .config import Account, Settings
-from .message import parse, should_reply
-from .ses import SesSender
-from .sound import notify
-from .store import Store
+from config import Account, Settings
+from message import parse, should_reply
+from ses import SesSender
+from sound import notify
+from store import Store
 
 
 @dataclass

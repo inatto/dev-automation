@@ -37,7 +37,7 @@ dev-manager help         # ajuda
 Ao iniciar, o `dev-manager` chama `deploy/local/install-commands.sh`. Esse
 script atualiza os comandos fixos, incluindo `oracle-monitor`, e chama
 `install-project-commands.sh`, que
-recria os comandos dos projetos listados em `config/auto-code-manager.projects`.
+recria os comandos dos projetos listados no `config/projects/<machine-id>.projects` ativo.
 
 Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 
@@ -78,11 +78,11 @@ substituição de ZIP.
 
 Quando toda a rodada de backups configurados termina com sucesso, o monitor pode
 tocar `C:\\Windows\\Media\\ding.wav` uma única vez. `Code.zip` só participa
-da rodada quando estiver explicitamente listado em `auto-code-manager.projects`.
+da rodada quando estiver explicitamente listado no arquivo `.projects` ativo da máquina.
 
 ## Projetos e agregadores explícitos
 
-O arquivo `config/auto-code-manager.projects` aceita caminhos relativos a
+O arquivo `config/projects/<machine-id>.projects` aceita caminhos relativos a
 `/home/daniel/Code` e é a única fonte da verdade para backup.
 
 - `bots/dev-automation` é um projeto e gera `dev-automation.zip`;

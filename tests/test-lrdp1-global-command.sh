@@ -16,7 +16,7 @@ for name in lrdp1 lrdp2; do
   [[ -x "$ROOT/apps/lrdp/$name" ]]
 done
 
-! grep -qxF 'bots/lrdp' "$ROOT/config/auto-code-manager.projects"
+! grep -qxF 'bots/lrdp' "$ROOT/config/projects/default.projects"
 
 HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" \
   "$ROOT/deploy/local/install-commands.sh" >/dev/null

@@ -51,7 +51,7 @@ cat > "$DEST/apps/api/config/local/app.env.external" <<'ENV'
 PUBLIC_API_URL=/api-antiga
 ENV
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/sample-app
 PROJECTS
 cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'SAFE_IGNORE'

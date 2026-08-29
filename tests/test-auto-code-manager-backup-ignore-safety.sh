@@ -10,7 +10,7 @@ CODE_ROOT="$TMP/Code"
 cp -a -- "$ROOT" "$TEST_PROJECT"
 mkdir -p "$CODE_ROOT/orgs/sample-app"
 printf 'data\n' > "$CODE_ROOT/orgs/sample-app/file.txt"
-printf 'orgs/sample-app\n' > "$TEST_PROJECT/config/auto-code-manager.projects"
+printf 'orgs/sample-app\n' > "$TEST_PROJECT/config/projects/default.projects"
 
 # Ausente: deve bloquear e não recriar vazio.
 rm -f "$TEST_PROJECT/config/auto-code-manager.ignore-zip"

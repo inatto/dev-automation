@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import imaplib
 import ssl
-from .config import Account, Settings
+from config import Account, Settings
 
 
 class MailboxClient:

@@ -50,7 +50,7 @@ printf 'rom qualquer\n' > "$TEMP_ROOT/unrelated.txt"
   zip -q "$WORKER_FROM_DIR/The Goonies (1986) Konami [MSX].zip" unrelated.txt
 )
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha-app
 orgs/beta-app
 PROJECTS

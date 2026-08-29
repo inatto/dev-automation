@@ -4,10 +4,10 @@ import argparse
 import json
 import sys
 
-from .config import load_settings
-from .monitor import Monitor
-from .store import Store
-from .tui import run as run_tui
+from config import load_settings
+from monitor import Monitor
+from store import Store
+from tui import run as run_tui
 
 
 def doctor(settings) -> int:

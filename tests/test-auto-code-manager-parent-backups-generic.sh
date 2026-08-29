@@ -32,7 +32,7 @@ printf 'worker\n' > "$CODE_ROOT/orgs/acme/worker/app.txt"
 printf 'nao incluir\n' > "$CODE_ROOT/orgs/acme/platform/README-platform.txt"
 printf 'nao incluir\n' > "$CODE_ROOT/orgs/acme/README-acme.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/acme/platform.zip
 orgs/acme.zip
 Code.zip

@@ -24,7 +24,7 @@ mkdir -p "$P" "$DL" "$DW" "$S"
 touch "$S/dev-manager.sound-disabled"
 printf 'old\n' > "$P/app.txt"
 
-cat > "$M/config/auto-code-manager.projects" <<'CFG'
+cat > "$M/config/projects/default.projects" <<'CFG'
 orgs/alpha-app
 CFG
 cat > "$M/config/auto-code-manager.ignore-zip" <<'CFG'
@@ -50,7 +50,7 @@ CFG
 
 run(){
   HOME="$H" WSL_DISTRO_NAME=Ubuntu DOWNLOADS_DIR="$DL" WINDOWS_DOWNLOADS_DIR="$DW" \
-    CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/auto-code-manager.projects" AUTO_CODE_TUI=off \
+    CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" AUTO_CODE_TUI=off \
     "$M/scripts/auto-code-manager.sh" "$@"
 }
 
@@ -72,7 +72,7 @@ run --import-downloads-once >/dev/null
 # e detecta a alteração por varredura rasa, simulando arquivo criado pelo Chrome.
 LOG="$T/live.log"
 HOME="$H" WSL_DISTRO_NAME=Ubuntu DOWNLOADS_DIR="$DL" WINDOWS_DOWNLOADS_DIR="$DW" \
-  CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/auto-code-manager.projects" AUTO_CODE_TUI=off \
+  CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" AUTO_CODE_TUI=off \
   "$M/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 for _ in $(seq 1 150); do

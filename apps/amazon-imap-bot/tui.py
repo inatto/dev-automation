@@ -5,9 +5,9 @@ import queue
 import threading
 import time
 
-from .config import Settings
-from .monitor import Monitor
-from .store import Store
+from config import Settings
+from monitor import Monitor
+from store import Store
 
 
 def run(settings: Settings) -> int:

@@ -21,7 +21,7 @@ Uso:
   chatgpts --help   Mostra esta ajuda
 
 Regra:
-  usa somente projetos reais de auto-code-manager.projects; agregadores *.zip não recebem janela
+  usa somente projetos reais do arquivo `.projects` da máquina; agregadores *.zip não recebem janela
 HELP
 }
 

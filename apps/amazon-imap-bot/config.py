@@ -56,7 +56,7 @@ def _bool(value: str, default: bool) -> bool:
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[2]
 
 
 def load_settings() -> Settings:

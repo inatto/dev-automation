@@ -34,7 +34,7 @@ printf 'child-v1\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/app.txt"
 printf 'ignored-v1\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules/pkg/cache.txt"
 printf 'other-v1\n' > "$CODE_ROOT/orgs/other/app.txt"
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 bots/dev-automation
 bots/dev-automation/apps/exec-agent
 bots/dev-automation/apps.zip
@@ -67,7 +67,7 @@ AUTO_CODE_MONITOR_MODE=inotify
 ENV
 
 DOWNLOADS_DIR="$DOWNLOADS" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$TEMP/state" \
-  DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/auto-code-manager.projects" \
+  DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 

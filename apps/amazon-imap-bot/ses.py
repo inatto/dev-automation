@@ -7,8 +7,8 @@ from email.utils import formataddr, formatdate, make_msgid
 import boto3
 from botocore.config import Config
 
-from .config import Account
-from .message import Incoming
+from config import Account
+from message import Incoming
 
 
 class SesSender:

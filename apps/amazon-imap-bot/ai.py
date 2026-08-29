@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .message import Incoming
+from message import Incoming
 
 
 SYSTEM = """Você redige APENAS uma confirmação curta de recebimento de e-mail para uma central de suporte.

@@ -22,7 +22,7 @@ Uso:
   phpstorms --help   Mostra esta ajuda
 
 Regra:
-  abre somente projetos reais de auto-code-manager.projects; agregadores *.zip não abrem IDE
+  abre somente projetos reais do arquivo `.projects` da máquina; agregadores *.zip não abrem IDE
 EOF_HELP
 }
 

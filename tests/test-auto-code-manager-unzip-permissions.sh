@@ -20,7 +20,7 @@ mkdir -p "$P/deploy/local" "$D" "$S" "$PKG/deploy/local"
 printf 'old\n' > "$P/deploy/local/setup.sh"
 chmod 755 "$P/deploy/local/setup.sh"
 
-cat > "$M/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$M/config/projects/default.projects" <<'PROJECTS'
 orgs/alpha-app
 PROJECTS
 printf '.git/\n.venv/\nvenv/\nnode_modules/\n' > "$M/config/auto-code-manager.ignore-zip"

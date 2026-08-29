@@ -36,7 +36,7 @@ printf 'arquivo antigo preservado\n' > "$CODE_ROOT/orgs/orbital/orbital-app/old.
   zip -q -0 "$PARENT_ZIP" ./*.zip
 )
 
-cat > "$TEST_PROJECT/config/auto-code-manager.projects" <<'PROJECTS'
+cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
 orgs/orbital.zip
 orgs/orbital/orbital-app
 orgs/orbital/orbital-assets
