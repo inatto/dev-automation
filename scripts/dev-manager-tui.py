@@ -294,6 +294,7 @@ class Dashboard:
         self.mode = "INOTIFY"
         self.output_dir = os.environ.get("CODE_ROOT", "/home/daniel/Code")
         self.downloads = str(Path.home() / "Downloads")
+        self.projects_file = os.environ.get("DEV_MANAGER_PROJECTS_FILE", "")
         self.inotify_instances = 0
         self.inotify_watches = 0
         self.max_instances = 0
@@ -560,6 +561,8 @@ class Dashboard:
             self.status_detail = clean
         elif clean.startswith("Downloads:"):
             self.downloads = clean.split(":", 1)[1].strip()
+        elif clean.startswith("PROJECTS:"):
+            self.projects_file = clean.split(":", 1)[1].strip()
         elif clean.startswith("ZIP_DIR:"):
             self.output_dir = clean.split(":", 1)[1].strip()
         elif clean.startswith("Modo:"):
@@ -767,7 +770,7 @@ class Dashboard:
 
         margin = 1
         width = cols - 2
-        header_h = 7
+        header_h = 9
         action_h = 4
         footer_h = 1
         action_top = margin + header_h
@@ -901,6 +904,12 @@ class Dashboard:
             )
             safe_add(header, 4, col2_x, f"DOWNLOADS ZIPs: {self.download_zip_count}", self.colors["base"], col2_w)
             safe_add(header, 5, col1_x, f"DOWNLOADS: {self.downloads} · ZIPs CODE: {self.zip_count}", self.colors["ok"], col1_w + col2_w)
+
+            projects_text = f"PROJECTS: {self.projects_file or 'aguardando resolução...'}"
+            projects_width = max(1, width - 4)
+            safe_add(header, 6, 2, projects_text[:projects_width], self.colors["highlight"], projects_width)
+            if len(projects_text) > projects_width:
+                safe_add(header, 7, 2, fit(projects_text[projects_width:], projects_width), self.colors["highlight"], projects_width)
 
             mem_percent = (100.0 * self.memory_used / self.memory_total) if self.memory_total else 0.0
             disk_percent = (100.0 * self.disk_used / self.disk_total) if self.disk_total else 0.0

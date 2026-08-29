@@ -300,6 +300,7 @@ import_downloads() {
   local -a downloads=()
   local -A attempted=()
 
+  clean_download_zone_identifiers
   mapfile -t downloads < <(download_inbox_existing_dirs)
 
   if [ "${#downloads[@]}" -eq 0 ]; then

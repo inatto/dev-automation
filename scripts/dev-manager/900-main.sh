@@ -162,12 +162,13 @@ if [ "$TUI_ACTIVE" = true ]; then
   TUI_LAST_ACTION="Auto Code Manager $SCRIPT_VERSION"
   tui_refresh
   LOG_CONTEXT=wait log "Auto Code Manager $SCRIPT_VERSION iniciado."
-  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · Downloads=$(download_inbox_summary) · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
+  LOG_CONTEXT=wait log "CODE_ROOT=$CODE_ROOT · PROJECTS=$PROJECTS_FILE · Downloads=$(download_inbox_summary) · ZIP_DIR=$(archive_output_dir) · modo=${AUTO_CODE_MONITOR_MODE:-inotify}."
 else
   line
   echo "Auto Code Manager - $SCRIPT_VERSION"
   line
   echo "CODE_ROOT:     $CODE_ROOT"
+  echo "PROJECTS:      $PROJECTS_FILE"
   echo "Downloads:     $(download_inbox_summary)"
   echo "ZIP_DIR:       $(archive_output_dir)"
   echo "ENV:           $ENV_FILE"
@@ -204,7 +205,7 @@ else
 fi
 
 if is_wsl_runtime; then
-  run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento." clean_zone || true
+  run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento no Linux ou polling no Downloads do Windows." clean_zone || true
 fi
 run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
 run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia os DDLs por arquivo: SQL novo vira baseline sem ZIP; alteração posterior gera 1 ZIP com 1 SQL; na raiz Code fica somente o snapshot mais recente." reconcile_configured_sql_snapshots || true
@@ -279,7 +280,8 @@ while true; do
 
   # WSL2 pode não emitir inotify quando o Chrome/Explorer do Windows grava em
   # /mnt/c. Mantemos o loop bloqueante, mas acordamos no máximo a cada 1s apenas
-  # para uma varredura rasa do Downloads do Windows.
+  # para uma varredura rasa do Downloads do Windows: remove Zone.Identifier e
+  # verifica se chegou algum ZIP configurado.
   if windows_download_polling_enabled; then
     if [ -z "$local_timeout" ] || [ "$local_timeout" -gt 1 ]; then
       local_timeout=1
@@ -298,9 +300,12 @@ while true; do
           taskbar_status error "Watcher inotify falhou"
           exit 1
         fi
-      elif windows_configured_download_zip_exists; then
-        if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido no Downloads do Windows; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
-          LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
+      else
+        clean_windows_download_zone_identifiers
+        if windows_configured_download_zip_exists; then
+          if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido no Downloads do Windows; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
+            LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
+          fi
         fi
       fi
     fi

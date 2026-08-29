@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
 # Contexto: limpeza Zone.Identifier e filtros rsync de backup
 
+delete_zone_identifiers_in_dir() {
+  local dir="$1" mode="${2:-recursive}"
+  [ -d "$dir" ] || return 0
+
+  if [ "$mode" = "shallow" ]; then
+    find "$dir" -maxdepth 1 -type f -name "*:Zone.Identifier" -delete 2>/dev/null || true
+  else
+    find "$dir" -type f -name "*:Zone.Identifier" -delete 2>/dev/null || true
+  fi
+}
+
 clean_zone() {
+  local dir
   # Só existe como compatibilidade para projetos manipulados por Windows/WSL.
   # Linux nativo não faz varredura inútil atrás de metadata que não cria.
   is_wsl_runtime || return 0
 
   taskbar_status clean "Zone.Identifier"
-  LOG_CONTEXT=zone log "Limpando resíduos Zone.Identifier do ambiente WSL em $CODE_ROOT"
+  LOG_CONTEXT=zone log "Limpando resíduos Zone.Identifier das pastas de trabalho conhecidas pelo Dev Manager."
 
-  find "$CODE_ROOT" \
-    -type f \
-    -name "*:Zone.Identifier" \
-    -delete 2>/dev/null || true
+  delete_zone_identifiers_in_dir "$CODE_ROOT" recursive
+  while IFS= read -r dir || [ -n "$dir" ]; do
+    [ -n "$dir" ] || continue
+    delete_zone_identifiers_in_dir "$dir" recursive
+  done < <(download_inbox_existing_dirs)
 }
 
 make_rsync_filter() {

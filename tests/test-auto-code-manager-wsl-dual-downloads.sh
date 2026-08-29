@@ -54,6 +54,14 @@ run(){
     "$M/scripts/auto-code-manager.sh" "$@"
 }
 
+# Resíduos Zone.Identifier nas caixas conhecidas devem ser removidos também em
+# execução one-shot, inclusive no Downloads montado do Windows.
+printf 'zone-linux\n' > "$DL/linux.zip:Zone.Identifier"
+printf 'zone-windows\n' > "$DW/windows.zip:Zone.Identifier"
+run --import-downloads-once >/dev/null
+[ ! -e "$DL/linux.zip:Zone.Identifier" ]
+[ ! -e "$DW/windows.zip:Zone.Identifier" ]
+
 # Uma única drenagem deve enxergar ZIPs nas duas caixas.
 mkdir -p "$T/pkg-linux" "$T/pkg-win"
 printf 'linux\n' > "$T/pkg-linux/app.txt"
@@ -82,6 +90,15 @@ done
 grep -Fq 'IDLE event-driven' "$LOG"
 grep -Fq 'por varredura rasa de 1s' "$LOG"
 
+# No /mnt/c o Windows pode criar o sidecar sem gerar inotify no WSL. O polling
+# de 1s precisa removê-lo mesmo quando nenhum ZIP de projeto chegou.
+printf 'zone-live\n' > "$DW/browser-download.zip:Zone.Identifier"
+for _ in $(seq 1 50); do
+  [ ! -e "$DW/browser-download.zip:Zone.Identifier" ] && break
+  sleep .1
+done
+[ ! -e "$DW/browser-download.zip:Zone.Identifier" ]
+
 rm -rf "$T/pkg-live"; mkdir -p "$T/pkg-live"
 printf 'windows-live\n' > "$T/pkg-live/app.txt"
 (cd "$T/pkg-live" && zip -qr "$T/alpha-app--windows-live.zip" .)
@@ -100,4 +117,4 @@ kill -KILL "$PID" 2>/dev/null || true
 wait "$PID" 2>/dev/null || true
 PID=""
 
-printf 'OK: WSL monitora/importa ~/Downloads e Downloads do Windows; pasta Windows funciona sem depender de inotify\n'
+printf 'OK: WSL monitora/importa Downloads Linux/Windows e limpa Zone.Identifier no /mnt/c sem depender de inotify\n'

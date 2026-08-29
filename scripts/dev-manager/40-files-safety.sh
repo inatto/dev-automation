@@ -45,6 +45,25 @@ download_inbox_summary() {
   printf '%s\n' "$summary"
 }
 
+clean_download_zone_identifiers() {
+  local dir
+  is_wsl_runtime || return 0
+
+  while IFS= read -r dir || [ -n "$dir" ]; do
+    [ -n "$dir" ] || continue
+    [ -d "$dir" ] || continue
+    find "$dir" -maxdepth 1 -type f -name "*:Zone.Identifier" -delete 2>/dev/null || true
+  done < <(download_inbox_existing_dirs)
+}
+
+clean_windows_download_zone_identifiers() {
+  local windows
+  windows_download_polling_enabled || return 0
+  windows="$(windows_download_inbox_dir)"
+  [ -d "$windows" ] || return 0
+  find "$windows" -maxdepth 1 -type f -name "*:Zone.Identifier" -delete 2>/dev/null || true
+}
+
 ensure_download_inbox() {
   local primary dir parent
   primary="$(download_inbox_dir)"
