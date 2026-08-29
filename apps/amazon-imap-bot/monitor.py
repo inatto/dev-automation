@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable
 
-from .ai import ReplyGenerator
+from ai import ReplyGenerator
 from config import Account, Settings
 from message import parse, should_reply
 from ses import SesSender
