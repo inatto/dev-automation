@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import curses
+import ipaddress
 import json
 import locale
 import os
@@ -235,6 +236,44 @@ def save_state(profile: RdpProfile, state: RdpState) -> None:
             tmp.unlink()
         except OSError:
             pass
+
+
+def validate_target_ip(value: str) -> str:
+    value = value.strip()
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise ValueError("IP IPv4 inválido") from exc
+    if address.version != 4:
+        raise ValueError("use um endereço IPv4")
+    return str(address)
+
+
+def update_profile_target_file(profile: RdpProfile, target: str) -> None:
+    target = validate_target_ip(target)
+    path = Path(profile.script)
+    try:
+        original = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise OSError(f"não foi possível ler {path}: {exc}") from exc
+
+    pattern = re.compile(r'(?m)^(?P<prefix>[ \t]*LRDP_TARGET=)(?P<value>[^\r\n]*)(?P<ending>\r?)$')
+    matches = list(pattern.finditer(original))
+    if len(matches) != 1:
+        raise ValueError(f"esperado exatamente um LRDP_TARGET em {path}")
+
+    replacement = rf'\g<prefix>"{target}"\g<ending>'
+    updated = pattern.sub(replacement, original, count=1)
+    if updated == original:
+        return
+
+    try:
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            handle.write(updated)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise OSError(f"não foi possível gravar {path}: {exc}") from exc
 
 
 def parse_monitor_output(text: str) -> List[Monitor]:
@@ -530,6 +569,7 @@ class LrdpTui:
         self.previous_mode = "main"
         self.config_field = 0
         self.edit_state: Optional[RdpState] = None
+        self.edit_target = ""
         self.monitor_candidate = ""
         self.message = "Pronto. Enter conecta usando a configuração salva."
         self.message_until = 0.0
@@ -657,7 +697,7 @@ class LrdpTui:
 
         footer = " ENTER Conectar   F2 Configurar   F3 Monitores   F4 Rede   F5 Atualizar   F1 Ajuda   Q Sair "
         if self.mode == "config":
-            footer = " ↑↓ Campo   ←→/ENTER Alterar   F10/S Salvar   ESC Cancelar   F5 Atualizar monitores "
+            footer = " ↑↓ Campo   ENTER Editar IP/alterar   ←→ Alterar opções   F10/S Salvar   ESC Cancelar "
         elif self.mode == "monitors":
             footer = " ←→/↑↓ Escolher monitor   ENTER Definir principal   F5 Atualizar   ESC/F3 Voltar "
         elif self.mode == "network":
@@ -905,19 +945,20 @@ class LrdpTui:
         monitor_win = self.stdscr.derwin(content_h, w - left_w, 2, left_w)
         self.prep_box(fields_win, f"F2 CONFIGURAÇÃO :: {profile.label}")
         fh, fw = fields_win.getmaxyx()
-        safe_add(fields_win, 2, 2, f"Destino fixo: {profile.target}:{profile.port}", self.attrs["bold"])
-        safe_add(fields_win, 3, 2, "Alterações só são persistidas com F10/S.", self.attrs["muted"])
+        safe_add(fields_win, 2, 2, f"Arquivo: {Path(profile.script).name}  |  porta: {profile.port}", self.attrs["bold"])
+        safe_add(fields_win, 3, 2, "F10/S salva opções e grava o IP no arquivo LRDP_TARGET.", self.attrs["muted"])
         values = self.config_values(profile, self.edit_state)
         explanations = [
+            "ENTER edita. Ao salvar, altera LRDP_TARGET no arquivo deste RDP.",
             "Credencial usada na autenticação. A senha fica oculta.",
             "Onde o som do Windows remoto será reproduzido.",
             "Liga/desliga o redirecionamento do microfone do Ubuntu.",
             "Primeiro ID em /monitors; vira o principal da sessão RDP.",
         ]
-        labels = ["Login", "Áudio", "Microfone", "Monitor principal"]
-        start = 6
+        labels = ["IP de destino", "Login", "Áudio", "Microfone", "Monitor principal"]
+        start = 5
         for idx, (label, value) in enumerate(zip(labels, values)):
-            y = start + idx * 4
+            y = start + idx * 3
             selected = idx == self.config_field
             attr = self.attrs["selected"] if selected else self.attrs["border"]
             if selected:
@@ -927,20 +968,22 @@ class LrdpTui:
                 except curses.error:
                     pass
             safe_add(fields_win, y, 3, f"{label}:", attr | curses.A_BOLD, fw - 6)
-            arrows = f"<  {value}  >"
-            safe_add(fields_win, y + 1, 5, fit(arrows, fw - 10), attr, fw - 10)
+            display_value = f"[ ENTER editar ]  {value}" if idx == 0 else f"<  {value}  >"
+            safe_add(fields_win, y + 1, 5, fit(display_value, fw - 10), attr, fw - 10)
             safe_add(fields_win, y + 2, 5, fit(explanations[idx], fw - 10), self.attrs["muted"], fw - 10)
-        fixed_y = min(fh - 7, start + len(labels) * 4 + 1)
-        safe_add(fields_win, fixed_y, 2, "PARÂMETROS FIXOS", self.attrs["accent"])
-        fixed = ["/multimon = ativo", "/cert:ignore = ativo", f"porta RDP = {profile.port}"]
-        for i, line in enumerate(fixed):
-            safe_add(fields_win, fixed_y + 1 + i, 4, line, self.attrs["muted"])
+        fixed_y = start + len(labels) * 3 + 1
+        if fixed_y + 4 < fh:
+            safe_add(fields_win, fixed_y, 2, "PARÂMETROS FIXOS", self.attrs["accent"])
+            fixed = ["/multimon = ativo", "/cert:ignore = ativo", f"porta RDP = {profile.port}"]
+            for i, line in enumerate(fixed):
+                safe_add(fields_win, fixed_y + 1 + i, 4, line, self.attrs["muted"])
         self.draw_monitor_box(monitor_win, self.edit_state, "PRÉVIA / TOPOLOGIA")
 
     def config_values(self, profile: RdpProfile, state: RdpState) -> List[str]:
         login = selected_login(profile, state)
         primary = effective_primary(state, self.monitors) or "automático"
         return [
+            self.edit_target or profile.target,
             f"{login.label} ({login.username})",
             AUDIO_LABELS.get(state.audio_mode, state.audio_mode),
             "REDIRECIONADO" if state.microphone == "yes" else "desligado",
@@ -1075,11 +1118,11 @@ class LrdpTui:
             ("Enter", "abre o RDP selecionado usando a última configuração; não pergunta tudo de novo"),
             ("↑ / ↓", "navega entre RDP 1, 2, 3... descobertos automaticamente em apps/lrdp"),
             ("1..9", "seleciona rapidamente um RDP pelo número"),
-            ("F2", "BIOS de configuração: login, áudio, microfone e monitor principal"),
+            ("F2", "configura IP de destino, login, áudio, microfone e monitor principal"),
             ("F3", "mapa de monitores com posição/tamanho; Enter define o principal do RDP"),
             ("F4", "diagnóstico Ubuntu/rede: IP local, interface, gateway, destino e sessão ativa"),
             ("F5", "recarrega monitores/RDPs e força novo teste de rede"),
-            ("F10/S", "salva as alterações dentro da tela F2"),
+            ("F10/S", "salva F2; se o IP mudou, grava LRDP_TARGET no arquivo lrdpN"),
             ("Mouse", "clique seleciona um RDP; duplo clique conecta quando o terminal suporta"),
             ("Q", "sai somente da TUI; sessões RDP já abertas continuam rodando"),
         ]
@@ -1099,6 +1142,7 @@ class LrdpTui:
             self.set_message("Nenhum RDP para configurar.")
             return
         self.edit_state = replace(self.state(profile))
+        self.edit_target = profile.target
         if not self.edit_state.primary_monitor:
             self.edit_state.primary_monitor = effective_primary(self.edit_state, self.monitors)
         self.config_field = 0
@@ -1108,30 +1152,107 @@ class LrdpTui:
         profile = self.profile
         if not profile or self.edit_state is None:
             return
-        if self.config_field == 0 and profile.logins:
+        if self.config_field == 1 and profile.logins:
             count = len(profile.logins)
             self.edit_state.login_index = ((self.edit_state.login_index - 1 + delta) % count) + 1
-        elif self.config_field == 1:
+        elif self.config_field == 2:
             index = AUDIO_MODES.index(self.edit_state.audio_mode) if self.edit_state.audio_mode in AUDIO_MODES else 1
             self.edit_state.audio_mode = AUDIO_MODES[(index + delta) % len(AUDIO_MODES)]
-        elif self.config_field == 2:
+        elif self.config_field == 3:
             self.edit_state.microphone = "no" if self.edit_state.microphone == "yes" else "yes"
-        elif self.config_field == 3 and self.monitors:
+        elif self.config_field == 4 and self.monitors:
             ordered = physical_monitor_order(self.monitors)
             ids = [str(m.id) for m in ordered]
             current = effective_primary(self.edit_state, self.monitors)
             index = ids.index(current) if current in ids else 0
             self.edit_state.primary_monitor = ids[(index + delta) % len(ids)]
 
+    def edit_target_ip(self) -> None:
+        profile = self.profile
+        if not profile or self.edit_state is None:
+            return
+        h, w = self.stdscr.getmaxyx()
+        box_w = min(66, max(44, w - 12))
+        box_h = 9
+        y = max(1, (h - box_h) // 2)
+        x = max(1, (w - box_w) // 2)
+        win = self.stdscr.derwin(box_h, box_w, y, x)
+        value = self.edit_target or profile.target
+        cursor = len(value)
+        try:
+            curses.curs_set(1)
+        except curses.error:
+            pass
+        try:
+            while True:
+                self.prep_box(win, f"EDITAR IP :: {profile.label}")
+                safe_add(win, 2, 3, "IPv4 do computador remoto:", self.attrs["bold"], box_w - 6)
+                field_w = max(8, box_w - 8)
+                shown = fit(value, field_w)
+                safe_add(win, 4, 4, " " * field_w, self.attrs["selected"], field_w)
+                safe_add(win, 4, 4, shown, self.attrs["selected"], field_w)
+                safe_add(win, 6, 3, "ENTER confirma apenas na edição; F10/S grava no arquivo. ESC cancela.", self.attrs["muted"], box_w - 6)
+                try:
+                    win.move(4, min(4 + cursor, 4 + field_w - 1))
+                except curses.error:
+                    pass
+                win.refresh()
+                key = win.getch()
+                if key in (27,):
+                    return
+                if key in (10, 13, curses.KEY_ENTER):
+                    try:
+                        self.edit_target = validate_target_ip(value)
+                    except ValueError as exc:
+                        self.set_message(f"IP não alterado: {exc}.", 6)
+                        return
+                    self.set_message(f"IP preparado: {self.edit_target}. Pressione F10/S para gravar.")
+                    return
+                if key in (curses.KEY_LEFT,):
+                    cursor = max(0, cursor - 1)
+                elif key in (curses.KEY_RIGHT,):
+                    cursor = min(len(value), cursor + 1)
+                elif key == curses.KEY_HOME:
+                    cursor = 0
+                elif key == curses.KEY_END:
+                    cursor = len(value)
+                elif key in (curses.KEY_BACKSPACE, 127, 8):
+                    if cursor > 0:
+                        value = value[: cursor - 1] + value[cursor:]
+                        cursor -= 1
+                elif key == curses.KEY_DC:
+                    if cursor < len(value):
+                        value = value[:cursor] + value[cursor + 1 :]
+                elif ord("0") <= key <= ord("9") or key == ord("."):
+                    if len(value) < 15:
+                        value = value[:cursor] + chr(key) + value[cursor:]
+                        cursor += 1
+        finally:
+            try:
+                curses.curs_set(0)
+            except curses.error:
+                pass
+
     def save_config(self) -> None:
         profile = self.profile
         if not profile or self.edit_state is None:
             return
+        try:
+            target = validate_target_ip(self.edit_target or profile.target)
+            if target != profile.target:
+                update_profile_target_file(profile, target)
+                profile.target = target
+        except (OSError, ValueError) as exc:
+            self.set_message(f"ERRO ao salvar IP de {profile.label}: {exc}", 8)
+            return
         save_state(profile, self.edit_state)
         self.states[profile.name] = replace(self.edit_state)
+        self.worker.update_profiles(self.profiles)
+        self.worker.refresh_now()
         self.mode = "main"
         self.edit_state = None
-        self.set_message(f"Configuração de {profile.label} salva.")
+        self.edit_target = ""
+        self.set_message(f"Configuração de {profile.label} salva; IP no arquivo: {profile.target}.")
 
     def begin_monitors(self) -> None:
         profile = self.profile
@@ -1265,11 +1386,14 @@ class LrdpTui:
             if key == esc:
                 self.mode = "main"
                 self.edit_state = None
+                self.edit_target = ""
                 self.set_message("Alterações descartadas.")
             elif key in (curses.KEY_UP, ord("k")):
-                self.config_field = (self.config_field - 1) % 4
+                self.config_field = (self.config_field - 1) % 5
             elif key in (curses.KEY_DOWN, ord("j"), 9):
-                self.config_field = (self.config_field + 1) % 4
+                self.config_field = (self.config_field + 1) % 5
+            elif self.config_field == 0 and key in (10, 13, curses.KEY_ENTER, ord(" ")):
+                self.edit_target_ip()
             elif key in (curses.KEY_LEFT, ord("h")):
                 self.cycle_config(-1)
             elif key in (curses.KEY_RIGHT, ord("l"), 10, 13, curses.KEY_ENTER, ord(" ")):

@@ -14,14 +14,21 @@ PROJECT_SSH_RUNNER="$PROJECT_ROOT/scripts/project-ssh.sh"
 PROJECT_ALL_RUNNER="$PROJECT_ROOT/scripts/project-all-command.sh"
 ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 VOICE_COMMANDS_SOURCE="$PROJECT_ROOT/apps/voice-commands/run.sh"
+GPT_CONSOLE_SOURCE="$PROJECT_ROOT/apps/gpt-console/run.sh"
+AMAZON_IMAP_BOT_SOURCE="$PROJECT_ROOT/apps/amazon-imap-bot/run.sh"
+SCRIPT_DEV_AUTOMATION_SOURCE="$PROJECT_ROOT/apps/script-dev-automation/run.sh"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
 CHROMES_ALL_SOURCE="$PROJECT_ROOT/scripts/chromes-all.sh"
+CHROMES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/chromes-close.sh"
 FILES_SOURCE="$PROJECT_ROOT/scripts/files.sh"
 FILES_ALL_SOURCE="$PROJECT_ROOT/scripts/files-all.sh"
+FILES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/files-close.sh"
 TERMINALS_SOURCE="$PROJECT_ROOT/scripts/terminals.sh"
+TERMINALS_CLOSE_SOURCE="$PROJECT_ROOT/scripts/terminals-close.sh"
 CHATGPTS_SOURCE="$PROJECT_ROOT/scripts/chatgpts.sh"
 PHPSTORMS_SOURCE="$PROJECT_ROOT/scripts/phpstorms.sh"
 PYCHARMS_SOURCE="$PROJECT_ROOT/scripts/pycharms.sh"
+PYCHARMS_CLOSE_SOURCE="$PROJECT_ROOT/scripts/pycharms-close.sh"
 PHPSTORM_DEV_SOURCE="$PROJECT_ROOT/scripts/phpstorm-dev.sh"
 DEV_MANAGER_SOURCE="$PROJECT_ROOT/scripts/dev-manager.sh"
 DESKTOPS_SOURCE="$PROJECT_ROOT/scripts/desktops.sh"
@@ -103,14 +110,21 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$PROJECT_ALL_RUNNER" ]] || fail "executor geral de projetos não encontrado: $PROJECT_ALL_RUNNER"
 [[ -d "$ORACLE_MONITOR_DIR" ]] || fail "aplicação não encontrada: $ORACLE_MONITOR_DIR"
 [[ -f "$VOICE_COMMANDS_SOURCE" ]] || fail "aplicação não encontrada: $VOICE_COMMANDS_SOURCE"
+[[ -f "$GPT_CONSOLE_SOURCE" ]] || fail "aplicação não encontrada: $GPT_CONSOLE_SOURCE"
+[[ -f "$AMAZON_IMAP_BOT_SOURCE" ]] || fail "aplicação não encontrada: $AMAZON_IMAP_BOT_SOURCE"
+[[ -f "$SCRIPT_DEV_AUTOMATION_SOURCE" ]] || fail "aplicação não encontrada: $SCRIPT_DEV_AUTOMATION_SOURCE"
 [[ -f "$CHROMES_SOURCE" ]] || fail "script não encontrado: $CHROMES_SOURCE"
 [[ -f "$CHROMES_ALL_SOURCE" ]] || fail "script não encontrado: $CHROMES_ALL_SOURCE"
+[[ -f "$CHROMES_CLOSE_SOURCE" ]] || fail "script não encontrado: $CHROMES_CLOSE_SOURCE"
 [[ -f "$FILES_SOURCE" ]] || fail "script não encontrado: $FILES_SOURCE"
 [[ -f "$FILES_ALL_SOURCE" ]] || fail "script não encontrado: $FILES_ALL_SOURCE"
+[[ -f "$FILES_CLOSE_SOURCE" ]] || fail "script não encontrado: $FILES_CLOSE_SOURCE"
 [[ -f "$TERMINALS_SOURCE" ]] || fail "script não encontrado: $TERMINALS_SOURCE"
+[[ -f "$TERMINALS_CLOSE_SOURCE" ]] || fail "script não encontrado: $TERMINALS_CLOSE_SOURCE"
 [[ -f "$CHATGPTS_SOURCE" ]] || fail "script não encontrado: $CHATGPTS_SOURCE"
 [[ -f "$PHPSTORMS_SOURCE" ]] || fail "script não encontrado: $PHPSTORMS_SOURCE"
 [[ -f "$PYCHARMS_SOURCE" ]] || fail "script não encontrado: $PYCHARMS_SOURCE"
+[[ -f "$PYCHARMS_CLOSE_SOURCE" ]] || fail "script não encontrado: $PYCHARMS_CLOSE_SOURCE"
 [[ -f "$PHPSTORM_DEV_SOURCE" ]] || fail "script não encontrado: $PHPSTORM_DEV_SOURCE"
 [[ -f "$DEV_MANAGER_SOURCE" ]] || fail "script não encontrado: $DEV_MANAGER_SOURCE"
 [[ -f "$DESKTOPS_SOURCE" ]] || fail "script não encontrado: $DESKTOPS_SOURCE"
@@ -125,7 +139,7 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$VOICE_COMMANDS_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -153,16 +167,20 @@ EOF_WRAPPER
 chmod +x "$DEV_GITSETUP_TARGET"
 log "criado: dev-gitsetup -> $DEV_GITSETUP_SOURCE"
 
-for command_name in chromes chromes-all files files-all terminals chatgpts phpstorms pycharms phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb voice-commands; do
+for command_name in chromes chromes-all chromes-close files files-all files-close terminals terminals-close chatgpts phpstorms pycharms pycharms-close phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb voice-commands gpt-console amazon-imap-bot script-dev-automation; do
   case "$command_name" in
     chromes) source_file="$CHROMES_SOURCE" ;;
     chromes-all) source_file="$CHROMES_ALL_SOURCE" ;;
+    chromes-close) source_file="$CHROMES_CLOSE_SOURCE" ;;
     files) source_file="$FILES_SOURCE" ;;
     files-all) source_file="$FILES_ALL_SOURCE" ;;
+    files-close) source_file="$FILES_CLOSE_SOURCE" ;;
     terminals) source_file="$TERMINALS_SOURCE" ;;
+    terminals-close) source_file="$TERMINALS_CLOSE_SOURCE" ;;
     chatgpts) source_file="$CHATGPTS_SOURCE" ;;
     phpstorms) source_file="$PHPSTORMS_SOURCE" ;;
     pycharms) source_file="$PYCHARMS_SOURCE" ;;
+    pycharms-close) source_file="$PYCHARMS_CLOSE_SOURCE" ;;
     phpstorm-dev) source_file="$PHPSTORM_DEV_SOURCE" ;;
     dev-manager) source_file="$DEV_MANAGER_SOURCE" ;;
     desktops) source_file="$DESKTOPS_SOURCE" ;;
@@ -170,6 +188,9 @@ for command_name in chromes chromes-all files files-all terminals chatgpts phpst
     dev-status) source_file="$DEV_STATUS_SOURCE" ;;
     g512-rgb) source_file="$G512_RGB_SOURCE" ;;
     voice-commands) source_file="$VOICE_COMMANDS_SOURCE" ;;
+    gpt-console) source_file="$GPT_CONSOLE_SOURCE" ;;
+    amazon-imap-bot) source_file="$AMAZON_IMAP_BOT_SOURCE" ;;
+    script-dev-automation) source_file="$SCRIPT_DEV_AUTOMATION_SOURCE" ;;
   esac
   target_file="$TARGET_DIR/$command_name"
 
@@ -250,4 +271,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v files\n  command -v files-all\n  command -v terminals\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v oracle-monitor\n  command -v lrdp\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v chromes-close\n  command -v files\n  command -v files-all\n  command -v files-close\n  command -v terminals\n  command -v terminals-close\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v pycharms-close\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v gpt-console\n  command -v script-dev-automation\n  command -v oracle-monitor\n  command -v lrdp\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'

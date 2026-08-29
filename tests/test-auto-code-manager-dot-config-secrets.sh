@@ -9,6 +9,7 @@ mkdir -p "$P/.config/tools" "$P/apps/api/.config" "$D" "$S"
 cat > "$P/.config/tools/app.env" <<'ENV'
 PUBLIC_URL=/old
 API_TOKEN=real-dot-config-token
+OPENAI_ADMIN_KEY=real-openai-admin-key
 DATABASE_URL=postgresql://user:real-dot-config-password@localhost/db
 ENV
 cat > "$P/apps/api/.config/service.conf" <<'ENV'
@@ -30,6 +31,7 @@ run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" DEV_MANAGER_PROJECTS_FILE="$M
 run --backup-once >/dev/null 2>&1
 Z="$C/alpha-app.zip"
 unzip -p "$Z" .config/tools/app.env | grep -Fxq 'API_TOKEN=********'
+unzip -p "$Z" .config/tools/app.env | grep -Fxq 'OPENAI_ADMIN_KEY=********'
 unzip -p "$Z" .config/tools/app.env | grep -Fxq 'DATABASE_URL=postgresql://user:********@localhost/db'
 unzip -p "$Z" apps/api/.config/service.conf | grep -Fxq 'SERVICE_PASSWORD=********'
 [ "$(unzip -p "$Z" .config/tools/private.bin)" = '********' ]
@@ -40,6 +42,7 @@ PK="$T/pkg"; mkdir -p "$PK/.config/tools" "$PK/apps/api/.config"
 cat > "$PK/.config/tools/app.env" <<'ENV'
 PUBLIC_URL=/new
 API_TOKEN=***
+OPENAI_ADMIN_KEY=********
 DATABASE_URL=postgresql://user:***@db.internal/newdb
 NEW_FLAG=true
 ENV
@@ -53,6 +56,7 @@ run --import-downloads-once >/dev/null 2>&1
 
 grep -Fxq 'PUBLIC_URL=/new' "$P/.config/tools/app.env"
 grep -Fxq 'API_TOKEN=real-dot-config-token' "$P/.config/tools/app.env"
+grep -Fxq 'OPENAI_ADMIN_KEY=real-openai-admin-key' "$P/.config/tools/app.env"
 grep -Fxq 'DATABASE_URL=postgresql://user:real-dot-config-password@db.internal/newdb' "$P/.config/tools/app.env"
 grep -Fxq 'NEW_FLAG=true' "$P/.config/tools/app.env"
 grep -Fxq 'SERVICE_ENABLED=false' "$P/apps/api/.config/service.conf"

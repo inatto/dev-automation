@@ -126,6 +126,21 @@ project_archive_path() {
   printf '%s/%s.zip\n' "$(archive_output_dir)" "$archive_name"
 }
 
+project_archive_content_prefix() {
+  local project="$1"
+  local normalized parent project_rel parent_rel
+
+  normalized="$(normalize_target "$project")"
+  target_is_aggregate "$normalized" && return 0
+
+  parent="$(registered_parent_project "$normalized")"
+  [ -n "$parent" ] || return 0
+
+  project_rel="$(target_source_rel "$normalized")"
+  parent_rel="$(target_source_rel "$parent")"
+  printf '%s\n' "${project_rel#"$parent_rel/"}"
+}
+
 configured_projects() {
   clean_file "$PROJECTS_FILE"
 }

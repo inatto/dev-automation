@@ -47,7 +47,7 @@ local_path = Path(sys.argv[2])
 out_path = Path(sys.argv[3])
 masked_token = re.compile(r"\*{3,}")
 secret_key = re.compile(
-    r"(?:^|_)(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)(?:$|_)",
+    r"(?:^|_)(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_KEY|ADMIN_KEY|ACCESS_KEY|PRIVATE_KEY)(?:$|_)",
     re.IGNORECASE,
 )
 assignment = re.compile(

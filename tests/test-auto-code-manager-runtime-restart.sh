@@ -81,7 +81,7 @@ SCRIPT
 chmod +x "$APP/deploy/local/setup.sh"
 
 API_COUNT_FILE="$TEMP/api.count" WEB_COUNT_FILE="$TEMP/web.count" AUTO_CODE_STATE_DIR="$STATE" DEV_AUTOMATION_ERROR_SOUND_ENABLED=0 \
-  "$MANAGER/scripts/project-command.sh" alpha-app "$APP" local setup >"$TEMP/app.log" 2>&1 &
+  "$MANAGER/scripts/project-command.sh" alpha-app-auto "$APP" local >"$TEMP/app.log" 2>&1 &
 APP_PID=$!
 
 wait_count() {
@@ -98,6 +98,7 @@ wait_count "$TEMP/api.count" 1
 wait_count "$TEMP/web.count" 1
 state_file="$(find "$STATE/running-projects" -maxdepth 1 -type f -name '*.state' -print -quit)"
 grep -Fxq 'MODE=split' "$state_file"
+grep -Fxq 'AUTO_MODE=1' "$state_file"
 
 make_zip() {
   local kind="$1" zip="$TEMP/alpha-app.zip" pkg="$TEMP/pkg"
@@ -113,6 +114,7 @@ make_zip() {
 
 import_zip() {
   HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
+    DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/auto-code-manager.projects" AUTO_CODE_TUI=off \
     "$MANAGER/scripts/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
   [[ ! -e "$TEMP/alpha-app.zip" ]]
 }
@@ -141,4 +143,4 @@ if find /tmp -maxdepth 1 -type d -name 'auto-code-import-alpha-app-*' -print -qu
   exit 1
 fi
 
-printf 'OK: ZIP completo reinicia seletivamente API/Web no comando agregado e limpa temporários\n'
+printf 'OK: modo auto reinicia seletivamente API/Web somente após ZIP confirmado e limpa temporários\n'

@@ -45,13 +45,21 @@ HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" PROJECTS_FILE="
 
 for command_name in \
   dev-automation \
+  dev-automation-auto \
   dev-automation--exec-agent \
+  dev-automation--exec-agent-auto \
   remote-dev-automation \
+  remote-dev-automation-auto \
   remote-dev-automation--exec-agent \
+  remote-dev-automation--exec-agent-auto \
   amazon-infra \
+  amazon-infra-auto \
   amazon-infra--monitor-app \
+  amazon-infra--monitor-app-auto \
   remote-amazon-infra \
+  remote-amazon-infra-auto \
   remote-amazon-infra--monitor-app \
+  remote-amazon-infra--monitor-app-auto \
   ssh-dev-automation \
   ssh-dev-automation--exec-agent \
   ssh-amazon-infra \

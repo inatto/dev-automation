@@ -4,8 +4,8 @@
 import_one_zip() {
   local zip_file="$1"
   local skip_stable="${2:-false}"
-  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest
-  local total_files checked_files rel destination removal_count=0
+  local zip_name project archive_name logical_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest content_prefix
+  local total_files checked_files rel destination removal_count=0 runtime_scope="both"
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
   local -A nested_seen=() expected_targets=()
@@ -62,7 +62,11 @@ import_one_zip() {
     return 1
   fi
 
-  if [ -d "$temp_dir/$archive_name" ]; then
+  content_prefix="$(project_archive_content_prefix "$project")"
+  if [ -n "$content_prefix" ] && [ -d "$temp_dir/$content_prefix" ]; then
+    source_dir="$temp_dir/$content_prefix"
+    log "Hierarquia do subprojeto identificada no ZIP: $content_prefix/"
+  elif [ -d "$temp_dir/$archive_name" ]; then
     source_dir="$temp_dir/$archive_name"
     log "Raiz do ZIP identificada: $archive_name/"
   elif [ -n "$logical_name" ] && [ -d "$temp_dir/$logical_name" ]; then
@@ -272,6 +276,7 @@ import_one_zip() {
     return 1
   fi
 
+  runtime_scope="$(runtime_scope_for_import "$source_dir" "$removal_manifest")"
   rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
   log "Removendo ZIP original somente após todas as confirmações..."
   if ! finalize_import_zip "$zip_file"; then
@@ -281,6 +286,7 @@ import_one_zip() {
 
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
+  signal_auto_deploys_after_import "$project" "$runtime_scope"
   soft_beep
   line
 }

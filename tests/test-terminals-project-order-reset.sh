@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-TMP="$(mktemp -d /tmp/terminals-order-reset-XXXXXX)"
+TMP="$(mktemp -d /tmp/terminals-project-order-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home" "$TMP/state/desktops" "$TMP/code/a" "$TMP/code/new" "$TMP/projects-dir"
+mkdir -p "$TMP/bin" "$TMP/home" "$TMP/state/desktops" "$TMP/code/a" "$TMP/code/new"
 cat > "$TMP/projects" <<'PROJECTS'
 a
 new
@@ -15,7 +15,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 12\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 13\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -23,79 +23,57 @@ cat > "$TMP/bin/ptyxis" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
-cat > "$TMP/bin/gsettings" <<'FAKE'
-#!/usr/bin/env bash
-exit 0
-FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=12
+version=13
 controller=1
 floating-label=0
 window-placement=1
 READY
-# Simula lote da configuração anterior: isso não pode ser reaproveitado após inserir/reordenar projeto.
-printf 'shell=old\nmanaged=123\n' > "$TMP/state/desktops/terminals.batch"
-printf 'assinatura-antiga\n' > "$TMP/state/desktops/terminals.projects.sha256"
 : > "$TMP/terminal.log"
-: > "$TMP/actions.log"
+: > "$TMP/order.log"
+
 (
   last=''
-  open_token=''
-  count=0
-  observed=0
-  deadline=$((SECONDS + 30))
+  handled=0
+  deadline=$((SECONDS + 20))
   while (( SECONDS < deadline )); do
     req="$TMP/state/desktops/terminals.request"
-    if [[ -s "$req" ]]; then
-      line="$(cat "$req")"
-      token="${line%%$'\t'*}"
-      if [[ "$token" != "$last" ]]; then
-        last="$token"
-        action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
-        count="$(tr '\t' '\n' <<<"$line" | sed -n 's/^count=//p' | head -n1)"
-        printf '%s\n' "$action" >> "$TMP/actions.log"
-        case "$action" in
-          managed-reset)
-            printf '%s\taction=managed-reset\tcount=%s\tmanaged=1\tmissing=%s\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" "$count" "$((count-1))" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=1\texpected=1\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
-            rm -f "$TMP/state/desktops/terminals.batch"
-            ;;
-          status)
-            printf '%s\taction=status\tcount=%s\tmanaged=0\tmissing=%s\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" "$count" "$count" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=0\texpected=0\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
-            ;;
-          open)
-            open_token="$token"; observed=0
-            printf '%s\taction=open\tcount=%s\tmanaged=0\tmissing=%s\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" "$count" "$count" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=0\texpected=%s\tcomplete=0\n' "$token" "$count" > "$TMP/state/desktops/terminals.result"
-            ;;
-        esac
-      fi
-    fi
-    if [[ -n "$open_token" ]]; then
-      current="$(wc -l < "$TMP/terminal.log")"
-      if (( current > observed )); then
-        observed="$current"
-        complete=0; (( observed >= count )) && complete=1
-        printf '%s\tplaced=%s\texpected=%s\tcomplete=%s\n' "$open_token" "$observed" "$count" "$complete" > "$TMP/state/desktops/terminals.result"
-        (( complete == 1 )) && exit 0
-      fi
-    fi
-    sleep 0.03
+    [[ -s "$req" ]] || { sleep 0.02; continue; }
+    line="$(cat "$req")"
+    token="${line%%$'\t'*}"
+    [[ "$token" != "$last" ]] || { sleep 0.02; continue; }
+    last="$token"
+    action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
+    workspace="$(tr '\t' '\n' <<<"$line" | sed -n 's/^workspace=//p' | head -n1)"
+    slot="$(tr '\t' '\n' <<<"$line" | sed -n 's/^slot=//p' | head -n1)"
+    count="$(tr '\t' '\n' <<<"$line" | sed -n 's/^count=//p' | head -n1)"
+    [[ "$action" == direct ]]
+    handled=$((handled + 1))
+    printf '%s:%s\n' "$slot" "$workspace" >> "$TMP/order.log"
+    printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tvalid=1\n' \
+      "$token" "$count" "$workspace" "$slot" > "$TMP/state/desktops/terminals.ready"
+    for _ in $(seq 1 100); do
+      (( $(wc -l < "$TMP/terminal.log") >= handled )) && break
+      sleep 0.02
+    done
+    printf '%s\tplaced=1\texpected=1\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+    (( handled == count )) && exit 0
   done
-  exit 9
+  exit 4
 ) &
 watcher=$!
+
 env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
   AUTO_CODE_STATE_DIR="$TMP/state" PROJECTS_FILE="$TMP/projects" CODE_ROOT="$TMP/code" \
-  TERMINALS_TEST_LOG="$TMP/terminal.log" TERMINALS_OPEN_SETTLE_SECONDS=0 \
-  "$ROOT/scripts/terminals.sh" >/tmp/terminals-order-reset.out
+  TERMINALS_TEST_LOG="$TMP/terminal.log" TERMINALS_OPEN_INTERVAL_SECONDS=0 \
+  "$ROOT/scripts/terminals.sh" >/dev/null
 wait "$watcher"
-[[ "$(tr '\n' ' ' < "$TMP/actions.log")" == "managed-reset status open " ]]
-[[ "$(wc -l < "$TMP/terminal.log")" -eq 4 ]]
-[[ -s "$TMP/state/desktops/terminals.projects.sha256" ]]
-! grep -Fxq 'assinatura-antiga' "$TMP/state/desktops/terminals.projects.sha256"
-grep -Fq 'lista/ordem de projetos mudou' /tmp/terminals-order-reset.out
-rm -f /tmp/terminals-order-reset.out
-echo 'OK: mudança de lista/ordem descarta apenas o lote gerenciado antigo antes de reabrir em ordem canônica.'
+
+[[ "$(cat "$TMP/order.log")" == $'1:2\n2:3\n3:4\n4:5' ]]
+sed -n '1p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/a"
+sed -n '2p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/new"
+sed -n '3p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
+sed -n '4p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
+
+echo 'OK: a ordem do arquivo de projetos define diretamente desktop e pasta, sem associação posterior.'

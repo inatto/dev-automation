@@ -50,6 +50,36 @@ for profile in data['profiles']:
         assert set(login) == {'label', 'username', 'password_set'}, login
 PY
 
+# O IP editado no F2 deve alterar apenas LRDP_TARGET no arquivo do RDP e validar IPv4.
+cp "$ROOT/apps/lrdp/lrdp1" "$TMP/lrdp1-edit"
+chmod 751 "$TMP/lrdp1-edit"
+python3 - "$ROOT/apps/lrdp/lrdp-tui.py" "$TMP/lrdp1-edit" <<'PY'
+import importlib.util
+import pathlib
+import sys
+
+module_path, script_path = sys.argv[1:3]
+spec = importlib.util.spec_from_file_location("lrdp_tui", module_path)
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+script = pathlib.Path(script_path)
+before = script.read_text(encoding="utf-8")
+profile = module.RdpProfile("lrdp1", "RDP 1", "192.168.1.143", 3389, str(script), [])
+module.update_profile_target_file(profile, "10.20.30.40")
+after = script.read_text(encoding="utf-8")
+assert 'LRDP_TARGET="10.20.30.40"' in after
+assert after.count("LRDP_TARGET=") == 1
+assert before.replace('LRDP_TARGET="192.168.1.143"', 'LRDP_TARGET="10.20.30.40"') == after
+assert (script.stat().st_mode & 0o777) == 0o751
+try:
+    module.validate_target_ip("999.1.2.3")
+except ValueError:
+    pass
+else:
+    raise AssertionError("IPv4 inválido foi aceito")
+PY
+
 # O modo usado pela TUI deve conectar sem imprimir perguntas de configuração.
 output="$(PATH="$TMP/bin:$PATH" LRDP_STATE_ROOT="$TMP/state" "$ROOT/apps/lrdp/lrdp1" --saved)"
 grep -Fq '/u:govbr' <<<"$output"

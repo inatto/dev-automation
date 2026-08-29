@@ -37,11 +37,15 @@ commands=(
   desktops
   chromes
   chromes-all
+  chromes-close
   files
   files-all
+  files-close
   terminals
+  terminals-close
   phpstorms
   pycharms
+  pycharms-close
   phpstorm-dev
   local-nginx
   dev-status
@@ -50,7 +54,10 @@ commands=(
   lrdp1
   lrdp2
   voice-commands
+  gpt-console
+  script-dev-automation
   sample-app
+  sample-app-auto
   local-all
   remote-all
 )
@@ -68,5 +75,7 @@ grep -Fq 'criado: lrdp ->' "$LOG_FILE"
 grep -Fq 'criado: lrdp1 ->' "$LOG_FILE"
 grep -Fq 'criado: lrdp2 ->' "$LOG_FILE"
 grep -Fq 'criado: voice-commands' "$LOG_FILE"
+grep -Fq 'criado: gpt-console' "$LOG_FILE"
+grep -Fq 'criado: script-dev-automation' "$LOG_FILE"
 grep -Fq 'criado: sample-app' "$LOG_FILE"
 printf 'OK: instalador principal atualiza comandos fixos, oracle-monitor e comandos dos projetos\n'

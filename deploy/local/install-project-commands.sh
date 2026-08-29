@@ -119,10 +119,12 @@ while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
   found=0
   if [[ -f "$project_dir/deploy/local/setup.sh" ]]; then
     create_command "$project_name" "$project_dir" local
+    create_command "$project_name-auto" "$project_dir" local
     found=1
   fi
   if [[ -f "$project_dir/deploy/remote/setup.sh" ]]; then
     create_command "remote-$project_name" "$project_dir" remote
+    create_command "remote-$project_name-auto" "$project_dir" remote
     create_ssh_command "ssh-$project_name" "$project_dir" "$line"
     found=1
   fi

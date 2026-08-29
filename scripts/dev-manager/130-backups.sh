@@ -4,6 +4,7 @@
 backup_project() {
   local project="$1"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
+  local archive_tree_dir content_prefix
   local child child_name child_zip child_count
   local sanitize_result sanitized_files sanitized_values redacted_files
   local -a children=()
@@ -24,6 +25,7 @@ backup_project() {
   temp_dir="$(mktemp -d "/tmp/auto-code-backup-${archive_name}-XXXXXX")"
   temp_zip="/tmp/${archive_name}-backup-$$.zip"
   final_zip="$(project_archive_path "$project")"
+  archive_tree_dir="$temp_dir"
 
   log "Gerando backup: $project -> $final_zip"
 
@@ -94,25 +96,40 @@ backup_project() {
       rm -rf -- "$temp_dir" "$filter_file" "$temp_zip"
       return 1
     fi
+
+    content_prefix="$(project_archive_content_prefix "$project")"
+    if [ -n "$content_prefix" ]; then
+      archive_tree_dir="$(mktemp -d "/tmp/auto-code-archive-tree-${archive_name}-XXXXXX")"
+      mkdir -p -- "$archive_tree_dir/$content_prefix"
+      if ! rsync -a -- "$temp_dir/" "$archive_tree_dir/$content_prefix/"; then
+        log "ERRO ao preservar hierarquia do subprojeto no ZIP: $content_prefix/"
+        rm -rf -- "$temp_dir" "$archive_tree_dir" "$filter_file" "$temp_zip"
+        return 1
+      fi
+      log "Hierarquia preservada no ZIP do subprojeto: $content_prefix/"
+    fi
   fi
 
-  if ! (cd "$temp_dir" && zip -qry "$temp_zip" .); then
+  if ! (cd "$archive_tree_dir" && zip -qry "$temp_zip" .); then
     log "ERRO ao compactar alvo: $project"
-    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
+    rm -rf -- "$temp_dir" ${archive_tree_dir:+"$archive_tree_dir"} ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
   if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
     log "ERRO: validação do backup falhou: $project"
-    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
+    rm -rf -- "$temp_dir" ${archive_tree_dir:+"$archive_tree_dir"} ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
-  if ! verify_zip_modes_against_tree "$temp_zip" "$temp_dir"; then
+  if ! verify_zip_modes_against_tree "$temp_zip" "$archive_tree_dir"; then
     log "ERRO: backup ZIP não preservou chmod da origem: $project"
-    rm -rf -- "$temp_dir" ${filter_file:+"$filter_file"} "$temp_zip"
+    rm -rf -- "$temp_dir" ${archive_tree_dir:+"$archive_tree_dir"} ${filter_file:+"$filter_file"} "$temp_zip"
     return 1
   fi
 
   mv -f -- "$temp_zip" "$final_zip"
+  if [ "$archive_tree_dir" != "$temp_dir" ]; then
+    rm -rf -- "$archive_tree_dir"
+  fi
   rm -rf -- "$temp_dir"
   [ -z "$filter_file" ] || rm -f -- "$filter_file"
   log "OK backup: $final_zip"

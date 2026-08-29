@@ -137,8 +137,104 @@ configured_download_zip_exists() {
   return 1
 }
 
-# Importação não reinicia nem sinaliza processos automaticamente.
-# Reinício/deploy é responsabilidade dos comandos explícitos do projeto.
+runtime_scope_for_import() {
+  local source_dir="$1"
+  local removal_manifest="${2:-}"
+  local rel
+  local has_api=0 has_web=0 has_other=0
+
+  if [ -d "$source_dir" ]; then
+    while IFS= read -r -d '' rel; do
+      case "$rel" in
+        apps/api/*|api/*) has_api=1 ;;
+        apps/web/*|web/*) has_web=1 ;;
+        *) has_other=1 ;;
+      esac
+    done < <(find "$source_dir" -type f -printf '%P\0' 2>/dev/null)
+  fi
+
+  if [ -n "$removal_manifest" ] && [ -s "$removal_manifest" ]; then
+    while IFS= read -r -d '' rel; do
+      case "$rel" in
+        apps/api/*|api/*) has_api=1 ;;
+        apps/web/*|web/*) has_web=1 ;;
+        *) has_other=1 ;;
+      esac
+    done < "$removal_manifest"
+  fi
+
+  if [ "$has_other" -eq 0 ] && [ "$has_api" -eq 1 ] && [ "$has_web" -eq 0 ]; then
+    printf 'api\n'
+  elif [ "$has_other" -eq 0 ] && [ "$has_web" -eq 1 ] && [ "$has_api" -eq 0 ]; then
+    printf 'web\n'
+  else
+    printf 'both\n'
+  fi
+}
+
+runtime_state_value() {
+  local state_file="$1" key="$2"
+  awk -v wanted="$key" '
+    index($0, wanted "=") == 1 {
+      print substr($0, length(wanted) + 2)
+      exit
+    }
+  ' "$state_file" 2>/dev/null
+}
+
+signal_auto_deploys_after_import() {
+  local project="$1" scope="${2:-both}"
+  local project_dir state_file runtime_dir auto_mode pid request_file temp_request deploy_mode
+  local signaled=0 stale=0
+  local nullglob_was_set=false
+
+  project_dir="$(project_path "$project")"
+  case "$scope" in api|web|both) ;; *) scope="both" ;; esac
+
+  log "Escopo de runtime detectado: $scope"
+  [ -d "$RUNNING_PROJECTS_DIR" ] || {
+    log "AUTO: nenhum deploy auto ativo para $project."
+    return 0
+  }
+
+  shopt -q nullglob && nullglob_was_set=true
+  shopt -s nullglob
+  for state_file in "$RUNNING_PROJECTS_DIR"/*.state; do
+    auto_mode="$(runtime_state_value "$state_file" AUTO_MODE)"
+    [ "$auto_mode" = "1" ] || continue
+
+    runtime_dir="$(runtime_state_value "$state_file" PROJECT_DIR)"
+    [ "$runtime_dir" = "$project_dir" ] || continue
+
+    pid="$(runtime_state_value "$state_file" PID)"
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
+      rm -f -- "$state_file" "$state_file.request" 2>/dev/null || true
+      stale=$((stale + 1))
+      continue
+    fi
+
+    request_file="$state_file.request"
+    temp_request="$request_file.tmp.$$"
+    printf '%s\n' "$scope" > "$temp_request"
+    mv -f -- "$temp_request" "$request_file"
+
+    if kill -USR1 "$pid" 2>/dev/null; then
+      deploy_mode="$(runtime_state_value "$state_file" DEPLOY_MODE)"
+      log "AUTO: reinício solicitado para $project (${deploy_mode:-desconhecido}, PID $pid)."
+      signaled=$((signaled + 1))
+    else
+      rm -f -- "$request_file" 2>/dev/null || true
+    fi
+  done
+  [ "$nullglob_was_set" = true ] || shopt -u nullglob
+
+  if [ "$signaled" -eq 0 ]; then
+    log "AUTO: nenhum deploy auto ativo para $project."
+  else
+    log "AUTO: $signaled deploy(s) sinalizado(s) após importação confirmada de $project."
+  fi
+  [ "$stale" -eq 0 ] || log "AUTO: $stale estado(s) obsoleto(s) removido(s)."
+}
 
 finalize_import_zip() {
   local zip_file="$1"

@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Terminais em duas fases, no mesmo padrão operacional do pycharms:
-# 1ª chamada abre somente o que falta, UM POR VEZ e com confirmação do GNOME;
-# 2ª e seguintes apenas reconciliam workspace/monitor/maximização.
-# Workspace 1 = LAZER; um terminal por projeto e, no final, um em lrdp1 e outro em lrdp2.
+# Abre um terminal diretamente em cada workspace do projeto, em uma única fase.
+# Workspace 1 = LAZER; projetos ocupam 2..N e lrdp1/lrdp2 ficam no final.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -14,10 +12,8 @@ PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
-OPEN_SETTLE_SECONDS="${TERMINALS_OPEN_SETTLE_SECONDS:-2}"
+OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-1.5}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
-PROJECTS_SIGNATURE_FILE="$STATE_DIR/terminals.projects.sha256"
-TERMINALS_BATCH_FILE="$STATE_DIR/terminals.batch"
 
 log(){ printf '[terminals] %s\n' "$*"; }
 warn(){ printf '[terminals] AVISO: %s\n' "$*" >&2; }
@@ -51,8 +47,6 @@ load_projects() {
     fi
   done < "$PROJECTS_FILE"
 
-  # lrdp1 e lrdp2 são os dois workspaces finais definidos por desktops.sh.
-  # Também recebem um terminal, depois de todos os projetos.
   project_entries+=("lrdp1" "lrdp2")
   project_dirs+=("$HOME" "$HOME")
 }
@@ -79,55 +73,25 @@ launch_terminal_window() {
   esac
 }
 
-current_projects_signature() {
-  printf '%s\0' "${project_entries[@]}" | sha256sum | awk '{print $1}'
-}
-
-persist_projects_signature() {
-  local signature="$1" tmp
-  mkdir -p "$STATE_DIR"
-  tmp="$PROJECTS_SIGNATURE_FILE.tmp.$$"
-  printf '%s\n' "$signature" > "$tmp"
-  mv -f -- "$tmp" "$PROJECTS_SIGNATURE_FILE"
-}
-
-reconcile_project_list_identity() {
-  local current="$1" previous=''
-  [[ -s "$PROJECTS_SIGNATURE_FILE" ]] && previous="$(head -n1 "$PROJECTS_SIGNATURE_FILE" 2>/dev/null || true)"
-
-  # Um lote existente sem assinatura veio de uma versão antiga. Uma assinatura
-  # diferente significa que projeto(s) foram inseridos/removidos/reordenados.
-  # Em ambos os casos a posição antiga não identifica mais o projeto correto.
-  if [[ -s "$TERMINALS_BATCH_FILE" && ( -z "$previous" || "$previous" != "$current" ) ]]; then
-    log 'lista/ordem de projetos mudou; descartando somente os terminais gerenciados antigos para reconstruir a associação exata.'
-    gnome_placement_prepare terminals managed-reset "count=$count" ||       fail 'não foi possível limpar o lote antigo de terminais gerenciados.'
-    gnome_placement_wait_complete terminals 120 ||       fail 'o GNOME não confirmou a limpeza do lote antigo de terminais.'
-  fi
-}
-
 acquire_lock() {
   mkdir -p "$STATE_DIR"
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$STATE_DIR/terminals.lock"
-    flock -w 5 9 || fail 'já existe outra execução de terminals em andamento; aguarde terminar.'
+    flock -w 5 9 || fail 'já existe outra execução de terminals em andamento.'
     return 0
   fi
 
   local lock_dir="$STATE_DIR/terminals.lock.d"
-  mkdir "$lock_dir" 2>/dev/null || fail 'já existe outra execução de terminals em andamento; aguarde terminar.'
+  mkdir "$lock_dir" 2>/dev/null || fail 'já existe outra execução de terminals em andamento.'
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 }
 
-# O reset usa apenas o protocolo estável action=reset. Assim ele continua
-# conseguindo limpar a bagunça produzida pela v47 mesmo antes do novo
-# controlador ser carregado pela sessão GNOME.
+# O reset mantém o protocolo estável para conseguir limpar o lote antigo mesmo
+# antes de a sessão GNOME carregar o controlador novo.
 legacy_compatible_reset() {
   gnome_placement_supported || fail 'terminals --reset requer GNOME/Wayland.'
   local info request ready result token tmp attempt line controller_rc=0
 
-  # Copia primeiro o controlador novo para o disco. Se a sessão ainda estiver
-  # usando a versão anterior, o reset abaixo continua falando o protocolo v9 e
-  # funciona; no próximo login o GNOME já carrega a v10.
   "$PROJECT_ROOT/scripts/desktops.sh" --ensure-controller >/dev/null || controller_rc=$?
   if (( controller_rc != 0 && controller_rc != 75 )); then
     warn 'não foi possível preparar o controlador novo no disco; tentando ao menos limpar o lote atual.'
@@ -143,14 +107,15 @@ legacy_compatible_reset() {
   token="$(date +%s%N)-$$-$RANDOM"
   tmp="$request.tmp.$$"
   rm -f -- "$ready" "$result"
-  printf '%s\taction=reset\tcount=%s\n' "$token" "${#project_entries[@]}" > "$tmp"
+  printf '%s	action=reset	count=%s
+' "$token" "${#project_entries[@]}" > "$tmp"
   mv -f -- "$tmp" "$request"
 
   for ((attempt=0; attempt<100; attempt++)); do
     if [[ -s "$ready" ]]; then
       line="$(cat "$ready" 2>/dev/null || true)"
-      if [[ "${line%%$'\t'*}" == "$token" ]]; then
-        log 'RESET confirmado: fechando o lote gerenciado e todos os terminais extras nos workspaces de projeto.'
+      if [[ "${line%%$'	'*}" == "$token" ]]; then
+        log 'RESET confirmado: fechando o lote gerenciado e os terminais extras nos workspaces de projeto.'
         return 0
       fi
     fi
@@ -160,10 +125,10 @@ legacy_compatible_reset() {
 }
 
 show_diagnose() {
-  local count="${#project_entries[@]}"
   printf '=== TERMINALS / GNOME ===\n'
   printf 'Sessão: %s / %s\n' "${XDG_CURRENT_DESKTOP:-?}" "${XDG_SESSION_TYPE:-?}"
   printf 'Destinos: %s (projetos + lrdp1/lrdp2; workspaces 2..%s; LAZER excluído)\n' "$count" "$((count + 1))"
+  printf 'Intervalo: %s segundo(s) entre aberturas\n' "$OPEN_INTERVAL_SECONDS"
   printf 'Terminal: '; terminal_backend || printf 'nenhum terminal compatível encontrado\n'
   printf 'Monitores:\n'
   command -v xrandr >/dev/null 2>&1 && xrandr --listmonitors 2>/dev/null || true
@@ -189,12 +154,11 @@ case "${1:-}" in
   --reset|reset)
     acquire_lock
     legacy_compatible_reset
-    rm -f -- "$PROJECTS_SIGNATURE_FILE"
     exit 0
     ;;
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
-    printf 'Fluxo: 1ª chamada abre exatamente os terminais faltantes, um por vez; 2ª chamada distribui e maximiza um por projeto no monitor direito.\n'
+    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda 1,5 segundo antes do próximo.\n'
     printf 'LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
     exit 0
     ;;
@@ -202,84 +166,47 @@ case "${1:-}" in
   *) fail "opção inválida: $1" ;;
 esac
 
+[[ "$OPEN_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+  fail "intervalo inválido: $OPEN_INTERVAL_SECONDS"
+[[ "$CAPTURE_TIMEOUT_TENTHS" =~ ^[0-9]+$ ]] || \
+  fail "timeout inválido: $CAPTURE_TIMEOUT_TENTHS"
+
 acquire_lock
-request_fields="count=$count"
-projects_signature="$(current_projects_signature)"
-reconcile_project_list_identity "$projects_signature"
+IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
+  fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
 
-# Consulta sempre o estado real. Repetir o comando não cria lote novo quando
-# os terminais gerenciados ainda existem.
-gnome_placement_prepare terminals status "$request_fields" || \
-  fail 'não foi possível consultar o estado dos terminais no GNOME/Wayland.'
-managed="$(gnome_placement_ready_field managed 2>/dev/null || true)"
-missing="$(gnome_placement_ready_field missing 2>/dev/null || true)"
-untracked="$(gnome_placement_ready_field untracked 2>/dev/null || printf '0')"
-overflow="$(gnome_placement_ready_field overflow 2>/dev/null || printf '0')"
-[[ "$managed" =~ ^[0-9]+$ && "$missing" =~ ^[0-9]+$ && "$untracked" =~ ^[0-9]+$ && "$overflow" =~ ^[0-9]+$ ]] || \
-  fail "estado inválido retornado pelo GNOME: managed=${managed:-?} missing=${missing:-?} untracked=${untracked:-?} overflow=${overflow:-?}"
+log 'FLUXO ÚNICO: cada terminal será aberto diretamente no seu workspace e na pasta do projeto.'
+log "Terminal: $terminal_kind -> $terminal"
+log "Intervalo entre aberturas: $OPEN_INTERVAL_SECONDS segundo(s)."
 
-if (( untracked > 0 )); then
-  warn "$untracked terminal(is) não gerenciado(s) já existe(m) nos workspaces de projeto; serão preservados. Para limpar tudo e recomeçar: terminals --reset"
-fi
-if (( overflow > 0 )); then
-  warn "$overflow janela(s) excedente(s) do lote anterior será(ão) fechada(s) na fase de movimentação."
-fi
+for ((project_index=0; project_index<count; project_index++)); do
+  workspace_number=$((project_index + 2))
+  slot=$((project_index + 1))
+  project_name="${project_entries[$project_index]}"
+  working_dir="${project_dirs[$project_index]}"
+  request_fields="$(printf 'count=%s\tworkspace=%s\tslot=%s' "$count" "$workspace_number" "$slot")"
 
-if (( missing > 0 )); then
-  IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
-    fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
-
-  gnome_placement_prepare terminals open "$request_fields" || fail 'não foi possível preparar a fase de abertura.'
-  missing="$(gnome_placement_ready_field missing 2>/dev/null || true)"
-  managed="$(gnome_placement_ready_field managed 2>/dev/null || true)"
-  [[ "$missing" =~ ^[0-9]+$ && "$managed" =~ ^[0-9]+$ ]] || \
-    fail "quantidades inválidas para abertura: managed=${managed:-?} missing=${missing:-?}"
-
-  log 'FASE: ABERTURA'
-  log "Terminal: $terminal_kind -> $terminal"
-  log "ABERTURA: $missing terminal(is) faltando para $count projeto(s). Abrindo UM POR VEZ e esperando confirmação antes do próximo."
-  log 'Nesta chamada NÃO haverá movimentação entre workspaces.'
-
-  captured=0
-  while (( captured < missing )); do
-    project_index=$((managed + captured))
-    (( project_index < count )) || project_index=$((count - 1))
-    project_name="${project_entries[$project_index]}"
-    working_dir="${project_dirs[$project_index]}"
-
-    previous="$captured"
-    log "ABRINDO $((managed + previous + 1))/$count: $project_name"
-    launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" || \
-      fail "falha ao abrir terminal via $terminal_kind"
-
-    if ! gnome_placement_wait_min terminals placed "$((previous + 1))" "$CAPTURE_TIMEOUT_TENTHS"; then
-      fail "o GNOME não confirmou a nova janela de terminal para '$project_name'; parei imediatamente para não disparar duplicatas."
-    fi
-
-    captured="$(gnome_placement_result_field terminals placed 2>/dev/null || true)"
-    [[ "$captured" =~ ^[0-9]+$ ]] || fail "captura inválida retornada pelo GNOME: ${captured:-vazio}"
-    (( captured > missing )) && captured="$missing"
-    sleep 0.15
-  done
-
-  if ! gnome_placement_wait_complete terminals "$CAPTURE_TIMEOUT_TENTHS"; then
-    fail "o GNOME não confirmou a captura dos $missing terminais novos. Rode: terminals --diagnose"
+  log "ABRINDO $slot/$count: desktop $workspace_number · $project_name · $working_dir"
+  if ! gnome_placement_prepare terminals direct "$request_fields"; then
+    fail "não foi possível ativar o desktop $workspace_number. Rode 'desktops' e faça logout/login uma vez se o controlador tiver sido atualizado."
   fi
 
-  [[ "$OPEN_SETTLE_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || OPEN_SETTLE_SECONDS=2
-  sleep "$OPEN_SETTLE_SECONDS"
-  persist_projects_signature "$projects_signature"
-  log "FASE ABERTURA CONCLUÍDA: $missing terminal(is) novo(s) capturado(s), sem distribuição."
-  log 'PRÓXIMA CHAMADA: terminals fará somente a MOVIMENTAÇÃO e MAXIMIZAÇÃO, um terminal por projeto no monitor direito.'
-  exit 0
-fi
+  ready_workspace="$(gnome_placement_ready_field workspace 2>/dev/null || true)"
+  ready_slot="$(gnome_placement_ready_field slot 2>/dev/null || true)"
+  ready_valid="$(gnome_placement_ready_field valid 2>/dev/null || true)"
+  [[ "$ready_valid" == 1 && "$ready_workspace" == "$workspace_number" && "$ready_slot" == "$slot" ]] || \
+    fail "o GNOME não confirmou o destino de '$project_name' (desktop=${ready_workspace:-?}, slot=${ready_slot:-?})."
 
-log 'FASE: MOVIMENTAÇÃO'
-log "ABERTURA: 0. Os $managed/$count terminais necessários já existem; nenhuma nova janela será criada."
-gnome_placement_prepare terminals reconcile "$request_fields" || fail 'não foi possível preparar a reconciliação dos terminais.'
-if ! gnome_placement_wait_complete terminals 200; then
-  fail 'o GNOME não confirmou a movimentação completa. Rode: terminals --diagnose'
-fi
-persist_projects_signature "$projects_signature"
-log "MOVIMENTAÇÃO CONCLUÍDA: 1 terminal por projeto, workspaces 2..$((count + 1)), monitor direito e MAXIMIZADO."
-log 'Idempotência: próximas chamadas apenas reconciliam; não abrem outro lote enquanto os terminais gerenciados existirem.'
+  launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" || \
+    fail "falha ao abrir terminal via $terminal_kind para '$project_name'"
+
+  if ! gnome_placement_wait_complete terminals "$CAPTURE_TIMEOUT_TENTHS"; then
+    fail "o GNOME não confirmou o terminal de '$project_name' no desktop $workspace_number; parei para não abrir os seguintes no lugar errado."
+  fi
+
+  if (( project_index + 1 < count )); then
+    sleep "$OPEN_INTERVAL_SECONDS"
+  fi
+done
+
+log "CONCLUÍDO: $count terminal(is) aberto(s) diretamente nos desktops 2..$((count + 1)), sem segunda fase."

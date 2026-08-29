@@ -3,7 +3,10 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d /tmp/terminals-wayland-test-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home" "$TMP/state/desktops" "$TMP/code/bots/dev-automation" "$TMP/code/orgs/orbital/orbital-app" "$TMP/code/orgs/orbital/orbital-ui"
+mkdir -p "$TMP/bin" "$TMP/home" "$TMP/state/desktops" \
+  "$TMP/code/bots/dev-automation" \
+  "$TMP/code/orgs/orbital/orbital-app" \
+  "$TMP/code/orgs/orbital/orbital-ui"
 cat > "$TMP/projects" <<'PROJECTS'
 bots/dev-automation
 orgs/orbital/orbital-app
@@ -22,13 +25,9 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info)
-    printf '  Version: %s\n  State: ACTIVE\n' "${TERMINALS_FAKE_EXT_VERSION:-10}"
-    exit 0
-    ;;
-  enable) exit 0 ;;
+  info) printf '  Version: 13\n  State: ACTIVE\n' ;;
+  enable) ;;
 esac
-exit 0
 FAKE
 cat > "$TMP/bin/ptyxis" <<'FAKE'
 #!/usr/bin/env bash
@@ -36,7 +35,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=12
+version=13
 controller=1
 floating-label=0
 window-placement=1
@@ -44,78 +43,47 @@ READY
 : > "$TMP/terminal.log"
 : > "$TMP/actions.log"
 
-# Controlador falso: só confirma UMA janela por vez, com atraso. Se o backend
-# disparar uma rajada antes da confirmação, marca corrida e o teste falha.
+# Controlador falso: confirma a ativação de um workspace, aguarda exatamente a
+# janela daquele slot e só então libera o próximo pedido.
 (
   last=''
-  managed=0
-  open_token=''
-  observed=0
-  deadline=$((SECONDS + 40))
+  handled=0
+  deadline=$((SECONDS + 30))
   while (( SECONDS < deadline )); do
     req="$TMP/state/desktops/terminals.request"
-    if [[ -s "$req" ]]; then
-      line="$(cat "$req")"
-      token="${line%%$'\t'*}"
-      if [[ "$token" != "$last" ]]; then
-        last="$token"
-        action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
-        count="$(tr '\t' '\n' <<<"$line" | sed -n 's/^count=//p' | head -n1)"
-        printf '%s\n' "$action" >> "$TMP/actions.log"
-        case "$action" in
-          status)
-            missing=$((count - managed))
-            printf '%s\taction=status\tcount=%s\tmanaged=%s\tmissing=%s\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
-              "$token" "$count" "$managed" "$missing" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=%s\texpected=%s\tcomplete=1\n' "$token" "$managed" "$managed" > "$TMP/state/desktops/terminals.result"
-            ;;
-          open)
-            missing=$((count - managed))
-            open_token="$token"
-            observed=0
-            printf '%s\taction=open\tcount=%s\tmanaged=%s\tmissing=%s\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
-              "$token" "$count" "$managed" "$missing" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=0\texpected=%s\tcomplete=0\n' "$token" "$missing" > "$TMP/state/desktops/terminals.result"
-            ;;
-          reconcile)
-            printf '%s\taction=reconcile\tcount=%s\tmanaged=%s\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
-              "$token" "$count" "$managed" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=%s\texpected=%s\tcomplete=1\n' "$token" "$count" "$count" > "$TMP/state/desktops/terminals.result"
-            ;;
-          reset)
-            printf '%s\taction=reset\tcount=%s\tmanaged=%s\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
-              "$token" "$count" "$managed" > "$TMP/state/desktops/terminals.ready"
-            printf '%s\tplaced=%s\texpected=%s\tcomplete=1\n' "$token" "$managed" "$managed" > "$TMP/state/desktops/terminals.result"
-            managed=0
-            ;;
-          *) exit 3 ;;
-        esac
-      fi
-    fi
+    [[ -s "$req" ]] || { sleep 0.02; continue; }
+    line="$(cat "$req")"
+    token="${line%%$'\t'*}"
+    [[ "$token" != "$last" ]] || { sleep 0.02; continue; }
+    last="$token"
 
-    if [[ -n "$open_token" ]]; then
-      current="$(wc -l < "$TMP/terminal.log")"
-      if (( current > observed )); then
-        # Dá tempo para uma implementação defeituosa disparar a rajada.
-        sleep 0.15
-        later="$(wc -l < "$TMP/terminal.log")"
-        if (( later > observed + 1 )); then
-          : > "$TMP/race.detected"
-          exit 4
-        fi
-        observed=$current
-        complete=0
-        (( observed >= 5 )) && complete=1
-        printf '%s\tplaced=%s\texpected=5\tcomplete=%s\n' "$open_token" "$observed" "$complete" > "$TMP/state/desktops/terminals.result"
-        if (( complete == 1 )); then
-          managed=5
-          open_token=''
-        fi
-      fi
-    fi
+    action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
+    count="$(tr '\t' '\n' <<<"$line" | sed -n 's/^count=//p' | head -n1)"
+    workspace="$(tr '\t' '\n' <<<"$line" | sed -n 's/^workspace=//p' | head -n1)"
+    slot="$(tr '\t' '\n' <<<"$line" | sed -n 's/^slot=//p' | head -n1)"
 
-    [[ "$(tail -n 4 "$TMP/actions.log" 2>/dev/null | tr '\n' ' ')" == *"status open status reconcile"* ]] && exit 0
-    sleep 0.03
+    case "$action" in
+      direct)
+        handled=$((handled + 1))
+        [[ "$count" == 5 ]]
+        [[ "$slot" == "$handled" ]]
+        [[ "$workspace" == "$((handled + 1))" ]]
+        printf '%s\t%s\t%s\n' "$action" "$workspace" "$slot" >> "$TMP/actions.log"
+        printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tvalid=1\n' \
+          "$token" "$count" "$workspace" "$slot" > "$TMP/state/desktops/terminals.ready"
+        printf '%s\tplaced=0\texpected=1\tcomplete=0\n' "$token" > "$TMP/state/desktops/terminals.result"
+
+        for _ in $(seq 1 200); do
+          current="$(wc -l < "$TMP/terminal.log")"
+          (( current >= handled )) && break
+          sleep 0.02
+        done
+        [[ "$(wc -l < "$TMP/terminal.log")" -eq "$handled" ]]
+        printf '%s\tplaced=1\texpected=1\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+        (( handled == count )) && exit 0
+        ;;
+      *) exit 3 ;;
+    esac
   done
   exit 2
 ) &
@@ -130,70 +98,54 @@ common_env=(
   PROJECTS_FILE="$TMP/projects"
   CODE_ROOT="$TMP/code"
   TERMINALS_TEST_LOG="$TMP/terminal.log"
-  TERMINALS_OPEN_SETTLE_SECONDS=0
+  TERMINALS_OPEN_INTERVAL_SECONDS=0
 )
 
-out1="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
-[[ "$(wc -l < "$TMP/terminal.log")" -eq 5 ]]
-[[ ! -e "$TMP/race.detected" ]]
-grep -Fq 'FASE: ABERTURA' <<<"$out1"
-grep -Fq 'Abrindo UM POR VEZ' <<<"$out1"
-grep -Fq 'esperando confirmação antes do próximo' <<<"$out1"
-grep -Fq 'Nesta chamada NÃO haverá movimentação entre workspaces.' <<<"$out1"
-grep -Fq 'PRÓXIMA CHAMADA: terminals fará somente a MOVIMENTAÇÃO e MAXIMIZAÇÃO' <<<"$out1"
-grep -Fq -- '--new-window --working-directory=' "$TMP/terminal.log"
-
-after_first="$(wc -l < "$TMP/terminal.log")"
-out2="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
-[[ "$(wc -l < "$TMP/terminal.log")" -eq "$after_first" ]]
-grep -Fq 'FASE: MOVIMENTAÇÃO' <<<"$out2"
-grep -Fq 'ABERTURA: 0.' <<<"$out2"
-grep -Fq 'workspaces 2..6' <<<"$out2"
-grep -Fq 'monitor direito e MAXIMIZADO' <<<"$out2"
-grep -Fq 'próximas chamadas apenas reconciliam' <<<"$out2"
+out="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
 wait "$watcher"
 
-[[ "$(tr '\n' ' ' < "$TMP/actions.log")" == *"status open status reconcile"* ]]
-grep -Fq 'gnome_placement_wait_min terminals placed' "$ROOT/scripts/terminals.sh"
-! grep -Fq 'for ((i=1; i<=missing; i++))' "$ROOT/scripts/terminals.sh"
-grep -Fq '_scheduleTerminalPlacement' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'window.maximize()' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'overflowSequences' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq '_closeTerminalWindows(status.overflow)' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'projectIndex + 1' "$ROOT/apps/desktops-gnome-extension/extension.js"
-! grep -Fq 'Reaproveita no máximo um terminal já existente' "$ROOT/apps/desktops-gnome-extension/extension.js"
-! grep -Fq 'Preserva primeiro os terminais' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq "case 'managed-reset'" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'lista/ordem de projetos mudou' "$ROOT/scripts/terminals.sh"
-grep -Fq 'status|open|reconcile|reset|managed-reset' "$ROOT/scripts/gnome-window-placement.sh"
+[[ "$(wc -l < "$TMP/terminal.log")" -eq 5 ]]
+[[ "$(cat "$TMP/actions.log")" == $'direct\t2\t1\ndirect\t3\t2\ndirect\t4\t3\ndirect\t5\t4\ndirect\t6\t5' ]]
+sed -n '1p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/bots/dev-automation"
+sed -n '2p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-app"
+sed -n '3p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-ui"
+sed -n '4p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
+sed -n '5p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
 
-# Reset deve funcionar até com o controlador v9 ainda carregado, justamente para
-# limpar imediatamente o excesso criado pela versão anterior.
-cat > "$TMP/state/desktops/extension.ready" <<'READY_V9'
-version=9
-controller=1
-floating-label=0
-window-placement=1
-READY_V9
-: > "$TMP/reset.actions"
+grep -Fq 'FLUXO ÚNICO' <<<"$out"
+grep -Fq 'Intervalo entre aberturas: 0 segundo(s).' <<<"$out"
+grep -Fq 'sem segunda fase' <<<"$out"
+! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals.sh"
+! grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-1.5' "$ROOT/scripts/terminals.sh"
+grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals.sh"
+grep -Fq "action === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq 'workspace.activate(global.get_current_time())' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq "terminalSession.mode === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq '_scheduleTerminalPlacement(' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq 'status|open|direct|reconcile|reset|managed-reset' "$ROOT/scripts/gnome-window-placement.sh"
+
+: > "$TMP/reset.log"
 (
-  for _ in $(seq 1 200); do
+  previous="$(head -n1 "$TMP/state/desktops/terminals.request" 2>/dev/null || true)"
+  for _ in $(seq 1 300); do
     req="$TMP/state/desktops/terminals.request"
-    [[ -s "$req" ]] || { sleep 0.03; continue; }
+    [[ -s "$req" ]] || { sleep 0.02; continue; }
     line="$(cat "$req")"
+    [[ "${line%%$'\t'*}" != "${previous%%$'\t'*}" ]] || { sleep 0.02; continue; }
     token="${line%%$'\t'*}"
     action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
-    [[ "$action" == reset ]] || { sleep 0.03; continue; }
-    printf '%s\n' "$action" > "$TMP/reset.actions"
-    printf '%s\taction=reset\tcount=3\tmanaged=5\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" > "$TMP/state/desktops/terminals.ready"
-    printf '%s\tplaced=5\texpected=5\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+    [[ "$action" == reset ]] || exit 5
+    printf '%s\n' "$action" > "$TMP/reset.log"
+    printf '%s\taction=reset\tcount=5\tmanaged=5\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
+      "$token" > "$TMP/state/desktops/terminals.ready"
     exit 0
   done
-  exit 5
+  exit 6
 ) &
 reset_watcher=$!
-TERMINALS_FAKE_EXT_VERSION=9 env "${common_env[@]}" "$ROOT/scripts/terminals.sh" --reset >/dev/null
+env "${common_env[@]}" "$ROOT/scripts/terminals.sh" --reset >/dev/null
 wait "$reset_watcher"
-grep -Fxq reset "$TMP/reset.actions"
+grep -Fxq reset "$TMP/reset.log"
 
-echo 'OK: terminals abre projetos + lrdp1/lrdp2 sequencialmente, move/maximiza na segunda chamada e mantém reset compatível com v9.'
+echo 'OK: terminals ativa cada desktop e abre ali o terminal da pasta correta, um por vez, sem segunda fase.'

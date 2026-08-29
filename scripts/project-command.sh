@@ -13,9 +13,26 @@ PROJECT_NAME="${1:-}"
 PROJECT_DIR="${2:-}"
 DEPLOY_MODE="${3:-local}"
 shift 3 || true
-ACTION="${1:-setup}"
-if (($# > 0)); then
+AUTO_MODE=0
+if [[ "$PROJECT_NAME" == *-auto ]]; then
+  AUTO_MODE=1
+  ACTION="${1:-setup}"
+  if (($# > 0)); then
+    shift
+  fi
+elif [[ "${1:-}" == "auto" ]]; then
+  # Compatibilidade com a sintaxe antiga; os comandos instalados usam -auto.
+  AUTO_MODE=1
   shift
+  ACTION="${1:-setup}"
+  if (($# > 0)); then
+    shift
+  fi
+else
+  ACTION="${1:-setup}"
+  if (($# > 0)); then
+    shift
+  fi
 fi
 ARGS=("$@")
 
@@ -47,8 +64,8 @@ printf '[%s] executando: ./deploy/%s/%s.sh%s\n' \
   "$PROJECT_NAME" "$DEPLOY_MODE" "$ACTION" "${ARGS[*]:+ ${ARGS[*]}}"
 cd "$PROJECT_DIR"
 
-# Remoto continua execução simples: nunca é reiniciado por um ZIP local.
-if [[ "$DEPLOY_MODE" == "remote" ]]; then
+# Sem `auto`, remoto preserva o contrato antigo: executa uma vez e termina.
+if [[ "$DEPLOY_MODE" == "remote" && "$AUTO_MODE" -eq 0 ]]; then
   bash "$SCRIPT_PATH" "${ARGS[@]}"
   status=$?
   if ((status != 0)); then
@@ -67,6 +84,7 @@ WEB_PID=""
 RESTART_REQUESTED=0
 RESTART_SCOPE="both"
 STOP_REQUESTED=0
+IDLE_PID=""
 SUPERVISION_MODE="single"
 API_SCRIPT=""
 WEB_SCRIPT=""
@@ -96,7 +114,7 @@ can_split_canonical_action() {
   return 0
 }
 
-if can_split_canonical_action; then
+if [[ "$DEPLOY_MODE" == "local" ]] && can_split_canonical_action; then
   SUPERVISION_MODE="split"
   printf '[%s] supervisão por camada ativa: API e Web independentes.\n' "$PROJECT_NAME"
 fi
@@ -109,6 +127,7 @@ write_state() {
     printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR"
     printf 'DEPLOY_MODE=%s\n' "$DEPLOY_MODE"
     printf 'ACTION=%s\n' "$ACTION"
+    printf 'AUTO_MODE=%s\n' "$AUTO_MODE"
     printf 'MODE=%s\n' "$SUPERVISION_MODE"
     printf 'CHILD_PID=%s\n' "${CHILD_PID:-}"
     printf 'API_PID=%s\n' "${API_PID:-}"
@@ -162,6 +181,7 @@ on_restart() {
   else
     stop_pid "$CHILD_PID"
   fi
+  stop_pid "$IDLE_PID"
 }
 
 on_stop() {
@@ -172,6 +192,7 @@ on_stop() {
   else
     stop_pid "$CHILD_PID"
   fi
+  stop_pid "$IDLE_PID"
 }
 
 cleanup() {
@@ -182,6 +203,21 @@ trap on_restart USR1
 trap on_stop INT TERM
 trap cleanup EXIT
 write_state
+
+wait_for_auto_restart() {
+  printf '[%s] AUTO ativo; aguardando novo ZIP aplicado pelo Dev Automation.\n' "$PROJECT_NAME"
+  while ((RESTART_REQUESTED == 0 && STOP_REQUESTED == 0)); do
+    sleep 86400 &
+    IDLE_PID=$!
+    wait "$IDLE_PID" 2>/dev/null || true
+    IDLE_PID=""
+  done
+}
+
+if ((AUTO_MODE == 1)); then
+  printf '[%s] AUTO ativo: ./deploy/%s/%s.sh será reexecutado somente após ZIP importado pelo Dev Automation.\n' \
+    "$PROJECT_NAME" "$DEPLOY_MODE" "$ACTION"
+fi
 
 if [[ "$SUPERVISION_MODE" == "split" ]]; then
   start_api
@@ -256,5 +292,17 @@ while true; do
     printf '[%s] ERRO: comando terminou com código %d\n' "$PROJECT_NAME" "$status" >&2
     play_error_sound
   fi
-  exit "$status"
+
+  if ((AUTO_MODE == 0)); then
+    exit "$status"
+  fi
+
+  printf '[%s] deploy %s concluído com código %d; monitor AUTO permanece ativo.\n' \
+    "$PROJECT_NAME" "$DEPLOY_MODE" "$status"
+  wait_for_auto_restart
+  if ((STOP_REQUESTED == 1)); then
+    exit 130
+  fi
+  printf '[%s] novo ZIP confirmado; reexecutando ./deploy/%s/%s.sh\n' \
+    "$PROJECT_NAME" "$DEPLOY_MODE" "$ACTION"
 done

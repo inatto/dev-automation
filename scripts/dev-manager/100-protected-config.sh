@@ -31,7 +31,7 @@ from pathlib import Path
 root = Path(sys.argv[1])
 placeholder = "********"
 secret_key = re.compile(
-    r"(?:^|_)(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY)(?:$|_)",
+    r"(?:^|_)(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_KEY|ADMIN_KEY|ACCESS_KEY|PRIVATE_KEY)(?:$|_)",
     re.IGNORECASE,
 )
 assignment = re.compile(

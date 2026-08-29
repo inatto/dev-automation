@@ -3,7 +3,7 @@
 # Não cria/edita .gitattributes, não altera índice, não faz git add/init.
 
 GITCRYPT_GUARD_SCRIPT="${DEV_MANAGER_GITCRYPT_GUARD_SCRIPT:-$PROJECT_ROOT/scripts/config-gitcrypt-guard.sh}"
-GITCRYPT_GUARD_KEY="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/git-reverse-crypt-2.key}"
+GITCRYPT_GUARD_KEY="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/reverse-crypt.key}"
 GITCRYPT_CRITICAL_BEEPED=false
 
 emit_gitcrypt_guard_output() {

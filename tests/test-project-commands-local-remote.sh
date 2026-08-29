@@ -22,14 +22,19 @@ done
 HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" PROJECTS_FILE="$TMP/projects" \
   "$ROOT/deploy/local/install-project-commands.sh" >/dev/null
 [[ -x "$TARGET_DIR/sample-app" ]]
+[[ -x "$TARGET_DIR/sample-app-auto" ]]
 [[ -x "$TARGET_DIR/remote-sample-app" ]]
+[[ -x "$TARGET_DIR/remote-sample-app-auto" ]]
 [[ -x "$TARGET_DIR/ssh-sample-app" ]]
 [[ "$($TARGET_DIR/sample-app | tail -n 1)" == 'local:setup:' ]]
 [[ "$($TARGET_DIR/sample-app start | tail -n 1)" == 'local:start:' ]]
 [[ "$($TARGET_DIR/remote-sample-app | tail -n 1)" == 'remote:setup:' ]]
 [[ "$($TARGET_DIR/remote-sample-app start-api abc | tail -n 1)" == 'remote:start-api:abc' ]]
+grep -Fq 'exec bash ' "$TARGET_DIR/sample-app-auto"
+grep -Fq '"sample-app-auto"' "$TARGET_DIR/sample-app-auto"
+grep -Fq '"remote-sample-app-auto"' "$TARGET_DIR/remote-sample-app-auto"
 if "$TARGET_DIR/remote-sample-app help" >/dev/null 2>&1; then
   echo 'FALHOU: help inventado foi aceito' >&2
   exit 1
 fi
-echo 'OK: comandos locais e remotos executam somente scripts reais do contrato'
+echo 'OK: comandos locais/remotos normais e -auto são instalados no padrão com hífen'

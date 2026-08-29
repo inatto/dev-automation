@@ -19,7 +19,7 @@
 - `↑`/`↓`: selecionar RDP.
 - `1`..`9`: seleção rápida.
 - `Enter`: conectar com a configuração salva.
-- `F2`: configuração estilo BIOS. `←`/`→` altera, `F10` ou `S` salva, `Esc` cancela.
+- `F2`: configuração estilo BIOS. O campo **IP de destino** abre a edição com `Enter`; `←`/`→` altera as demais opções; `F10` ou `S` salva; `Esc` cancela.
 - `F3`: mapa de monitores. `←`/`→` escolhe e `Enter` define o principal.
 - `F4`: diagnóstico de rede/Ubuntu.
 - `F5`: redetectar RDPs, monitores, DRM e rede.
@@ -28,7 +28,7 @@
 
 ## Persistência
 
-Cada RDP grava apenas as escolhas em `~/.config/dev-automation/lrdp/lrdpN.conf`. As credenciais continuam definidas no script `apps/lrdp/lrdpN`; a TUI recebe apenas metadados sem senha por `--metadata`.
+Cada RDP grava login/áudio/microfone/monitor em `~/.config/dev-automation/lrdp/lrdpN.conf`. Quando o IP é alterado pelo F2 e salvo com `F10/S`, a TUI atualiza diretamente a linha `LRDP_TARGET` do respectivo `apps/lrdp/lrdpN`. As credenciais continuam definidas no script; a TUI recebe apenas metadados sem senha por `--metadata`.
 
 A TUI abre o RDP com `--saved`, que evita qualquer prompt no terminal. Logs de lançamento ficam em `~/.local/state/dev-automation/lrdp/lrdpN.log`.
 

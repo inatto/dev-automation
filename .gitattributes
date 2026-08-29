@@ -24,3 +24,4 @@
 *.zip  binary
 *.wav  binary
 *.mp3  binary
+.config/** filter=git-crypt diff=git-crypt

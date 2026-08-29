@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "project": {
+    "id": "orbital-app",
+    "label": "Orbital App",
+    "zip_name": "orbital-app.zip"
+  },
+  "instructions": "Os comandos do usuário podem estar em português, mas nomes de ações e parâmetros permanecem em inglês.",
+  "actions": [
+    {
+      "name": "find_member",
+      "description": "Locate a member record by name, CPF, email, or another search term without changing data.",
+      "parameters": [
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Name, CPF, email, or text supplied by the user.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "view_member",
+      "description": "Open or retrieve the details of one specific member record.",
+      "parameters": [
+        {
+          "name": "member_id",
+          "type": "string",
+          "description": "Explicit member identifier when the user supplied one.",
+          "required": false
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Name, CPF, or email used to identify the member.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "edit_member",
+      "description": "Start editing an existing member record identified by the user; do not infer field values that were not supplied.",
+      "parameters": [
+        {
+          "name": "member_id",
+          "type": "string",
+          "description": "Explicit member identifier when available.",
+          "required": false
+        },
+        {
+          "name": "query",
+          "type": "string",
+          "description": "Name, CPF, or email used to identify the member.",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

@@ -84,16 +84,23 @@ validate_project_global_names() {
     fi
 
     command_base="$(project_global_command_base "$project" "$projects_file")"
-    command_lower="${command_base,,}"
-    owner="${command_owners[$command_lower]:-}"
-    if [[ -n "$owner" && "$owner" != "$project" ]]; then
-      printf '[project-commands] ERRO: nome de comando global ambíguo %q.\n' "$command_base" >&2
-      printf '[project-commands]   Já cadastrado: %s\n' "$owner" >&2
-      printf '[project-commands]   Duplicado:     %s\n' "$project" >&2
-      failed=1
-    else
-      command_owners["$command_lower"]="$project"
-    fi
+    for generated_command in \
+      "$command_base" \
+      "$command_base-auto" \
+      "remote-$command_base" \
+      "remote-$command_base-auto" \
+      "ssh-$command_base"; do
+      command_lower="${generated_command,,}"
+      owner="${command_owners[$command_lower]:-}"
+      if [[ -n "$owner" && "$owner" != "$project" ]]; then
+        printf '[project-commands] ERRO: nome de comando global ambíguo %q.\n' "$generated_command" >&2
+        printf '[project-commands]   Já cadastrado: %s\n' "$owner" >&2
+        printf '[project-commands]   Duplicado:     %s\n' "$project" >&2
+        failed=1
+      else
+        command_owners["$command_lower"]="$project"
+      fi
+    done
   done < <(project_configured_normal_paths "$projects_file")
 
   [[ "$failed" -eq 0 ]]

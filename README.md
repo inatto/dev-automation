@@ -33,6 +33,7 @@ Depois da instalação:
 ```bash
 auto-code-manager
 dev-manager
+gpt-console
 desktops
 chromes
 phpstorms
@@ -42,6 +43,23 @@ orbital-app
 station-app
 inst-app
 ```
+
+### `gpt-console`
+
+Abre uma TUI tipo BIOS para testar a OpenAI API com catálogos de ações por
+projeto, texto, transcrição de áudio, uso local/remoto e edição controlada dos
+ZIPs existentes em `/home/daniel/Code`. A configuração fica exclusivamente em
+`dev-automation/.config/gpt-console/`; o ZIP devolvido pela API é validado e
+salvo em `~/Downloads` para o Dev Manager importar no fluxo normal.
+
+```bash
+bash apps/gpt-console/install.sh
+gpt-console
+gpt-console --doctor
+```
+
+Atalhos principais: `F2` configuração, `F3` projetos/ações, `F4` texto, `F5`
+voz, `F6` ZIP, `F7` uso, `F9` diagnóstico e `Q` sair.
 
 ### `auto-code-manager`
 
@@ -193,7 +211,7 @@ No Ubuntu/GNOME, `desktops` usa workspaces fixos, mantém os nomes via `gsetting
 
 O comando `lrdp` abre o **LRDP Control Center**, uma TUI fullscreen no padrão do Dev Manager. Ela descobre automaticamente `apps/lrdp/lrdpN`, portanto futuros `lrdp3`, `lrdp4` etc. entram na lista sem alterar a TUI. A tela principal mostra os RDPs, status TCP 3389, sessão FreeRDP ativa, configuração efetiva, mapa proporcional dos monitores, resolução/posição, saídas físicas DRM, IP local, interface, gateway, destino e o comando FreeRDP com a senha ocultada.
 
-Atalhos principais da TUI: `Enter` conecta imediatamente com a configuração salva; `F2` abre a configuração tipo BIOS (login, áudio, microfone e monitor principal); `F3` abre o mapa de monitores e permite escolher o principal; `F4` mostra rede/rotas; `F5` atualiza; `F1` mostra ajuda; `Q` sai. A configuração fica em `~/.config/dev-automation/lrdp/` e os logs de lançamento ficam em `~/.local/state/dev-automation/lrdp/`.
+Atalhos principais da TUI: `Enter` conecta imediatamente com a configuração salva; `F2` abre a configuração tipo BIOS (IP de destino, login, áudio, microfone e monitor principal; o IP salvo atualiza `LRDP_TARGET` no arquivo `apps/lrdp/lrdpN`); `F3` abre o mapa de monitores e permite escolher o principal; `F4` mostra rede/rotas; `F5` atualiza; `F1` mostra ajuda; `Q` sai. A configuração fica em `~/.config/dev-automation/lrdp/` e os logs de lançamento ficam em `~/.local/state/dev-automation/lrdp/`.
 
 Os comandos `lrdp1`/`lrdp2` continuam disponíveis como atalhos diretos e mantêm o modo de configuração textual legado. A TUI usa `--saved` internamente para conectar sem refazer perguntas.
 
@@ -207,25 +225,43 @@ A ordem e os nomes dos projetos continuam vindo apenas de `config/auto-code-mana
 
 ### `terminals`
 
-No Ubuntu/GNOME/Wayland, abre um terminal por projeto configurado. O workspace
-1 (`LAZER`) e os dois últimos (`lrdp1`/`lrdp2`) ficam fora.
-
-O fluxo é deliberadamente dividido em duas chamadas para não disputar com o
-startup assíncrono do terminal:
+No Ubuntu/GNOME/Wayland, uma única execução abre um terminal em cada workspace
+de projeto e também em `lrdp1`/`lrdp2`. Somente o workspace 1 (`LAZER`) fica
+fora.
 
 ```bash
-terminals   # 1ª chamada: abre somente o que falta, uma janela por vez
-terminals   # 2ª chamada: move para o monitor direito e maximiza
+terminals
 ```
 
-Cada nova janela só é solicitada depois que o controlador GNOME confirma a
-anterior. Repetições posteriores apenas reconciliam posição e maximização, sem
-criar outro lote. Para fechar o lote e limpar terminais extras dos workspaces de
-projeto:
+O comando ativa o desktop de destino antes de criar cada janela, abre o terminal
+já na pasta correspondente, posiciona-o no monitor direito, maximiza e aguarda
+1,5 segundo antes de seguir para o próximo desktop. Não existe segunda chamada
+de movimentação ou associação posterior. Uma nova execução abre um novo conjunto;
+para reabrir tudo do zero, use primeiro `terminals-close`. Para fechar o lote e
+limpar terminais extras dos workspaces de projeto:
 
 ```bash
 terminals --reset
+
+# fecha todos os terminais gráficos da sessão atual
+terminals-close
 ```
+
+### Comandos de fechamento
+
+Os atalhos abaixo encerram somente a aplicação correspondente para permitir
+uma reabertura limpa pelos comandos normais:
+
+```bash
+files-close       # Files/Nautilus da sessão gráfica atual
+chromes-close     # Google Chrome/Chromium da sessão gráfica atual
+pycharms-close    # todas as janelas PyCharm pelo controlador GNOME
+terminals-close   # todos os terminais gráficos da sessão atual
+```
+
+O `pycharms-close` reutiliza o fechamento seguro já existente em
+`pycharms --close`; ele solicita o fechamento das janelas e não mata uma JVM
+genérica por nome.
 
 ### `chromes`
 
@@ -299,14 +335,17 @@ ignorados.
 Cada comando entra automaticamente na pasta correta e usa `deploy/local`:
 
 ```bash
-orbital-app             # setup.sh + start.sh
-orbital-app start       # somente start.sh
-orbital-app setup       # somente setup.sh
-orbital-app run         # setup.sh + start.sh
-orbital-app test        # test.sh
-orbital-app scripts     # lista ações disponíveis
-orbital-app dir         # mostra a pasta
+orbital-app                 # deploy local normal
+orbital-app-auto            # deploy local + reinício após ZIP aplicado pelo Dev Automation
+remote-orbital-app          # deploy remoto normal
+remote-orbital-app-auto     # deploy remoto + novo deploy após ZIP aplicado pelo Dev Automation
+orbital-app start           # somente start.sh
+orbital-app-auto start      # start.sh supervisionado pelo modo auto
+orbital-app setup           # somente setup.sh
+orbital-app test            # test.sh
 ```
+
+Os comandos terminados em `-auto` não observam alterações manuais no filesystem. Eles reagem somente ao evento emitido pelo próprio Dev Automation depois que uma importação de ZIP termina com sucesso. Os comandos sem `-auto` mantêm o comportamento normal, sem reinício automático.
 
 Os scripts de execução usam `exec` no processo de longa duração, permitindo
 encerrar normalmente com `Ctrl+C`.
@@ -321,7 +360,8 @@ source ~/.bashrc
 ```
 
 O instalador cria ou atualiza `auto-code-manager`, `dev-manager`, `chromes`,
-`phpstorms`, `phpstorm-dev`, `oracle-monitor` e os comandos dos projetos listados na configuração.
+`chromes-close`, `files-close`, `terminals-close`, `pycharms-close`, `phpstorms`,
+`phpstorm-dev`, `oracle-monitor` e os comandos dos projetos listados na configuração.
 
 ## Oracle Local Monitor
 
@@ -361,7 +401,9 @@ Quando necessário, o unlock continua disponível somente por ação manual expl
 dev-manager git-crypt
 ```
 
-Esse comando manual usa a chave padrão `/home/daniel/static/git-reverse-crypt-2.key` e apenas tenta `git-crypt unlock`. Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração.
+Esse comando manual usa a chave padrão `/home/daniel/static/reverse-crypt.key` e apenas tenta `git-crypt unlock`. Ele não executa `git-crypt init`, não cria/edita `.gitattributes`, não usa `.git/info/attributes`, não faz `git add`, não reescreve índice/HEAD e não cria arquivos de configuração.
+
+Para auditar e proteger todas as pastas `.config` dos projetos habilitados, use `script-dev-automation`. A TUI exige confirmação antes de alterar `.gitattributes` ou preparar os arquivos no índice Git e nunca cria commits automaticamente.
 
 ## ZIP seguro de configs (v43)
 

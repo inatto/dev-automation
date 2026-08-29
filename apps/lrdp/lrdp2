@@ -3,7 +3,7 @@ set -euo pipefail
 
 LRDP_NAME="lrdp2"
 LRDP_LABEL="RDP 2"
-LRDP_TARGET="192.168.1.47"
+LRDP_TARGET="192.168.1.178"
 LRDP_PORT=3389
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

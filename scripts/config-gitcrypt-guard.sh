@@ -7,7 +7,7 @@ set -uo pipefail
 
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 PROJECTS_FILE="${DEV_MANAGER_PROJECTS_FILE:-}"
-KEY_FILE="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/git-reverse-crypt-2.key}"
+KEY_FILE="${DEV_MANAGER_GIT_CRYPT_KEY:-/home/daniel/static/reverse-crypt.key}"
 MODE="unlock"
 ONLY_PROJECT=""
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
@@ -24,11 +24,11 @@ Uso:
   config-gitcrypt-guard.sh [--unlock|--check] [--project REL] [--code-root DIR]
                            [--projects-file FILE] [--key FILE]
 
-Padrão: --unlock usando /home/daniel/static/git-reverse-crypt-2.key.
+Padrão: --unlock usando /home/daniel/static/reverse-crypt.key.
 
 IMPORTANTE: este script NÃO cria nem altera .gitattributes, NÃO altera o índice
 Git, NÃO faz git add e NÃO executa git-crypt init. A única ação mutável é:
-  git-crypt unlock /home/daniel/static/git-reverse-crypt-2.key
+  git-crypt unlock /home/daniel/static/reverse-crypt.key
 EOF_HELP
 }
 
