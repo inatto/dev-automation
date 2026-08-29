@@ -12,10 +12,14 @@ cat > "$TMP/bin/gnome-shell" <<'FAKE'
 #!/usr/bin/env bash
 printf 'GNOME Shell 50.1\n'
 FAKE
+cat > "$TMP/bin/gsettings" <<'FAKE'
+#!/usr/bin/env bash
+exit 0
+FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 13\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 15\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -25,10 +29,12 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
 : > "$TMP/terminal.log"
 : > "$TMP/order.log"
@@ -51,13 +57,13 @@ READY
     [[ "$action" == direct ]]
     handled=$((handled + 1))
     printf '%s:%s\n' "$slot" "$workspace" >> "$TMP/order.log"
-    printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tvalid=1\n' \
+    printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tall_monitors=1\tvalid=1\n' \
       "$token" "$count" "$workspace" "$slot" > "$TMP/state/desktops/terminals.ready"
     for _ in $(seq 1 100); do
       (( $(wc -l < "$TMP/terminal.log") >= handled )) && break
       sleep 0.02
     done
-    printf '%s\tplaced=1\texpected=1\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+    printf '%s\tplaced=1\texpected=1\tcomplete=1\tworkspace=%s\tmonitor=2\n' "$token" "$workspace" > "$TMP/state/desktops/terminals.result"
     (( handled == count )) && exit 0
   done
   exit 4

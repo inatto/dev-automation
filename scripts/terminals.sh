@@ -12,7 +12,7 @@ PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
-OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-1.5}"
+OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-0.5}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
 
 log(){ printf '[terminals] %s\n' "$*"; }
@@ -71,6 +71,12 @@ launch_terminal_window() {
     x-terminal-emulator) (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &) ;;
     *) return 1 ;;
   esac
+}
+
+ensure_workspaces_on_all_monitors() {
+  command -v gsettings >/dev/null 2>&1 || fail 'gsettings não encontrado; não consigo garantir um workspace por monitor.'
+  gsettings set org.gnome.mutter workspaces-only-on-primary false || \
+    fail 'não foi possível habilitar workspaces em todos os monitores.'
 }
 
 acquire_lock() {
@@ -158,7 +164,7 @@ case "${1:-}" in
     ;;
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
-    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda 1,5 segundo antes do próximo.\n'
+    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda 1 segundo antes do próximo.\n'
     printf 'LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
     exit 0
     ;;
@@ -174,6 +180,7 @@ esac
 acquire_lock
 IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
   fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
+ensure_workspaces_on_all_monitors
 
 log 'FLUXO ÚNICO: cada terminal será aberto diretamente no seu workspace e na pasta do projeto.'
 log "Terminal: $terminal_kind -> $terminal"
@@ -187,22 +194,44 @@ for ((project_index=0; project_index<count; project_index++)); do
   request_fields="$(printf 'count=%s\tworkspace=%s\tslot=%s' "$count" "$workspace_number" "$slot")"
 
   log "ABRINDO $slot/$count: desktop $workspace_number · $project_name · $working_dir"
-  if ! gnome_placement_prepare terminals direct "$request_fields"; then
-    fail "não foi possível ativar o desktop $workspace_number. Rode 'desktops' e faça logout/login uma vez se o controlador tiver sido atualizado."
-  fi
+  placement_rc=0
+  gnome_placement_prepare terminals direct "$request_fields" || placement_rc=$?
+  case "$placement_rc" in
+    0) ;;
+    75)
+      fail "o controlador GNOME foi atualizado no disco, mas a sessão ainda usa o código antigo. Faça logout/login UMA vez e rode 'terminals' novamente."
+      ;;
+    76)
+      fail "o controlador GNOME carregado não suporta a associação direta desktop/slot. Rode 'desktops --ensure-controller', faça logout/login UMA vez e execute 'terminals' novamente."
+      ;;
+    *)
+      fail "não foi possível ativar o desktop $workspace_number${GNOME_PLACEMENT_LAST_ERROR:+: $GNOME_PLACEMENT_LAST_ERROR}."
+      ;;
+  esac
 
+  ready_action="$(gnome_placement_ready_field action 2>/dev/null || true)"
+  ready_count="$(gnome_placement_ready_field count 2>/dev/null || true)"
   ready_workspace="$(gnome_placement_ready_field workspace 2>/dev/null || true)"
   ready_slot="$(gnome_placement_ready_field slot 2>/dev/null || true)"
+  ready_monitor="$(gnome_placement_ready_field monitor 2>/dev/null || true)"
+  ready_all_monitors="$(gnome_placement_ready_field all_monitors 2>/dev/null || true)"
   ready_valid="$(gnome_placement_ready_field valid 2>/dev/null || true)"
-  [[ "$ready_valid" == 1 && "$ready_workspace" == "$workspace_number" && "$ready_slot" == "$slot" ]] || \
-    fail "o GNOME não confirmou o destino de '$project_name' (desktop=${ready_workspace:-?}, slot=${ready_slot:-?})."
+  [[ "$ready_action" == direct && "$ready_count" == "$count" && "$ready_valid" == 1 && \
+     "$ready_workspace" == "$workspace_number" && "$ready_slot" == "$slot" && \
+     "$ready_monitor" =~ ^[0-9]+$ && "$ready_all_monitors" == 1 ]] || \
+    fail "o GNOME recusou o destino direto de '$project_name' (desktop esperado=$workspace_number, confirmado=${ready_workspace:-nenhum}; slot esperado=$slot, confirmado=${ready_slot:-nenhum}; monitor=${ready_monitor:-nenhum}; workspaces-em-todos-monitores=${ready_all_monitors:-não}; válido=${ready_valid:-não})."
 
   launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" || \
     fail "falha ao abrir terminal via $terminal_kind para '$project_name'"
 
   if ! gnome_placement_wait_complete terminals "$CAPTURE_TIMEOUT_TENTHS"; then
-    fail "o GNOME não confirmou o terminal de '$project_name' no desktop $workspace_number; parei para não abrir os seguintes no lugar errado."
+    fail "o GNOME não confirmou o terminal de '$project_name' no desktop $workspace_number e no monitor da direita; parei para não abrir os seguintes no lugar errado."
   fi
+
+  result_workspace="$(gnome_placement_result_field terminals workspace 2>/dev/null || true)"
+  result_monitor="$(gnome_placement_result_field terminals monitor 2>/dev/null || true)"
+  [[ "$result_workspace" == "$workspace_number" && "$result_monitor" == "$ready_monitor" ]] || \
+    fail "o terminal de '$project_name' terminou no destino errado (desktop=${result_workspace:-nenhum}, monitor=${result_monitor:-nenhum}; esperado desktop=$workspace_number, monitor=$ready_monitor)."
 
   if (( project_index + 1 < count )); then
     sleep "$OPEN_INTERVAL_SECONDS"

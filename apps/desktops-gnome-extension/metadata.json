@@ -3,5 +3,5 @@
   "name": "Dev Automation Workspace Controller",
   "description": "Controla workspaces e posicionamento explícito de janelas sem criar indicador visual duplicado.",
   "shell-version": ["50"],
-  "version": 13
+  "version": 15
 }

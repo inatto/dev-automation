@@ -236,7 +236,7 @@ terminals
 
 O comando ativa o desktop de destino antes de criar cada janela, abre o terminal
 já na pasta correspondente, posiciona-o no monitor direito, maximiza e aguarda
-1,5 segundo antes de seguir para o próximo desktop. Não existe segunda chamada
+1 segundo antes de seguir para o próximo desktop. Não existe segunda chamada
 de movimentação ou associação posterior. Uma nova execução abre um novo conjunto;
 para reabrir tudo do zero, use primeiro `terminals-close`. Para fechar o lote e
 limpar terminais extras dos workspaces de projeto:

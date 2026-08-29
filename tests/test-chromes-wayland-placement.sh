@@ -41,11 +41,14 @@ case "${1:-}" in
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     mkdir -p "$dir"
     cat > "$dir/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
+    rm -f "$dir/extension.reload-required"
     exit 0
     ;;
 esac

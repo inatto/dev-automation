@@ -31,11 +31,14 @@ case "${1:-}" in
   enable)
     mkdir -p "$HOME/.local/state/dev-automation/desktops"
     cat > "$HOME/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
+    rm -f "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/extension.reload-required"
     exit 0
     ;;
 esac
@@ -44,6 +47,7 @@ FAKE
 chmod +x "$TMP/bin/"*
 export GSETTINGS_LOG="$TMP/gsettings.log"
 PATH="$TMP/bin:$PATH" HOME="$TMP/home" DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops.sh" > "$TMP/out"
+grep -Fq 'org.gnome.mutter workspaces-only-on-primary false' "$GSETTINGS_LOG"
 grep -Fq 'org.gnome.mutter dynamic-workspaces false' "$GSETTINGS_LOG"
 grep -Fq 'org.gnome.desktop.wm.preferences num-workspaces 5' "$GSETTINGS_LOG"
 grep -Fq "workspace-names ['LAZER', 'dev-automation', 'orbital-app', 'lrdp1', 'lrdp2']" "$GSETTINGS_LOG"
@@ -61,5 +65,5 @@ grep -q "_rightmostMonitor" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "close.request" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "window.delete(timestamp)" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -q "workspace.index() <= 0" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq '"version": 13' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
+grep -Fq '"version": 15' "$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/metadata.json"
 echo 'OK: GNOME usa workspaces fixos nomeados, sem indicador flutuante, e fechamento preservando LAZER.'

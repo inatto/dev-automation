@@ -25,7 +25,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 13\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 15\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -35,10 +35,12 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
 : > "$TMP/terminal.log"
 : > "$TMP/actions.log"
@@ -69,7 +71,7 @@ READY
         [[ "$slot" == "$handled" ]]
         [[ "$workspace" == "$((handled + 1))" ]]
         printf '%s\t%s\t%s\n' "$action" "$workspace" "$slot" >> "$TMP/actions.log"
-        printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tvalid=1\n' \
+        printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tall_monitors=1\tvalid=1\n' \
           "$token" "$count" "$workspace" "$slot" > "$TMP/state/desktops/terminals.ready"
         printf '%s\tplaced=0\texpected=1\tcomplete=0\n' "$token" > "$TMP/state/desktops/terminals.result"
 
@@ -79,7 +81,7 @@ READY
           sleep 0.02
         done
         [[ "$(wc -l < "$TMP/terminal.log")" -eq "$handled" ]]
-        printf '%s\tplaced=1\texpected=1\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+        printf '%s\tplaced=1\texpected=1\tcomplete=1\tworkspace=%s\tmonitor=2\n' "$token" "$workspace" > "$TMP/state/desktops/terminals.result"
         (( handled == count )) && exit 0
         ;;
       *) exit 3 ;;
@@ -117,12 +119,13 @@ grep -Fq 'Intervalo entre aberturas: 0 segundo(s).' <<<"$out"
 grep -Fq 'sem segunda fase' <<<"$out"
 ! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals.sh"
 ! grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-1.5' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-1' "$ROOT/scripts/terminals.sh"
 grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals.sh"
+grep -Fq 'workspaces-only-on-primary false' "$ROOT/scripts/terminals.sh"
 grep -Fq "action === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq 'workspace.activate(global.get_current_time())' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq "terminalSession.mode === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq '_scheduleTerminalPlacement(' "$ROOT/apps/desktops-gnome-extension/extension.js"
+grep -Fq '_confirmDirectTerminalPlacement(' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq 'status|open|direct|reconcile|reset|managed-reset' "$ROOT/scripts/gnome-window-placement.sh"
 
 : > "$TMP/reset.log"

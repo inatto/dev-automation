@@ -3,13 +3,27 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d /tmp/desktops-controller-idempotent-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home/.local/state/dev-automation/desktops"
+TARGET="$TMP/home/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation"
+mkdir -p "$TMP/bin" "$TMP/home/.local/state/dev-automation/desktops" "$TARGET"
 printf 'bots/dev-automation\n' > "$TMP/projects"
+cp -f -- "$ROOT/apps/desktops-gnome-extension/extension.js" "$TARGET/extension.js"
+cp -f -- "$ROOT/apps/desktops-gnome-extension/stylesheet.css" "$TARGET/stylesheet.css"
+cat > "$TARGET/metadata.json" <<'JSON'
+{
+  "uuid": "workspace-name-osd@dev-automation",
+  "name": "Dev Automation Workspace Controller",
+  "description": "Controla workspaces e posicionamento explícito de janelas sem criar indicador visual duplicado.",
+  "shell-version": ["50"],
+  "version": 15
+}
+JSON
 cat > "$TMP/home/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
 cat > "$TMP/bin/gsettings" <<'FAKE'
 #!/usr/bin/env bash
@@ -35,5 +49,5 @@ for _ in 1 2 3; do
     "$ROOT/scripts/desktops.sh" >/dev/null
 done
 [[ ! -s "$TMP/ext.calls" ]]
-grep -Fqx 'version=13' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
+grep -Fqx 'version=15' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
 echo 'OK: controlador GNOME é idempotente; execuções repetidas não fazem enable/disable nem apagam o marker.'

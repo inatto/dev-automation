@@ -8,15 +8,49 @@ GNOME_PLACEMENT_STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automa
 GNOME_PLACEMENT_STATE_DIR="$GNOME_PLACEMENT_STATE_ROOT/desktops"
 GNOME_PLACEMENT_TOKEN=''
 GNOME_PLACEMENT_READY_LINE=''
-GNOME_PLACEMENT_CONTROLLER_VERSION=13
+GNOME_PLACEMENT_CONTROLLER_VERSION=15
+GNOME_PLACEMENT_LAST_ERROR=''
 
 _gnome_placement_log() {
   printf '[window-placement] %s\n' "$*"
 }
 
 _gnome_placement_fail() {
+  GNOME_PLACEMENT_LAST_ERROR="$*"
+  export GNOME_PLACEMENT_LAST_ERROR
   printf '[window-placement] ERRO: %s\n' "$*" >&2
   return 1
+}
+
+_gnome_placement_line_field() {
+  local line="$1" key="$2" field
+  local -a fields=()
+  IFS=$'\t' read -ra fields <<<"$line"
+  for field in "${fields[@]}"; do
+    if [[ "$field" == "$key="* ]]; then
+      printf '%s\n' "${field#*=}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+_gnome_placement_ready_is_compatible() {
+  local kind="$1" action="$2" line="$3"
+  local ready_action workspace slot monitor all_monitors valid
+
+  [[ "$kind" == terminals ]] || return 0
+  ready_action="$(_gnome_placement_line_field "$line" action 2>/dev/null || true)"
+  [[ "$ready_action" == "$action" ]] || return 1
+
+  [[ "$action" == direct ]] || return 0
+  workspace="$(_gnome_placement_line_field "$line" workspace 2>/dev/null || true)"
+  slot="$(_gnome_placement_line_field "$line" slot 2>/dev/null || true)"
+  monitor="$(_gnome_placement_line_field "$line" monitor 2>/dev/null || true)"
+  all_monitors="$(_gnome_placement_line_field "$line" all_monitors 2>/dev/null || true)"
+  valid="$(_gnome_placement_line_field "$line" valid 2>/dev/null || true)"
+  [[ "$workspace" =~ ^[0-9]+$ && "$slot" =~ ^[0-9]+$ && "$monitor" =~ ^[0-9]+$ && \
+     "$all_monitors" =~ ^[01]$ && "$valid" =~ ^[01]$ ]]
 }
 
 gnome_placement_supported() {
@@ -27,6 +61,11 @@ gnome_placement_supported() {
 
 gnome_placement_prepare() {
   local kind="$1" action="${2:-default}" request_fields="${3:-}" request ready result token tmp attempt line
+  local controller_rc=0 malformed_replies=0
+  GNOME_PLACEMENT_TOKEN=''
+  GNOME_PLACEMENT_READY_LINE=''
+  GNOME_PLACEMENT_LAST_ERROR=''
+  export GNOME_PLACEMENT_TOKEN GNOME_PLACEMENT_READY_LINE GNOME_PLACEMENT_LAST_ERROR
   case "$kind" in
     chromes)
       [[ "$action" == default ]] || { _gnome_placement_fail "ação inválida para chromes: $action"; return 1; }
@@ -42,15 +81,36 @@ gnome_placement_prepare() {
 
   gnome_placement_supported || _gnome_placement_fail 'GNOME/Wayland não detectado nesta sessão.' || return 1
 
-  # Fast path idempotente: não reinstala/recarrega extensão a cada comando.
-  local controller_ready="$GNOME_PLACEMENT_STATE_DIR/extension.ready" controller_info=""
+  # Fast path seguro: além do marker/runtime, compara a cópia instalada quando
+  # ela existe e respeita o marker de recarga pendente. Assim não reinstala em
+  # toda abertura, mas também não conversa com código antigo após uma atualização.
+  local controller_ready="$GNOME_PLACEMENT_STATE_DIR/extension.ready"
+  local controller_reload="$GNOME_PLACEMENT_STATE_DIR/extension.reload-required"
+  local controller_source="$GNOME_PLACEMENT_PROJECT_ROOT/apps/desktops-gnome-extension/extension.js"
+  local controller_target="$HOME/.local/share/gnome-shell/extensions/workspace-name-osd@dev-automation/extension.js"
+  local controller_info='' installed_matches=1
   controller_info="$(gnome-extensions info workspace-name-osd@dev-automation 2>/dev/null || true)"
+  if [[ -f "$controller_target" && -f "$controller_source" ]] && ! cmp -s -- "$controller_source" "$controller_target"; then
+    installed_matches=0
+  fi
+
   if ! [[ -s "$controller_ready" ]] || \
      ! grep -Fqx "version=$GNOME_PLACEMENT_CONTROLLER_VERSION" "$controller_ready" || \
      ! grep -Fqx 'controller=1' "$controller_ready" || \
      ! grep -Fqx 'window-placement=1' "$controller_ready" || \
+     ! grep -Fqx 'terminal-direct=1' "$controller_ready" || \
+     ! grep -Fqx 'terminal-placement-verified=1' "$controller_ready" || \
+     [[ -e "$controller_reload" ]] || \
+     (( installed_matches == 0 )) || \
      ! grep -qiE '^[[:space:]]*State:[[:space:]]*ACTIVE[[:space:]]*$' <<<"$controller_info"; then
-    "$GNOME_PLACEMENT_PROJECT_ROOT/scripts/desktops.sh" --ensure-controller >/dev/null || return 1
+    "$GNOME_PLACEMENT_PROJECT_ROOT/scripts/desktops.sh" --ensure-controller >/dev/null || controller_rc=$?
+    if (( controller_rc != 0 )); then
+      if (( controller_rc == 75 )); then
+        GNOME_PLACEMENT_LAST_ERROR='controlador GNOME atualizado no disco, mas ainda não recarregado pela sessão Wayland'
+        export GNOME_PLACEMENT_LAST_ERROR
+      fi
+      return "$controller_rc"
+    fi
   fi
 
   mkdir -p "$GNOME_PLACEMENT_STATE_DIR"
@@ -72,6 +132,15 @@ gnome_placement_prepare() {
     if [[ -s "$ready" ]]; then
       line="$(cat "$ready" 2>/dev/null || true)"
       if [[ "${line%%$'\t'*}" == "$token" ]]; then
+        if ! _gnome_placement_ready_is_compatible "$kind" "$action" "$line"; then
+          ((malformed_replies += 1))
+          if (( malformed_replies >= 4 )); then
+            _gnome_placement_fail "controlador GNOME respondeu com protocolo incompatível para '$kind/$action'; recarregue a sessão após atualizar a extensão."
+            return 76
+          fi
+          sleep 0.1
+          continue
+        fi
         GNOME_PLACEMENT_TOKEN="$token"
         GNOME_PLACEMENT_READY_LINE="$line"
         export GNOME_PLACEMENT_TOKEN GNOME_PLACEMENT_READY_LINE

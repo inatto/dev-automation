@@ -18,7 +18,8 @@ DESKTOPS_CLOSE_REQUEST="$DESKTOPS_STATE_DIR/close.request"
 DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
 DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
 DESKTOPS_EXTENSION_READY="$DESKTOPS_STATE_DIR/extension.ready"
-GNOME_EXTENSION_VERSION=13
+DESKTOPS_EXTENSION_RELOAD_REQUIRED="$DESKTOPS_STATE_DIR/extension.reload-required"
+GNOME_EXTENSION_VERSION=15
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
@@ -158,24 +159,36 @@ JSON
   done
   rm -f -- "$metadata_tmp"
 
+  if (( changed == 1 )); then
+    local reload_tmp="$DESKTOPS_EXTENSION_RELOAD_REQUIRED.tmp.$$"
+    printf 'version=%s\n' "$GNOME_EXTENSION_VERSION" > "$reload_tmp"
+    mv -f -- "$reload_tmp" "$DESKTOPS_EXTENSION_RELOAD_REQUIRED"
+  fi
+
   runtime_ready=0
-  if [[ -s "$DESKTOPS_EXTENSION_READY" ]]; then
+  if [[ -s "$DESKTOPS_EXTENSION_READY" && ! -e "$DESKTOPS_EXTENSION_RELOAD_REQUIRED" ]]; then
     runtime_ready=1
     grep -Fqx "version=$GNOME_EXTENSION_VERSION" "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
     grep -Fqx 'controller=1' "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
     grep -Fqx 'floating-label=0' "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
     grep -Fqx 'window-placement=1' "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
+    grep -Fqx 'terminal-direct=1' "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
+    grep -Fqx 'terminal-placement-verified=1' "$DESKTOPS_EXTENSION_READY" || runtime_ready=0
   fi
 
   info="$(gnome-extensions info "$GNOME_EXTENSION_UUID" 2>/dev/null || true)"
   state="$(sed -n 's/^[[:space:]]*State:[[:space:]]*//p' <<<"$info" | head -n1 | tr '[:lower:]' '[:upper:]')"
 
-  # Caminho normal e idempotente: se o controlador já está ativo e confirmou a
-  # versão carregada nesta sessão, NÃO desabilita, NÃO reabilita e NÃO apaga o
-  # marker. Repetir desktops/chromes/terminals não muda o estado da extensão.
-  if [[ "$state" == ACTIVE && "$runtime_ready" == 1 ]]; then
-    (( changed == 0 )) || warn 'arquivos da extensão foram atualizados no disco; a sessão atual continua usando o controlador já carregado.'
+  # Caminho normal e idempotente: só continua quando o código instalado não
+  # mudou e o runtime confirmou a versão/capacidades desta sessão. Se houve
+  # cópia nova no Wayland, prosseguir seria falar com o controlador antigo.
+  if [[ "$state" == ACTIVE && "$runtime_ready" == 1 && "$changed" == 0 ]]; then
     return 0
+  fi
+
+  if [[ "$state" == ACTIVE && -e "$DESKTOPS_EXTENSION_RELOAD_REQUIRED" && "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+    warn "controlador GNOME v$GNOME_EXTENSION_VERSION atualizado no disco, mas a sessão Wayland ainda usa a versão anterior. Faça logout/login UMA vez para carregar o código novo."
+    return 75
   fi
 
   # Extensão ainda não registrada pelo Shell atual. Em Wayland, código novo só
@@ -193,10 +206,13 @@ JSON
       fail 'GNOME recusou habilitar a extensão de controle dos workspaces.'
     for ((attempt=0; attempt<30; attempt++)); do
       if [[ -s "$DESKTOPS_EXTENSION_READY" ]] && \
+         [[ ! -e "$DESKTOPS_EXTENSION_RELOAD_REQUIRED" ]] && \
          grep -Fqx "version=$GNOME_EXTENSION_VERSION" "$DESKTOPS_EXTENSION_READY" && \
          grep -Fqx 'controller=1' "$DESKTOPS_EXTENSION_READY" && \
          grep -Fqx 'floating-label=0' "$DESKTOPS_EXTENSION_READY" && \
-         grep -Fqx 'window-placement=1' "$DESKTOPS_EXTENSION_READY"; then
+         grep -Fqx 'window-placement=1' "$DESKTOPS_EXTENSION_READY" && \
+         grep -Fqx 'terminal-direct=1' "$DESKTOPS_EXTENSION_READY" && \
+         grep -Fqx 'terminal-placement-verified=1' "$DESKTOPS_EXTENSION_READY"; then
         return 0
       fi
       sleep 0.1
@@ -226,8 +242,13 @@ gvariant_strv() {
   printf '%s\n' "$result"
 }
 
-sync_gnome() {
+ensure_gnome_workspace_behavior() {
   command -v gsettings >/dev/null 2>&1 || fail 'gsettings não encontrado'
+  gsettings set org.gnome.mutter workspaces-only-on-primary false
+}
+
+sync_gnome() {
+  ensure_gnome_workspace_behavior
   local required_count names_variant
   required_count="${#desktop_names[@]}"
   names_variant="$(gvariant_strv "${desktop_names[@]}")"
@@ -306,7 +327,7 @@ case "$requested_action:$platform" in
   sync:windows) sync_windows ;;
   close:gnome) request_gnome_close ;;
   close:windows) fail 'desktops --close está disponível no Ubuntu/GNOME.' ;;
-  ensure-controller:gnome) install_gnome_extension ;;
+  ensure-controller:gnome) ensure_gnome_workspace_behavior; install_gnome_extension ;;
   ensure-controller:windows) fail 'desktops --ensure-controller está disponível no Ubuntu/GNOME.' ;;
   *) fail "ação/plataforma inválida: $requested_action/$platform" ;;
 esac

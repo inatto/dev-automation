@@ -32,10 +32,12 @@ case "${1:-}" in info) printf '  Version: 11\n  State: ACTIVE\n' ;; esac
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=13
+version=15
 controller=1
 floating-label=0
 window-placement=1
+terminal-direct=1
+terminal-placement-verified=1
 READY
 : > "$TMP/chrome.log"
 (

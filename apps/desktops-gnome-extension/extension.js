@@ -17,7 +17,8 @@ const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
-const EXTENSION_VERSION = 13;
+const EXTENSION_RELOAD_REQUIRED_PATH = GLib.build_filenamev([STATE_DIR, 'extension.reload-required']);
+const EXTENSION_VERSION = 15;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -247,18 +248,29 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
+    _workspacesOnAllMonitors() {
+        try {
+            const onlyPrimary = Meta.prefs_get_workspaces_only_on_primary?.();
+            return onlyPrimary !== true;
+        } catch (_) {
+            return true;
+        }
+    }
+
     _prepareDirectTerminal(token, fields, target, monitor) {
         const workspaceNumber = this._positiveInteger(fields.workspace);
         const slot = this._positiveInteger(fields.slot);
         const workspaceCount = Math.max(1, global.workspace_manager.n_workspaces);
+        const allMonitors = this._workspacesOnAllMonitors();
         const valid = target > 0 &&
             slot >= 1 && slot <= target &&
             workspaceNumber >= 2 && workspaceNumber <= target + 1 &&
-            workspaceNumber <= workspaceCount;
+            workspaceNumber <= workspaceCount &&
+            allMonitors;
 
         this._terminalSession = null;
         if (!valid) {
-            this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, false);
+            this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, allMonitors, false);
             this._writeTerminalResult(token, 0, 1, false);
             return;
         }
@@ -270,29 +282,42 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 .filter(sequence => sequence > 0)
         );
 
-        const activateAndArm = attemptsLeft => {
+        const activateAndArm = (attemptsLeft, stableChecks = 0) => {
             try {
                 const workspace = global.workspace_manager.get_workspace_by_index(workspaceIndex);
                 if (!workspace) {
-                    this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, false);
+                    this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, allMonitors, false);
                     this._writeTerminalResult(token, 0, 1, false);
                     return;
                 }
 
                 workspace.activate(global.get_current_time());
-                if (global.workspace_manager.get_active_workspace_index() !== workspaceIndex && attemptsLeft > 0) {
-                    const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 60, () => {
+                const activeWorkspace = global.workspace_manager.get_active_workspace_index();
+                if (activeWorkspace !== workspaceIndex) {
+                    if (attemptsLeft <= 0) {
+                        this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, allMonitors, false);
+                        this._writeTerminalResult(token, 0, 1, false);
+                        return;
+                    }
+                    const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
                         this._timeouts.delete(id);
-                        activateAndArm(attemptsLeft - 1);
+                        activateAndArm(attemptsLeft - 1, 0);
                         return GLib.SOURCE_REMOVE;
                     });
                     this._timeouts.add(id);
                     return;
                 }
 
-                if (global.workspace_manager.get_active_workspace_index() !== workspaceIndex) {
-                    this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, false);
-                    this._writeTerminalResult(token, 0, 1, false);
+                // Exige duas leituras consecutivas no mesmo workspace antes de
+                // liberar o processo que abre o terminal. Assim a animação/troca
+                // do GNOME termina antes do --new-window do Ptyxis.
+                if (stableChecks < 1) {
+                    const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                        this._timeouts.delete(id);
+                        activateAndArm(attemptsLeft, stableChecks + 1);
+                        return GLib.SOURCE_REMOVE;
+                    });
+                    this._timeouts.add(id);
                     return;
                 }
 
@@ -305,20 +330,22 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                     monitor,
                     expected: 1,
                     captured: 0,
+                    capturing: false,
                     complete: false,
                     seenSequences: existingSequences,
                     expiresAt: nowSeconds() + 20,
+                    window: null,
                 };
-                this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, true);
+                this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, allMonitors, true);
                 this._writeTerminalResult(token, 0, 1, false);
             } catch (error) {
                 console.error(`[workspace-controller] falha ao ativar workspace para terminal: ${error}`);
-                this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, false);
+                this._writeTerminalDirectReady(token, target, workspaceNumber, slot, monitor, allMonitors, false);
                 this._writeTerminalResult(token, 0, 1, false);
             }
         };
 
-        activateAndArm(30);
+        activateAndArm(30, 0);
     }
 
     _inspectNewWindow(window, attemptsLeft) {
@@ -332,34 +359,20 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         if (terminalSession && now <= terminalSession.expiresAt && this._isTerminal(window)) {
             const sequence = this._stableSequence(window);
             if (sequence && !terminalSession.seenSequences.has(sequence)) {
-                terminalSession.seenSequences.add(sequence);
-                this._handledWindows.add(window);
-
                 if (terminalSession.mode === 'direct') {
-                    this._scheduleTerminalPlacement(
-                        window,
-                        terminalSession.workspaceIndex,
-                        terminalSession.monitor,
-                        10
-                    );
-                    const batch = this._readTerminalBatch();
-                    const liveSequences = new Set(
-                        this._allTerminalWindows()
-                            .map(item => this._stableSequence(item))
-                            .filter(value => value > 0)
-                    );
-                    const managed = batch.managed
-                        .filter(value => value !== sequence && liveSequences.has(value));
-                    managed.push(sequence);
-                    const overflow = batch.overflow.filter(value => liveSequences.has(value));
-                    this._writeTerminalBatch(managed, overflow);
-                    terminalSession.captured = 1;
-                    terminalSession.complete = true;
-                    terminalSession.expiresAt = now + 2;
-                    this._writeTerminalResult(terminalSession.token, 1, 1, true);
+                    if (terminalSession.complete || terminalSession.capturing)
+                        return;
+
+                    terminalSession.seenSequences.add(sequence);
+                    terminalSession.capturing = true;
+                    terminalSession.window = window;
+                    this._handledWindows.add(window);
+                    this._confirmDirectTerminalPlacement(window, terminalSession, 50, 0);
                     return;
                 }
 
+                terminalSession.seenSequences.add(sequence);
+                this._handledWindows.add(window);
                 if (terminalSession.captured < terminalSession.expected) {
                     terminalSession.managedSequences.push(sequence);
                     terminalSession.captured += 1;
@@ -412,6 +425,83 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             });
             this._timeouts.add(id);
         }
+    }
+
+    _confirmDirectTerminalPlacement(window, session, attemptsLeft, stableChecks) {
+        if (!session || session.complete)
+            return;
+        if (!this._terminalSession || this._terminalSession.token !== session.token)
+            return;
+
+        let actualWorkspace = 0;
+        let actualMonitor = -1;
+        let correct = false;
+        try {
+            const workspace = window?.get_workspace?.();
+            if (!workspace || workspace.index() !== session.workspaceIndex)
+                window.change_workspace_by_index(session.workspaceIndex, false);
+            if (window.get_monitor?.() !== session.monitor)
+                window.move_to_monitor(session.monitor);
+            if (!window.is_maximized?.())
+                window.maximize();
+
+            actualWorkspace = (window.get_workspace?.()?.index?.() ?? -1) + 1;
+            actualMonitor = window.get_monitor?.() ?? -1;
+            correct = actualWorkspace === session.workspaceIndex + 1 && actualMonitor === session.monitor;
+        } catch (error) {
+            console.error(`[workspace-controller] falha ao posicionar terminal direto: ${error}`);
+        }
+
+        const nextStableChecks = correct ? stableChecks + 1 : 0;
+        if (nextStableChecks >= 2) {
+            const sequence = this._stableSequence(window);
+            const batch = this._readTerminalBatch();
+            const liveSequences = new Set(
+                this._allTerminalWindows()
+                    .map(item => this._stableSequence(item))
+                    .filter(value => value > 0)
+            );
+            const managed = batch.managed
+                .filter(value => value !== sequence && liveSequences.has(value));
+            if (sequence > 0)
+                managed.push(sequence);
+            const overflow = batch.overflow.filter(value => liveSequences.has(value));
+            this._writeTerminalBatch(managed, overflow);
+
+            session.captured = 1;
+            session.capturing = false;
+            session.complete = true;
+            session.expiresAt = nowSeconds() + 2;
+            this._writeTerminalResult(
+                session.token,
+                1,
+                1,
+                true,
+                actualWorkspace,
+                actualMonitor
+            );
+            return;
+        }
+
+        if (attemptsLeft <= 0) {
+            session.capturing = false;
+            this._writeTerminalResult(
+                session.token,
+                0,
+                1,
+                false,
+                actualWorkspace,
+                actualMonitor
+            );
+            return;
+        }
+
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            this._timeouts.delete(id);
+            this._confirmDirectTerminalPlacement(window, session, attemptsLeft - 1, nextStableChecks);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._timeouts.add(id);
     }
 
     _terminalStatus(target) {
@@ -657,24 +747,27 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
     }
 
-    _writeTerminalDirectReady(token, target, workspace, slot, monitor, valid) {
+    _writeTerminalDirectReady(token, target, workspace, slot, monitor, allMonitors, valid) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             GLib.file_set_contents(
                 TERMINALS_READY_PATH,
-                `${token}\taction=direct\tcount=${target}\tworkspace=${workspace}\tslot=${slot}\tmonitor=${monitor}\tvalid=${valid ? 1 : 0}\n`
+                `${token}\taction=direct\tcount=${target}\tworkspace=${workspace}\tslot=${slot}\tmonitor=${monitor}\tall_monitors=${allMonitors ? 1 : 0}\tvalid=${valid ? 1 : 0}\n`
             );
         } catch (error) {
             console.error(`[workspace-controller] falha ao preparar terminal direto: ${error}`);
         }
     }
 
-    _writeTerminalResult(token, placed, expected, complete) {
+    _writeTerminalResult(token, placed, expected, complete, workspace = 0, monitor = -1) {
         try {
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            const placement = workspace > 0 && monitor >= 0
+                ? `\tworkspace=${workspace}\tmonitor=${monitor}`
+                : '';
             GLib.file_set_contents(
                 TERMINALS_RESULT_PATH,
-                `${token}\tplaced=${placed}\texpected=${expected}\tcomplete=${complete ? 1 : 0}\n`
+                `${token}\tplaced=${placed}\texpected=${expected}\tcomplete=${complete ? 1 : 0}${placement}\n`
             );
         } catch (error) {
             console.error(`[workspace-controller] falha ao gravar resultado de terminals: ${error}`);
@@ -772,8 +865,9 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             GLib.mkdir_with_parents(STATE_DIR, 0o700);
             GLib.file_set_contents(
                 EXTENSION_READY_PATH,
-                `version=${EXTENSION_VERSION}\ncontroller=1\nfloating-label=0\nwindow-placement=1\n`
+                `version=${EXTENSION_VERSION}\ncontroller=1\nfloating-label=0\nwindow-placement=1\nterminal-direct=1\nterminal-placement-verified=1\n`
             );
+            this._removeFile(EXTENSION_RELOAD_REQUIRED_PATH);
         } catch (error) {
             console.error(`[workspace-controller] falha no self-check da extensão: ${error}`);
         }
