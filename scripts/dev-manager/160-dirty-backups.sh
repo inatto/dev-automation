@@ -3,7 +3,7 @@
 
 event_owner_project() {
   local event_path="$1"
-  local project project_dir
+  local project project_dir parent_config_dir
   local best=""
   local best_len=-1
 
@@ -16,6 +16,16 @@ event_owner_project() {
       if [ "${#project_dir}" -gt "$best_len" ]; then
         best="$project"
         best_len="${#project_dir}"
+      fi
+    fi
+
+    # .config/<filho>/ fica fisicamente dentro do pai, mas é propriedade do
+    # subprojeto. O prefixo é mais específico que a raiz do pai e portanto vence.
+    parent_config_dir="$(project_parent_config_path "$project")"
+    if [ -n "$parent_config_dir" ] && { [ "$event_path" = "$parent_config_dir" ] || [[ "$event_path" == "$parent_config_dir/"* ]]; }; then
+      if [ "${#parent_config_dir}" -gt "$best_len" ]; then
+        best="$project"
+        best_len="${#parent_config_dir}"
       fi
     fi
   done < <(backup_targets)

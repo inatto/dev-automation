@@ -151,6 +151,38 @@ project_archive_content_prefix() {
   printf '%s\n' "${project_rel#"$parent_rel/"}"
 }
 
+# Subprojetos podem manter configuração protegida no projeto-pai, seguindo a
+# convenção .config/<nome-do-subprojeto>/. Essa árvore pertence ao ZIP do
+# subprojeto (não ao ZIP do pai), embora fisicamente esteja ao lado de apps/.
+project_parent_config_relpath() {
+  local project="$1" parent logical
+
+  target_is_aggregate "$project" && return 0
+  parent="$(registered_parent_project "$project")"
+  [ -n "$parent" ] || return 0
+  logical="$(project_logical_name "$project")"
+  [ -n "$logical" ] || return 0
+  printf '.config/%s\n' "$logical"
+}
+
+project_parent_config_path() {
+  local project="$1" parent rel
+
+  parent="$(registered_parent_project "$project")"
+  [ -n "$parent" ] || return 0
+  rel="$(project_parent_config_relpath "$project")"
+  [ -n "$rel" ] || return 0
+  printf '%s/%s\n' "$(project_path "$parent")" "$rel"
+}
+
+project_relpath_is_parent_config() {
+  local project="$1" rel="$2" config_rel
+
+  config_rel="$(project_parent_config_relpath "$project")"
+  [ -n "$config_rel" ] || return 1
+  [ "$rel" = "$config_rel" ] || [[ "$rel" == "$config_rel/"* ]]
+}
+
 configured_projects() {
   clean_file "$PROJECTS_FILE"
 }
@@ -258,14 +290,29 @@ registered_subproject_relative_paths() {
 project_relpath_belongs_to_registered_subproject() {
   local parent="$1"
   local rel="$2"
-  local child_relative
+  local child child_rel parent_rel child_relative direct_parent config_relative
 
-  while IFS= read -r child_relative || [ -n "$child_relative" ]; do
+  parent_rel="$(target_source_rel "$parent")"
+  while IFS= read -r child || [ -n "$child" ]; do
+    [ -n "$child" ] || continue
+    child_rel="$(target_source_rel "$child")"
+    child_relative="${child_rel#"$parent_rel/"}"
     [ -n "$child_relative" ] || continue
+
     if [ "$rel" = "$child_relative" ] || [[ "$rel" == "$child_relative/"* ]]; then
       return 0
     fi
-  done < <(registered_subproject_relative_paths "$parent")
+
+    # A configuração irmã .config/<filho>/ pertence somente ao filho cujo pai
+    # direto é este projeto. Descendentes mais profundos ficam sob o próprio pai.
+    direct_parent="$(registered_parent_project "$child")"
+    if [ "$direct_parent" = "$parent" ]; then
+      config_relative="$(project_parent_config_relpath "$child")"
+      if [ -n "$config_relative" ] && { [ "$rel" = "$config_relative" ] || [[ "$rel" == "$config_relative/"* ]]; }; then
+        return 0
+      fi
+    fi
+  done < <(registered_subprojects "$parent")
 
   return 1
 }
@@ -274,19 +321,32 @@ append_registered_subproject_excludes() {
   local parent="$1"
   local filter_file="$2"
   local phase="${3:-backup}"
-  local relative
+  local parent_rel child child_rel relative direct_parent config_relative
   local count=0
 
-  while IFS= read -r relative || [ -n "$relative" ]; do
+  parent_rel="$(target_source_rel "$parent")"
+  while IFS= read -r child || [ -n "$child" ]; do
+    [ -n "$child" ] || continue
+    child_rel="$(target_source_rel "$child")"
+    relative="${child_rel#"$parent_rel/"}"
     [ -n "$relative" ] || continue
+
     printf -- '- /%s/***\n' "$relative" >> "$filter_file"
+
+    direct_parent="$(registered_parent_project "$child")"
+    config_relative=""
+    if [ "$direct_parent" = "$parent" ]; then
+      config_relative="$(project_parent_config_relpath "$child")"
+      [ -z "$config_relative" ] || printf -- '- /%s/***\n' "$config_relative" >> "$filter_file"
+    fi
+
     count=$((count + 1))
     if [ "$phase" = "unzip" ]; then
-      log "Protegendo subprojeto cadastrado durante unzip do pai: $relative/"
+      log "Protegendo subprojeto cadastrado durante unzip do pai: $relative/${config_relative:+ + $config_relative/}"
     else
-      log "Excluindo subprojeto cadastrado do ZIP pai: $relative/"
+      log "Excluindo subprojeto cadastrado do ZIP pai: $relative/${config_relative:+ + $config_relative/}"
     fi
-  done < <(registered_subproject_relative_paths "$parent")
+  done < <(registered_subprojects "$parent")
 
   if [ "$count" -gt 0 ]; then
     if [ "$phase" = "unzip" ]; then

@@ -228,13 +228,12 @@ protected_config_baseline_dir() {
   printf '%s/%s\n' "$PROTECTED_CONFIG_BASELINES_DIR" "$(project_archive_name "$project")"
 }
 
-save_protected_config_baseline() {
+append_protected_config_baseline() {
   local project="$1"
   local sanitized_root="$2"
   local baseline_dir rel destination
 
   baseline_dir="$(protected_config_baseline_dir "$project")"
-  rm -rf -- "$baseline_dir"
   mkdir -p -- "$baseline_dir"
 
   while IFS= read -r -d '' rel; do
@@ -243,6 +242,17 @@ save_protected_config_baseline() {
     mkdir -p -- "$(dirname -- "$destination")"
     cp -p -- "$sanitized_root/$rel" "$destination"
   done < <(find "$sanitized_root" -type f -printf '%P\0')
+}
+
+save_protected_config_baseline() {
+  local project="$1"
+  local sanitized_root="$2"
+  local baseline_dir
+
+  baseline_dir="$(protected_config_baseline_dir "$project")"
+  rm -rf -- "$baseline_dir"
+  mkdir -p -- "$baseline_dir"
+  append_protected_config_baseline "$project" "$sanitized_root"
 }
 
 valid_import_relative_path() {

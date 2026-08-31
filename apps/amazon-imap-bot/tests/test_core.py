@@ -419,17 +419,13 @@ def test_functions_view_reads_real_json_as_human_interface():
         assert '"functions"' not in text
 
 
-def test_project_zip_function_is_configured_for_daniel():
-    import json
-    from pathlib import Path
-
-    config_path = Path(__file__).resolve().parents[3] / ".config" / "amazon-imap-bot" / "functions.json"
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
-    assert "project_zip_edit" in payload["functions"]
-    assert "project_zip_edit" in payload["senders"]["danielmaiax@gmail.com"]["functions"]
-    entry = payload["functions"]["project_zip_edit"]
-    assert entry["default_reasoning_level"] == 2
-    assert entry["allowed_reasoning_levels"] == [0, 1, 2, 3, 4, 5]
+def test_oracle_seed_registers_project_and_catalog_admin_for_daniel():
+    patch = Path(__file__).resolve().parents[1] / "sql" / "oracle" / "002_seed_function_catalog.sql"
+    sql = patch.read_text(encoding="utf-8")
+    assert "project_zip_edit" in sql
+    assert "function_catalog_admin" in sql
+    assert "danielmaiax@gmail.com" in sql
+    assert "MERGE INTO WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS" in sql
 
 
 def test_function_map_accepts_project_zip_edit_and_level():
@@ -630,8 +626,28 @@ def test_project_zip_function_accepts_query_operation():
     import json
     from function_map import FunctionMap
 
-    config_path = Path(__file__).resolve().parents[3] / ".config" / "amazon-imap-bot" / "functions.json"
-    mapping = FunctionMap(config_path)
+    class Source:
+        source_name = "teste"
+        def load(self):
+            return {
+                "senders": {
+                    "danielmaiax@gmail.com": {
+                        "enabled": True,
+                        "functions": ["project_zip_edit"],
+                    }
+                },
+                "functions": {
+                    "project_zip_edit": {
+                        "enabled": True,
+                        "description": "Permite modificar, analisar e explicar projetos ZIP.",
+                        "default_reasoning_level": 2,
+                        "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                        "parameters": FunctionMap._default_parameters("project_zip_edit"),
+                    }
+                },
+            }
+
+    mapping = FunctionMap(Source())
     request = mapping.request_from_tool_call(
         "danielmaiax@gmail.com",
         "project_zip_edit",
@@ -724,6 +740,7 @@ def test_mobile_api_overview_and_actions_do_not_expose_secrets():
     monitor = SimpleNamespace(
         states={"bot@example.com": state}, stop_event=SimpleNamespace(is_set=lambda: False),
         run_lock=FakeLock(), on_event=lambda text: None,
+        function_map=SimpleNamespace(source_name="Oracle: TESTE"),
     )
     service = MobileApiService(settings, FakeStore(), monitor, api_runner=object())
     payload = service.overview()

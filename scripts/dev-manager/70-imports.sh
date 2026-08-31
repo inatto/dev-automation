@@ -6,6 +6,8 @@ import_one_zip() {
   local skip_stable="${2:-false}"
   local zip_name project archive_name project_dir temp_dir source_dir filtered_dir unzip_filter_file removal_manifest content_prefix root_alias
   local total_files checked_files rel destination removal_count=0 runtime_scope="both"
+  local parent_config_rel parent_config_source parent_project parent_project_dir parent_config_source_root parent_config_filtered_dir
+  local parent_config_files=0 parent_config_checked=0
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
   local -A nested_seen=() expected_targets=()
@@ -221,6 +223,42 @@ import_one_zip() {
     return 1
   fi
 
+  # ZIP de subprojeto pode ter duas raízes controladas pelo mesmo alvo:
+  #   apps/<filho>/                 -> diretório do subprojeto
+  #   .config/<filho>/              -> .config irmã no projeto-pai
+  # A segunda nunca passa pelo rsync direto; é reconciliada com o mesmo merge
+  # seguro de segredos e só depois aplicada à raiz do pai.
+  parent_config_rel="$(project_parent_config_relpath "$project")"
+  parent_config_source="${parent_config_rel:+$temp_dir/$parent_config_rel}"
+  if [ -n "$parent_config_rel" ] && [ -d "$parent_config_source" ]; then
+    parent_project="$(registered_parent_project "$project")"
+    parent_project_dir="$(project_path "$parent_project")"
+    parent_config_source_root="$temp_dir/.dev-auto-parent-config-source"
+    parent_config_filtered_dir="$temp_dir/.dev-auto-parent-config-filtered"
+    mkdir -p -- "$parent_config_source_root/$parent_config_rel" "$parent_config_filtered_dir"
+
+    if ! rsync -a -- "$parent_config_source/" "$parent_config_source_root/$parent_config_rel/"; then
+      log "ERRO: falha ao preparar .config irmã do subprojeto. ZIP mantido."
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+      return 1
+    fi
+
+    if ! materialize_changed_protected_configs \
+      "$project" \
+      "$parent_config_source_root" \
+      "$parent_config_filtered_dir" \
+      "$parent_project_dir" \
+      true; then
+      log "ERRO: merge seguro da .config irmã falhou. Projeto não recebeu o staging; ZIP mantido."
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+      return 1
+    fi
+
+    preserve_destination_symlinks_from_staging "$parent_project_dir" "$parent_config_filtered_dir"
+    parent_config_files="$(find "$parent_config_filtered_dir" -type f -printf '.' 2>/dev/null | wc -c)"
+    log "Config irmã reconhecida para o subprojeto: $parent_config_rel/ -> $parent_project_dir/$parent_config_rel/ ($parent_config_files arquivo(s) a aplicar após merge seguro)."
+  fi
+
   removal_count="$(find "$filtered_dir" -type f -name '*.remover' -printf '.' 2>/dev/null | wc -c)"
   if ! prepare_removal_markers "$filtered_dir" "$project_dir" "$removal_manifest"; then
     log "ERRO: validação de .remover falhou. O ZIP foi mantido."
@@ -231,8 +269,8 @@ import_one_zip() {
 
   source_dir="$filtered_dir"
   total_files="$(find "$source_dir" -type f -printf '.' 2>/dev/null | wc -c)"
-  if [ "$total_files" -eq 0 ] && [ "$removal_count" -eq 0 ]; then
-    log "ERRO: nenhum arquivo nem marcador .remover foi extraído. O ZIP foi mantido."
+  if [ "$total_files" -eq 0 ] && [ "$removal_count" -eq 0 ] && [ "$parent_config_files" -eq 0 ]; then
+    log "ERRO: nenhum arquivo, config irmã nem marcador .remover foi extraído. O ZIP foi mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
   fi
@@ -271,6 +309,34 @@ import_one_zip() {
     log "ERRO: conferidos $checked_files de $total_files arquivos. ZIP mantido."
     rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
     return 1
+  fi
+
+  if [ "$parent_config_files" -gt 0 ]; then
+    log "Copiando .config irmã reconciliada para o projeto-pai..."
+    if ! rsync -a --checksum --delay-updates --itemize-changes -- "$parent_config_filtered_dir/" "$parent_project_dir/" | sed 's/^/  RSYNC CONFIG PAI: /'; then
+      log "ERRO: falha ao copiar .config irmã. ZIP mantido."
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+      return 1
+    fi
+
+    parent_config_checked=0
+    while IFS= read -r -d '' rel; do
+      destination="$parent_project_dir/$rel"
+      if [ ! -f "$destination" ] || ! cmp -s -- "$parent_config_filtered_dir/$rel" "$destination"; then
+        log "ERRO: .config irmã não apareceu corretamente no destino: $destination"
+        log "ZIP mantido: $zip_file"
+        rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+        return 1
+      fi
+      parent_config_checked=$((parent_config_checked + 1))
+      log "CONFIG PAI CONFIRMADA [$parent_config_checked/$parent_config_files]: $destination"
+    done < <(find "$parent_config_filtered_dir" -type f -printf '%P\0')
+
+    if [ "$parent_config_checked" -ne "$parent_config_files" ]; then
+      log "ERRO: conferidas $parent_config_checked de $parent_config_files configs irmãs. ZIP mantido."
+      rm -rf -- "$temp_dir" "$filtered_dir" "$unzip_filter_file" "$removal_manifest"
+      return 1
+    fi
   fi
 
   if ! apply_removal_manifest "$project_dir" "$removal_manifest"; then

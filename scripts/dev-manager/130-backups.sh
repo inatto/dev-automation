@@ -4,7 +4,7 @@
 backup_project() {
   local project="$1"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
-  local archive_tree_dir content_prefix
+  local archive_tree_dir content_prefix parent_config_rel parent_config_path
   local child child_name child_zip child_count
   local sanitize_result sanitized_files sanitized_values redacted_files
   local -a children=()
@@ -107,6 +107,39 @@ backup_project() {
         return 1
       fi
       log "Hierarquia preservada no ZIP do subprojeto: $content_prefix/"
+
+      # Configuração irmã do subprojeto: fisicamente vive em
+      # <pai>/.config/<filho>/, mas pertence ao pacote do filho. Ela entra na
+      # raiz do ZIP ao lado de apps/<filho>/ e passa pelo MESMO sanitizador de
+      # segredos antes de sair do disco local.
+      parent_config_rel="$(project_parent_config_relpath "$project")"
+      parent_config_path="$(project_parent_config_path "$project")"
+      if [ -n "$parent_config_rel" ] && [ -d "$parent_config_path" ]; then
+        mkdir -p -- "$archive_tree_dir/$parent_config_rel"
+        if ! rsync -a -- "$parent_config_path/" "$archive_tree_dir/$parent_config_rel/"; then
+          log "ERRO ao incluir config do subprojeto no ZIP: $parent_config_path"
+          rm -rf -- "$temp_dir" "$archive_tree_dir" "$filter_file" "$temp_zip"
+          return 1
+        fi
+        find "$archive_tree_dir/$parent_config_rel" -type l -delete
+
+        if ! sanitize_result="$(sanitize_backup_config_passwords "$archive_tree_dir")"; then
+          log "ERRO ao sanitizar .config do subprojeto no backup: $project"
+          rm -rf -- "$temp_dir" "$archive_tree_dir" "$filter_file" "$temp_zip"
+          return 1
+        fi
+        IFS=: read -r sanitized_files sanitized_values redacted_files <<< "$sanitize_result"
+        if [ "${sanitized_values:-0}" -gt 0 ] || [ "${redacted_files:-0}" -gt 0 ]; then
+          log "CONFIG DO SUBPROJETO NO ZIP: ${sanitized_values:-0} segredo(s) mascarado(s); ${redacted_files:-0} arquivo(s) protegido(s) totalmente redigido(s)."
+        fi
+
+        if ! append_protected_config_baseline "$project" "$archive_tree_dir"; then
+          log "ERRO ao registrar referência da .config pertencente ao subprojeto: $parent_config_rel"
+          rm -rf -- "$temp_dir" "$archive_tree_dir" "$filter_file" "$temp_zip"
+          return 1
+        fi
+        log "Config irmã incluída no ZIP do subprojeto: $parent_config_rel/"
+      fi
     fi
   fi
 

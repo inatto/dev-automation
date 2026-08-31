@@ -27,11 +27,16 @@ cp -a -- "$ROOT" "$TEST_PROJECT"
 mkdir -p \
   "$DOWNLOADS" \
   "$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules/pkg" \
+  "$CODE_ROOT/bots/dev-automation/.config/exec-agent" \
   "$CODE_ROOT/orgs/other"
 
 printf 'parent-v1\n' > "$CODE_ROOT/bots/dev-automation/root.txt"
 printf 'child-v1\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/app.txt"
 printf 'ignored-v1\n' > "$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules/pkg/cache.txt"
+cat > "$CODE_ROOT/bots/dev-automation/.config/exec-agent/database.env" <<'ENV'
+DB_HOST=127.0.0.1
+DB_PASSWORD=exec-agent-local-secret
+ENV
 printf 'other-v1\n' > "$CODE_ROOT/orgs/other/app.txt"
 
 cat > "$TEST_PROJECT/config/projects/default.projects" <<'PROJECTS'
@@ -100,6 +105,10 @@ for zip in dev-automation.zip dev-automation-exec-agent.zip apps.zip Code.zip ot
   wait_for_file "$CODE_ROOT/$zip"
 done
 
+unzip -Z1 "$CODE_ROOT/dev-automation-exec-agent.zip" | grep -Fxq '.config/exec-agent/database.env'
+unzip -p "$CODE_ROOT/dev-automation-exec-agent.zip" .config/exec-agent/database.env | grep -Fxq 'DB_PASSWORD=********'
+! unzip -Z1 "$CODE_ROOT/dev-automation.zip" | grep -q '^.config/exec-agent/'
+
 # Aguarda a baseline e o watcher estabilizarem.
 sleep 1
 grep -Fxq "@$CODE_ROOT/bots/dev-automation/apps/exec-agent/node_modules" "$TEMP/state/inotify-paths.txt" || {
@@ -126,6 +135,24 @@ other_after="$(sha256sum "$CODE_ROOT/other.zip" | awk '{print $1}')"
 }
 [ "$other_after" = "$other_before" ] || {
   printf 'FALHOU: alteração do filho refez projeto não relacionado\n' >&2
+  exit 1
+}
+
+# A .config irmã pertence ao subprojeto: deve refazer somente o filho e seus
+# agregadores, nunca o ZIP do pai.
+parent_before_config="$(sha256sum "$CODE_ROOT/dev-automation.zip" | awk '{print $1}')"
+child_before_config="$(sha256sum "$CODE_ROOT/dev-automation-exec-agent.zip" | awk '{print $1}')"
+cat > "$CODE_ROOT/bots/dev-automation/.config/exec-agent/database.env" <<'ENV'
+DB_HOST=10.20.30.40
+DB_PASSWORD=exec-agent-local-secret
+ENV
+wait_for_hash_change "$CODE_ROOT/dev-automation-exec-agent.zip" "$child_before_config"
+unzip -p "$CODE_ROOT/dev-automation-exec-agent.zip" .config/exec-agent/database.env | grep -Fxq 'DB_HOST=10.20.30.40'
+unzip -p "$CODE_ROOT/dev-automation-exec-agent.zip" .config/exec-agent/database.env | grep -Fxq 'DB_PASSWORD=********'
+parent_after_config="$(sha256sum "$CODE_ROOT/dev-automation.zip" | awk '{print $1}')"
+[ "$parent_after_config" = "$parent_before_config" ] || {
+  printf 'FALHOU: alteração da .config irmã refez indevidamente o ZIP do pai\n' >&2
+  cat "$LOG" >&2
   exit 1
 }
 

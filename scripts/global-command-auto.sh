@@ -114,10 +114,10 @@ fi
 
 while true; do
   RESTART_REQUESTED=0
-  # A TUI do dev-manager precisa continuar ligada ao terminal real.
-  # Em shell não interativo, um comando iniciado com `&` pode receber stdin de /dev/null,
-  # fazendo o auto-code-manager cair no fallback/legacy.
-  if [[ "$COMMAND_NAME" == "dev-manager" && -r /dev/tty ]]; then
+  # Interfaces interativas supervisionadas precisam continuar ligadas ao
+  # terminal real. Em shell não interativo, um comando iniciado com `&` pode
+  # receber stdin de /dev/null e abrir sem aceitar a navegação pelo teclado.
+  if [[ -r /dev/tty ]]; then
     "${RUN_COMMAND[@]}" "${ARGS[@]}" </dev/tty &
   else
     "${RUN_COMMAND[@]}" "${ARGS[@]}" &

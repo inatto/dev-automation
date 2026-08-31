@@ -333,36 +333,36 @@ def _wrap_labeled(lines: list[str], prefix: str, value: object, width: int) -> N
     lines.extend(continuation + chunk for chunk in chunks[1:])
 
 
-def _function_view_lines(path, width: int) -> list[str]:
-    """Representa functions.json como uma visão humana; lê o arquivo atual a cada renderização."""
+def _function_view_lines(source, width: int) -> list[str]:
+    """Representa o catálogo de funções da camada de aplicação em formato humano."""
     width = max(48, width)
+    source_name = getattr(source, "source_name", str(source))
     try:
-        raw = path.read_text(encoding="utf-8")
+        if hasattr(source, "catalog_payload"):
+            payload = source.catalog_payload(refresh=False)
+        else:
+            # Compatibilidade explícita da visualização com um JSON legado.
+            raw = source.read_text(encoding="utf-8")
+            payload = json.loads(raw)
     except FileNotFoundError:
-        return [
-            "CONFIGURAÇÃO DE FUNÇÕES",
-            f"Arquivo: {path}",
-            "ERRO: functions.json não encontrado.",
-        ]
-    except OSError as exc:
-        return ["CONFIGURAÇÃO DE FUNÇÕES", f"Arquivo: {path}", f"ERRO: {exc}"]
-    try:
-        payload = json.loads(raw)
+        return ["CATÁLOGO DE FUNÇÕES", f"Fonte: {source_name}", "ERRO: fonte legada não encontrada."]
     except json.JSONDecodeError as exc:
         return [
-            "CONFIGURAÇÃO DE FUNÇÕES",
-            f"Arquivo: {path}",
-            f"ERRO: JSON inválido na linha {exc.lineno}, coluna {exc.colno}: {exc.msg}",
+            "CATÁLOGO DE FUNÇÕES",
+            f"Fonte: {source_name}",
+            f"ERRO: JSON legado inválido na linha {exc.lineno}, coluna {exc.colno}: {exc.msg}",
         ]
+    except Exception as exc:
+        return ["CATÁLOGO DE FUNÇÕES", f"Fonte: {source_name}", f"ERRO: {exc}"]
     if not isinstance(payload, dict):
-        return ["CONFIGURAÇÃO DE FUNÇÕES", f"Arquivo: {path}", "ERRO: raiz do JSON precisa ser um objeto."]
+        return ["CATÁLOGO DE FUNÇÕES", f"Fonte: {source_name}", "ERRO: catálogo inválido."]
 
     functions = payload.get("functions") if isinstance(payload.get("functions"), dict) else {}
     senders = payload.get("senders") if isinstance(payload.get("senders"), dict) else {}
     levels = payload.get("reasoning_levels") if isinstance(payload.get("reasoning_levels"), dict) else {}
     lines: list[str] = [
-        "CONFIGURAÇÃO DE FUNÇÕES",
-        f"Arquivo: {path}",
+        "CATÁLOGO DE FUNÇÕES",
+        f"Fonte: {source_name}",
         f"Versão: {payload.get('version', '-')}   Funções: {len(functions)}   Remetentes configurados: {len(senders)}",
         "",
         "NÍVEIS DE RACIOCÍNIO",
@@ -373,7 +373,7 @@ def _function_view_lines(path, width: int) -> list[str]:
             ordered.append(f"{key}={value}")
         _wrap_labeled(lines, "  ", "   ".join(ordered), width)
     else:
-        lines.append("  Nenhum nível declarado no arquivo.")
+        lines.append("  Nenhum nível declarado no catálogo.")
 
     lines.extend(["", "FUNÇÕES DISPONÍVEIS"])
     if not functions:
@@ -606,13 +606,22 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
     stdscr.touchwin()
     stdscr.refresh()
 
-def run(settings: Settings) -> int:
+def run(settings: Settings, startup_log=None) -> int:
+    startup_log = startup_log or (lambda text: None)
+    startup_log(f"TUI: abrindo SQLite local em {settings.database_path}...")
     store = Store(settings.database_path)
+    startup_log("TUI: SQLite local OK.")
     events: queue.Queue[str] = queue.Queue()
-    monitor = Monitor(settings, store, events.put)
+    startup_log("TUI: inicializando monitor...")
+    monitor = Monitor(settings, store, events.put, on_startup=startup_log)
+    startup_log("TUI: monitor inicializado.")
+    startup_log("TUI: inicializando executor de teste da API...")
     api_runner = ApiTestRunner(settings, store, events.put)
+    startup_log("TUI: executor de teste da API OK.")
     thread = threading.Thread(target=monitor.run_forever, daemon=True)
+    startup_log("TUI: iniciando thread de monitoramento IMAP...")
     thread.start()
+    startup_log("TUI: thread IMAP iniciada; abrindo interface curses.")
 
     def draw(stdscr):
         try:
@@ -720,13 +729,13 @@ def run(settings: Settings) -> int:
                 rows = store.list_api_runs(200)
                 cfg1 = f"Modelo={settings.openai_model}  Raciocínio={settings.openai_reasoning_effort}  Timeout={settings.openai_timeout_seconds}s  Chave={'CONFIGURADA' if settings.openai_api_key else 'AUSENTE'}"
                 cfg2 = f"Base URL={settings.openai_base_url}"
-                cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Projetos ZIP={settings.project_zip_search_root}  Funções={settings.functions_config}"
+                cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Projetos ZIP={settings.project_zip_search_root}  Funções={monitor.function_map.source_name}"
                 _safe_add(box, 1, 2, cfg1, w - 4, p.BORDER | curses.A_BOLD)
                 _safe_add(box, 2, 2, cfg2, w - 4, p.DIM)
                 _safe_add(box, 3, 2, cfg3, w - 4, p.DIM)
                 _safe_add(box, 4, 2, "ID    TIPO    INÍCIO      ESTADO         MODELO             NÍVEL   TEMPO     RESULTADO", w - 4, p.DIM)
             else:
-                function_lines = _function_view_lines(settings.functions_config, w - 6)
+                function_lines = _function_view_lines(monitor.function_map, w - 6)
 
             if active_tab == TAB_FUNCTIONS:
                 page = max(1, usable - 1)
@@ -816,7 +825,7 @@ def run(settings: Settings) -> int:
             else:
                 notice = ""
                 hint = (
-                    "FUNÇÕES mostra o conteúdo atual de functions.json em formato humano." if active_tab == TAB_FUNCTIONS else
+                    "FUNÇÕES mostra o catálogo Oracle carregado pela camada de aplicação." if active_tab == TAB_FUNCTIONS else
                     "T na área API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
                     "D remove da ENTRADA com confirmação e move o e-mail para a lixeira do servidor." if active_tab == TAB_INBOX else
                     "Use ↑/Esc para voltar ao menu superior."

@@ -9,20 +9,34 @@ materialize_changed_protected_configs() {
   local project="$1"
   local source_root="$2"
   local filtered_root="$3"
+  local destination_root="${4:-}"
+  local allow_parent_config="${5:-false}"
   local project_dir baseline_dir rel baseline destination local_target result changed=0 unchanged=0 redacted=0 isolated=0
 
-  project_dir="$(project_path "$project")"
+  project_dir="${destination_root:-$(project_path "$project")}"
   baseline_dir="$(protected_config_baseline_dir "$project")"
 
   while IFS= read -r -d '' rel; do
     protected_config_relpath "$rel" || continue
+
+    # No ZIP de um subprojeto, .config/<filho>/ fica fora de apps/<filho>/.
+    # A importação principal nunca pode mapeá-la para <filho>/.config; ela é
+    # tratada separadamente contra a raiz do projeto-pai.
+    if [ "$allow_parent_config" != "true" ] && declare -F project_relpath_is_parent_config >/dev/null 2>&1 && project_relpath_is_parent_config "$project" "$rel"; then
+      isolated=$((isolated + 1))
+      continue
+    fi
+
     if project_relpath_belongs_to_registered_subproject "$project" "$rel"; then
       isolated=$((isolated + 1))
       continue
     fi
 
+    local_target="$project_dir/$rel"
     baseline="$baseline_dir/$rel"
-    if [ -f "$baseline" ] && cmp -s -- "$source_root/$rel" "$baseline"; then
+    # Se o arquivo local sumiu, a baseline não pode fazê-lo desaparecer também:
+    # materializa o recebido para permitir bootstrap/restauração da estrutura.
+    if [ -e "$local_target" ] && [ -f "$baseline" ] && cmp -s -- "$source_root/$rel" "$baseline"; then
       unchanged=$((unchanged + 1))
       continue
     fi
@@ -36,7 +50,6 @@ materialize_changed_protected_configs() {
     fi
 
     destination="$filtered_root/$rel"
-    local_target="$project_dir/$rel"
     mkdir -p -- "$(dirname -- "$destination")"
 
     if ! result="$(python3 - "$source_root/$rel" "$local_target" "$destination" <<'PY_MERGE'

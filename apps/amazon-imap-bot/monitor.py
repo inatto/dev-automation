@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import imaplib
+import json
 import socket
 import ssl
 import threading
@@ -13,6 +14,7 @@ from typing import Callable
 from ai import ReplyGenerator
 from api_runner import ApiTestRunner
 from config import Account, Settings
+from function_catalog import OracleFunctionCatalog
 from function_map import FunctionMap, FunctionRequest
 from function_router import FunctionRouter
 from mailbox import MailboxClient
@@ -34,24 +36,49 @@ class AccountState:
 
 
 class Monitor:
-    def __init__(self, settings: Settings, store: Store, on_event: Callable[[str], None] | None = None):
+    def __init__(
+        self,
+        settings: Settings,
+        store: Store,
+        on_event: Callable[[str], None] | None = None,
+        function_map: FunctionMap | None = None,
+        on_startup: Callable[[str], None] | None = None,
+    ):
         self.settings = settings
         self.store = store
         self.on_event = on_event or (lambda text: None)
+        self.on_startup = on_startup or (lambda text: None)
         self.states = {a.email: AccountState(a.email) for a in settings.accounts if a.enabled}
         self.stop_event = threading.Event()
         self.run_lock = threading.Lock()
+        self.on_startup("Monitor: inicializando cliente OpenAI...")
         self.ai = ReplyGenerator(
             settings.openai_api_key, settings.openai_model, settings.openai_base_url,
             settings.openai_reasoning_effort, settings.openai_timeout_seconds,
         )
+        self.on_startup("Monitor: cliente OpenAI OK.")
+        self.on_startup("Monitor: inicializando Amazon SES...")
         self.ses = SesSender(settings.aws_profile, settings.aws_region)
+        self.on_startup("Monitor: Amazon SES OK.")
+        self.on_startup("Monitor: inicializando cliente IMAP...")
         self.mailbox = MailboxClient(settings)
-        self.function_map = FunctionMap(settings.functions_config)
+        self.on_startup("Monitor: cliente IMAP OK.")
+        if function_map is None:
+            self.on_startup("Monitor: carregando catálogo de funções do Oracle...")
+            self.function_map = FunctionMap(
+                OracleFunctionCatalog(settings.function_database, log=self.on_startup)
+            )
+            self.on_startup("Monitor: catálogo de funções Oracle OK.")
+        else:
+            self.function_map = function_map
+            self.on_startup(f"Monitor: catálogo fornecido externamente ({self.function_map.source_name}).")
+        self.on_startup("Monitor: inicializando roteador de funções...")
         self.function_router = FunctionRouter(
             settings.openai_api_key, settings.openai_model, settings.openai_base_url,
             settings.openai_timeout_seconds, self.function_map,
         )
+        self.on_startup("Monitor: roteador de funções OK.")
+        self.on_startup("Monitor: inicializando executores de API/ZIP...")
         self.api_runner = ApiTestRunner(
             settings, store,
             lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
@@ -60,8 +87,10 @@ class Monitor:
             settings, store,
             lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
         )
+        self.on_startup("Monitor: executores de API/ZIP OK.")
         self.accounts_by_email = {a.email.lower(): a for a in settings.accounts}
         self.own = set(self.accounts_by_email)
+        self.on_startup(f"Monitor: pronto; {len(self.states)} conta(s) ativa(s).")
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -80,7 +109,7 @@ class Monitor:
         self.on_event(f"{stamp} [{category}] {text}")
 
     def _execute_function_request(self, account: Account, item, request: FunctionRequest, state: AccountState) -> None:
-        """Executa uma função explicitamente autorizada pelo functions.json."""
+        """Executa uma função explicitamente autorizada pelo catálogo Oracle."""
         self.store.set_inbound_status(account.email, item.message_id, "executing")
         self._event(
             f"EXECUTANDO função={request.name} remetente={request.sender} "
@@ -93,6 +122,9 @@ class Monitor:
                 item.body or "",
             ] if part
         ).strip()
+        output_path = ""
+        result = ""
+        run_id = None
         if request.name == "api_zip_test":
             run_id = self.api_runner.run_zip_test(
                 reasoning_effort=request.reasoning_effort,
@@ -107,11 +139,44 @@ class Monitor:
                 operation=operation,
                 source=f"email:{request.sender}",
             )
+        elif request.name == "function_catalog_admin":
+            operation = str(request.arguments.get("operation") or "list").strip().lower()
+            started = time.monotonic()
+            run_id = self.store.add_api_run(
+                kind="function-catalog",
+                status="executando",
+                model="oracle",
+                reasoning_effort=request.reasoning_effort,
+                input_path="",
+                output_path="",
+                request_summary=f"{operation} do catálogo de funções Oracle",
+                request_payload=json.dumps(request.arguments, ensure_ascii=False),
+                listed_item_count=0,
+            )
+            try:
+                result = self.function_map.catalog_summary_text(refresh=operation == "sync")
+                self.store.update_api_run(
+                    run_id,
+                    status="concluido",
+                    response_summary=result,
+                    response_bytes=len(result.encode("utf-8")),
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    finished=True,
+                )
+            except Exception as exc:
+                self.store.update_api_run(
+                    run_id,
+                    status="erro",
+                    error=str(exc),
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    finished=True,
+                )
+                raise
         else:
             raise RuntimeError(f"função não implementada: {request.name}")
-        api_run = self.store.get_api_run(run_id) or {}
-        output_path = str(api_run.get("output_path") or "")
-        result = str(api_run.get("response_summary") or "").strip()
+        api_run = self.store.get_api_run(run_id) or {} if run_id is not None else {}
+        output_path = output_path or str(api_run.get("output_path") or "")
+        result = result or str(api_run.get("response_summary") or "").strip()
         self.store.set_inbound_status(account.email, item.message_id, "completed")
         self._event(
             f"CONCLUÍDO função={request.name} run=#{run_id} arquivo={output_path or '-'}",

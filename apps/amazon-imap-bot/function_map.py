@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import copy
 import json
+import threading
 from dataclasses import dataclass
 from pathlib import Path
+
+from function_catalog import JsonFunctionCatalog
 
 
 REASONING_LEVELS: dict[int, str] = {
@@ -26,39 +30,66 @@ class FunctionRequest:
 
 
 class FunctionMap:
-    """Autorizações locais e definições das funções que podem ser expostas ao GPT."""
+    """Catálogo e autorizações de funções consumidos pela camada de aplicação."""
 
-    def __init__(self, path: Path):
-        self.path = Path(path)
-        self.payload = self._load()
+    def __init__(self, source):
+        # Path permanece somente como compatibilidade explícita para rollback/importação.
+        self.source = JsonFunctionCatalog(source) if isinstance(source, (str, Path)) else source
+        self.source_name = getattr(self.source, "source_name", type(self.source).__name__)
+        self._lock = threading.RLock()
+        self.payload: dict = {}
+        self.reload()
 
-    def _load(self) -> dict:
-        if not self.path.is_file():
-            return {"version": 1, "senders": {}, "functions": {}}
-        try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"JSON inválido em {self.path}") from exc
+    def reload(self) -> dict:
+        payload = self.source.load()
         if not isinstance(payload, dict):
-            raise RuntimeError(f"configuração de funções inválida em {self.path}")
-        return payload
+            raise RuntimeError("catálogo de funções retornou uma estrutura inválida")
+        with self._lock:
+            self.payload = payload
+            return copy.deepcopy(self.payload)
+
+    def catalog_payload(self, refresh: bool = False) -> dict:
+        if refresh:
+            return self.reload()
+        with self._lock:
+            return copy.deepcopy(self.payload)
+
+    def catalog_summary_text(self, refresh: bool = False) -> str:
+        payload = self.catalog_payload(refresh=refresh)
+        functions = payload.get("functions") if isinstance(payload.get("functions"), dict) else {}
+        senders = payload.get("senders") if isinstance(payload.get("senders"), dict) else {}
+        active = sorted(
+            name for name, entry in functions.items()
+            if isinstance(entry, dict) and bool(entry.get("enabled", True))
+        )
+        lines = [
+            f"Catálogo Oracle versão {payload.get('version', '-')}.",
+            f"Funções ativas ({len(active)}): {', '.join(active) if active else 'nenhuma'}.",
+            f"Remetentes configurados: {len(senders)}.",
+        ]
+        for sender, entry in sorted(senders.items()):
+            names = entry.get("functions") if isinstance(entry, dict) else []
+            lines.append(f"- {sender}: {', '.join(map(str, names or [])) or 'nenhuma'}")
+        return "\n".join(lines)
 
     def sender_functions(self, sender: str) -> set[str]:
-        senders = self.payload.get("senders") or {}
-        if not isinstance(senders, dict):
-            return set()
-        entry = senders.get(str(sender or "").strip().lower())
-        if not isinstance(entry, dict) or not bool(entry.get("enabled", True)):
-            return set()
-        functions = entry.get("functions") or []
-        if not isinstance(functions, list):
-            return set()
-        return {str(name).strip() for name in functions if str(name).strip()}
+        with self._lock:
+            senders = self.payload.get("senders") or {}
+            if not isinstance(senders, dict):
+                return set()
+            entry = senders.get(str(sender or "").strip().lower())
+            if not isinstance(entry, dict) or not bool(entry.get("enabled", True)):
+                return set()
+            functions = entry.get("functions") or []
+            if not isinstance(functions, list):
+                return set()
+            return {str(name).strip() for name in functions if str(name).strip()}
 
     def function_entry(self, name: str) -> dict:
-        functions = self.payload.get("functions") or {}
-        entry = functions.get(name) if isinstance(functions, dict) else None
-        return dict(entry) if isinstance(entry, dict) else {}
+        with self._lock:
+            functions = self.payload.get("functions") or {}
+            entry = functions.get(name) if isinstance(functions, dict) else None
+            return copy.deepcopy(entry) if isinstance(entry, dict) else {}
 
     def function_enabled(self, name: str) -> bool:
         entry = self.function_entry(name)
@@ -79,23 +110,50 @@ class FunctionMap:
                 else "Pergunta ou instrução que deve ser respondida dentro do teste ZIP. "
                      "Se não houver uma pergunta separada, use uma confirmação objetiva de processamento do ZIP."
             )
+            properties = {
+                "reasoning_level": {
+                    "type": "integer",
+                    "enum": [0, 1, 2, 3, 4, 5],
+                    "description": (
+                        "Nível solicitado pelo usuário: 0=none, 1=low, 2=medium, "
+                        "3=high, 4=xhigh, 5=max."
+                    ),
+                },
+                "request_text": {
+                    "type": "string",
+                    "description": request_description,
+                },
+            }
+            required = ["reasoning_level", "request_text"]
+            if name == "project_zip_edit":
+                properties["operation"] = {
+                    "type": "string",
+                    "enum": ["modify", "query"],
+                    "description": "Use modify para alterar o ZIP e query para apenas analisar/responder.",
+                }
+                required.append("operation")
+            return {
+                "type": "object",
+                "properties": properties,
+                "required": required,
+                "additionalProperties": False,
+            }
+        if name == "function_catalog_admin":
             return {
                 "type": "object",
                 "properties": {
+                    "operation": {
+                        "type": "string",
+                        "enum": ["list", "sync"],
+                        "description": "list consulta o catálogo carregado; sync recarrega o catálogo a partir do Oracle.",
+                    },
                     "reasoning_level": {
                         "type": "integer",
                         "enum": [0, 1, 2, 3, 4, 5],
-                        "description": (
-                            "Nível solicitado pelo usuário: 0=none, 1=low, 2=medium, "
-                            "3=high, 4=xhigh, 5=max."
-                        ),
                     },
-                    "request_text": {
-                        "type": "string",
-                        "description": request_description,
-                    },
+                    "request_text": {"type": "string"},
                 },
-                "required": ["reasoning_level", "request_text"],
+                "required": ["operation"],
                 "additionalProperties": False,
             }
         return {
@@ -153,11 +211,13 @@ class FunctionMap:
         else:
             raise ValueError(f"argumentos inválidos para {name}")
 
-        if name not in {"api_zip_test", "project_zip_edit"}:
+        if name not in {"api_zip_test", "project_zip_edit", "function_catalog_admin"}:
             raise RuntimeError(f"função não implementada: {name}")
 
+        entry = self.function_entry(name)
+        raw_level = args.get("reasoning_level", entry.get("default_reasoning_level", 1))
         try:
-            level = int(args.get("reasoning_level"))
+            level = int(raw_level)
         except (TypeError, ValueError) as exc:
             raise ValueError("nível da API deve ser um número entre 0 e 5") from exc
         if level not in REASONING_LEVELS:
@@ -165,13 +225,20 @@ class FunctionMap:
         if level not in self._allowed_levels(name):
             raise ValueError(f"nível {level} não permitido para a função {name}")
 
+        if name == "function_catalog_admin":
+            operation = str(args.get("operation") or "").strip().lower()
+            if operation not in {"list", "sync"}:
+                raise ValueError("operation deve ser list ou sync")
+            args["operation"] = operation
+
         request_text = str(args.get("request_text") or "").strip()
         if not request_text:
-            request_text = (
-                "Confirme que o arquivo ZIP de teste foi processado com sucesso."
-                if name == "api_zip_test"
-                else "Execute a alteração de projeto solicitada no e-mail."
-            )
+            if name == "api_zip_test":
+                request_text = "Confirme que o arquivo ZIP de teste foi processado com sucesso."
+            elif name == "project_zip_edit":
+                request_text = "Execute a alteração de projeto solicitada no e-mail."
+            else:
+                request_text = "Administre o catálogo de funções armazenado no Oracle."
         request_text = request_text[:8000]
 
         return FunctionRequest(

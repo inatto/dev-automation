@@ -35,8 +35,27 @@ light_config_signature() {
   done
 }
 
+light_parent_config_signature() {
+  local project="$1" config_path
+
+  config_path="$(project_parent_config_path "$project")"
+  [ -n "$config_path" ] || return 0
+  if [ ! -d "$config_path" ]; then
+    printf 'missing\n'
+    return 0
+  fi
+
+  # .config de subprojeto é pequena e protegida; mede toda a árvore, inclusive
+  # arquivos que o ignore global poderia esconder, pois o backup do filho a leva
+  # pelo caminho protegido/sanitizado.
+  (
+    cd "$config_path" || exit 1
+    find . -mindepth 1 -printf '%y\t%P\t%T@\t%s\t%m\n' 2>/dev/null | LC_ALL=C sort
+  ) | sha256sum | awk '{print $1}'
+}
+
 build_light_watch_plan() {
-  local project root child child_root excluded
+  local project root child child_root excluded direct_parent parent_config
   local -a projects=()
 
   mkdir -p "$STATE_DIR"
@@ -67,6 +86,14 @@ build_light_watch_plan() {
       child_root="$(project_path "$child")"
       if [ "$child_root" != "$root" ] && path_is_within_absolute "$child_root" "$root"; then
         printf 'X\t%s\t%s\n' "$project" "$child_root" >> "$LIGHT_WATCH_PLAN"
+      fi
+
+      # A .config irmã pertence ao filho e não pode contaminar a assinatura do
+      # pai. O filho mede essa árvore separadamente abaixo.
+      direct_parent="$(registered_parent_project "$child")"
+      if [ "$direct_parent" = "$project" ]; then
+        parent_config="$(project_parent_config_path "$child")"
+        [ -z "$parent_config" ] || printf 'X\t%s\t%s\n' "$project" "$parent_config" >> "$LIGHT_WATCH_PLAN"
       fi
     done
   done
@@ -209,18 +236,27 @@ PY_LIGHT_SCAN
 }
 
 initialize_light_monitor() {
-  local project signature tree_signature ignore_signature
+  local project signature tree_signature ignore_signature parent_config
 
   build_light_watch_plan
   LIGHT_SIGNATURES=()
   LIGHT_TREE_SIGNATURES=()
   LIGHT_IGNORE_SIGNATURES=()
+  LIGHT_PARENT_CONFIG_SIGNATURES=()
   while IFS=$'\t' read -r project signature tree_signature ignore_signature || [ -n "$project" ]; do
     [ -n "$project" ] || continue
     LIGHT_SIGNATURES["$project"]="$signature"
     LIGHT_TREE_SIGNATURES["$project"]="$tree_signature"
     LIGHT_IGNORE_SIGNATURES["$project"]="$ignore_signature"
   done < <(light_scan_states)
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    parent_config="$(project_parent_config_path "$project")"
+    [ -n "$parent_config" ] || continue
+    LIGHT_PARENT_CONFIG_SIGNATURES["$project"]="$(light_parent_config_signature "$project")"
+  done < <(backup_targets)
 
   LIGHT_CONFIG_SIGNATURE="$(light_config_signature)"
   ACTIVE_MONITOR_MODE="light"
@@ -243,7 +279,7 @@ light_refresh_if_config_changed() {
 }
 
 light_scan_cycle() {
-  local project signature tree_signature ignore_signature old old_tree old_ignore scan_file
+  local project signature tree_signature ignore_signature old old_tree old_ignore scan_file parent_config
   local plan_changed=false
 
   light_refresh_if_config_changed || return 1
@@ -286,6 +322,21 @@ light_scan_cycle() {
     LIGHT_TREE_SIGNATURES["$project"]="$tree_signature"
     LIGHT_IGNORE_SIGNATURES["$project"]="$ignore_signature"
   done < "$scan_file"
+
+  # A árvore .config/<filho>/ não entra na assinatura do pai; mede cada uma
+  # separadamente e marca somente o subprojeto proprietário quando mudar.
+  while IFS= read -r project || [ -n "$project" ]; do
+    [ -n "$project" ] || continue
+    target_is_aggregate "$project" && continue
+    parent_config="$(project_parent_config_path "$project")"
+    [ -n "$parent_config" ] || continue
+    signature="$(light_parent_config_signature "$project")"
+    old="${LIGHT_PARENT_CONFIG_SIGNATURES[$project]-}"
+    if [ -n "$old" ] && [ "$old" != "$signature" ]; then
+      mark_backup_dirty "$project"
+    fi
+    LIGHT_PARENT_CONFIG_SIGNATURES["$project"]="$signature"
+  done < <(backup_targets)
 
   rm -f -- "$scan_file"
   return 0

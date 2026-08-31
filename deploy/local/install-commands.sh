@@ -15,7 +15,14 @@ PROJECT_ALL_RUNNER="$PROJECT_ROOT/scripts/project-all-command.sh"
 ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 VOICE_COMMANDS_SOURCE="$PROJECT_ROOT/apps/voice-commands/run.sh"
 GPT_CONSOLE_SOURCE="$PROJECT_ROOT/apps/gpt-console/run.sh"
-AMAZON_IMAP_BOT_SOURCE="$PROJECT_ROOT/apps/amazon-imap-bot/run.sh"
+AMAZON_IMAP_BOT_DIR="$PROJECT_ROOT/apps/amazon-imap-bot"
+AMAZON_IMAP_BOT_TERMINAL_SOURCE="$AMAZON_IMAP_BOT_DIR/terminal/run.sh"
+AMAZON_IMAP_BOT_LEGACY_SOURCE="$AMAZON_IMAP_BOT_DIR/run.sh"
+if [[ -f "$AMAZON_IMAP_BOT_TERMINAL_SOURCE" ]]; then
+  AMAZON_IMAP_BOT_SOURCE="$AMAZON_IMAP_BOT_TERMINAL_SOURCE"
+else
+  AMAZON_IMAP_BOT_SOURCE="$AMAZON_IMAP_BOT_LEGACY_SOURCE"
+fi
 AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE="$PROJECT_ROOT/scripts/amazon-imap-bot-auto-status.sh"
 SCRIPT_DEV_AUTOMATION_SOURCE="$PROJECT_ROOT/apps/script-dev-automation/run.sh"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
@@ -219,12 +226,21 @@ EOF_WRAPPER
   log "criado: $command_name -> $source_file"
 
   auto_target_file="$TARGET_DIR/$command_name-auto"
-  case "$source_file" in
-    "$PROJECT_ROOT"/apps/*)
-      watch_dir="$(dirname -- "$source_file")"
+  case "$command_name" in
+    amazon-imap-bot)
+      # As interfaces Terminal, Flutter e API são independentes, mas o AUTO
+      # acompanha o subaplicativo completo e relança a interface Terminal.
+      watch_dir="$AMAZON_IMAP_BOT_DIR"
       ;;
     *)
-      watch_dir="$PROJECT_ROOT"
+      case "$source_file" in
+        "$PROJECT_ROOT"/apps/*)
+          watch_dir="$(dirname -- "$source_file")"
+          ;;
+        *)
+          watch_dir="$PROJECT_ROOT"
+          ;;
+      esac
       ;;
   esac
   # Comandos globais AUTO são isolados pelo diretório exato. Em especial,

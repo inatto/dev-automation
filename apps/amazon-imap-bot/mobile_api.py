@@ -8,7 +8,6 @@ from dataclasses import asdict
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from api_runner import ApiTestRunner
@@ -98,7 +97,11 @@ class MobileApiService:
             "openai_key_configured": bool(self.settings.openai_api_key),
             "openai_output_dir": str(self.settings.openai_output_dir),
             "openai_test_zip": str(self.settings.openai_test_zip),
-            "functions_config": str(self.settings.functions_config),
+            "function_catalog_source": getattr(self.monitor.function_map, "source_name", "Oracle"),
+            "function_database_env": str(getattr(getattr(self.settings, "function_database", None), "env_path", "")),
+            "function_database_user": str(getattr(getattr(self.settings, "function_database", None), "user", "")),
+            "function_database_schema": str(getattr(getattr(self.settings, "function_database", None), "schema", "")),
+            "function_database_password_configured": bool(getattr(getattr(self.settings, "function_database", None), "password", "")),
             "project_zip_search_root": str(self.settings.project_zip_search_root),
             "auto_reply_enabled": self.settings.auto_reply_enabled,
             "sound_enabled": self.settings.sound_enabled,
@@ -143,16 +146,19 @@ class MobileApiService:
         ]
 
     def functions(self) -> dict:
-        path = Path(self.settings.functions_config)
-        if not path.is_file():
-            return {"version": 1, "senders": {}, "functions": {}, "available": False}
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, f"functions.json inválido: {exc}")
-        if not isinstance(payload, dict):
-            raise ApiError(HTTPStatus.INTERNAL_SERVER_ERROR, "functions.json inválido")
+            payload = self.monitor.function_map.catalog_payload(refresh=True)
+        except Exception as exc:
+            raise ApiError(HTTPStatus.SERVICE_UNAVAILABLE, f"catálogo Oracle indisponível: {exc}")
         return {**payload, "available": True}
+
+    def sync_functions(self) -> dict:
+        action = self._new_action("functions-sync", "Recarga do catálogo de funções a partir do Oracle")
+        self._run_action(
+            action,
+            lambda: self.monitor.function_map.catalog_summary_text(refresh=True),
+        )
+        return action
 
     def actions(self) -> list[dict]:
         with self._actions_lock:
@@ -279,6 +285,8 @@ class MobileApiHandler(BaseHTTPRequestHandler):
             return HTTPStatus.ACCEPTED, service.refresh()
         if method == "POST" and path == "/api/v1/actions/api-zip-test":
             return HTTPStatus.ACCEPTED, service.run_zip_test(self._body())
+        if method == "POST" and path == "/api/v1/actions/functions-sync":
+            return HTTPStatus.ACCEPTED, service.sync_functions()
         raise ApiError(HTTPStatus.NOT_FOUND, "rota não encontrada")
 
     def do_GET(self) -> None:

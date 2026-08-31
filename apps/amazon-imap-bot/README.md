@@ -24,7 +24,7 @@ O painel possui seis áreas no menu superior:
 - `CONSOLE`: chamadas IMAP, GPT e SES, sem exibir senhas, API keys ou credenciais AWS.
 - `CONTAS`: estado de cada caixa monitorada.
 - `API`: configuração efetiva da OpenAI e pilha/histórico das chamadas de API (e-mail e teste ZIP), com estado, modelo, nível de raciocínio, tempo, Response ID e arquivo de retorno.
-- `FUNÇÕES`: leitura do `functions.json` atual em interface humana, mostrando funções, estado, descrição, níveis, parâmetros e permissões por remetente sem exibir JSON cru.
+- `FUNÇÕES`: leitura do catálogo Oracle carregado pela camada de aplicação, mostrando funções, estado, descrição, níveis, parâmetros e permissões por remetente.
 
 As teclas `F1`, `F2`, `F3`, `F4` e `F6` ficam livres para uso futuro. No menu superior, use `←/→` para escolher uma área e `↓` ou `Enter` para entrar. Dentro da área, use `↑/↓`, `PgUp/PgDn` e `Enter` quando houver detalhes; `Esc` ou `↑` no primeiro item retorna ao menu. `F5` é global e executa imediatamente a mesma verificação IMAP do poll automático de 30 segundos. `R` permanece como atalho alternativo. `Q` sai. Na área `API`, `T` executa o teste de ZIP.
 
@@ -65,6 +65,32 @@ OPENAI_TEST_ZIP=.config/amazon-imap-bot/api-test-input.zip
 
 A aba API registra também as chamadas normais usadas para responder e-mails. Assim é possível ver uma chamada em `AGUARDANDO`, seguida de `CONCLUÍDO` ou `ERRO`, e o tempo total ao finalizar. A chave da API nunca é exibida; aparece apenas `CONFIGURADA` ou `AUSENTE`.
 
+
+### Catálogo de funções no Oracle
+
+A conexão do catálogo fica separada em `.config/amazon-imap-bot/database.env`:
+
+```env
+DB_TYPE=oracle
+DB_USER=WKSP_SINDICATTO
+DB_JDBC_URL=jdbc:oracle:thin:@sindicatto_tpurgent
+DB_TNS_ADMIN=$HOME/.oracle/Wallet_sindicatto
+DB_SCHEMA=WKSP_SINDICATTO
+DB_PASSWORD=
+# Opcional: somente se a wallet PEM exigir senha.
+DB_WALLET_PASSWORD=
+# Inicialização fail-fast: evita ficar dezenas de segundos em retries do descriptor do wallet.
+DB_CONNECT_TIMEOUT_SECONDS=8
+DB_CONNECT_RETRY_COUNT=0
+DB_CONNECT_RETRY_DELAY_SECONDS=1
+```
+
+Preencha a senha somente nesse arquivo local. O bot usa o driver Python `oracledb` no mesmo padrão do Orbital App: `DB_TNS_ADMIN` é passado como `config_dir` para resolver o alias TNS e também como `wallet_location` para carregar a wallet/mTLS. `DB_WALLET_PASSWORD` é opcional para wallets sem chave PEM criptografada; se `ewallet.pem` contiver `ENCRYPTED PRIVATE KEY`, use a mesma senha de wallet configurada no Orbital App. Por compatibilidade, o bot também aceita a chave `ORACLE_WALLET_PASSWORD` no `database.env`.
+
+Na inicialização, o terminal mostra cada etapa com tempo acumulado, inclusive resolução do DSN, host/porta/service do Oracle (sem senha), política de retry/timeout, abertura da conexão e leitura de cada parte do catálogo. Os valores `DB_CONNECT_*` sobrescrevem os retries do descriptor apenas no processo do bot, para que falhas de rede/ACL apareçam rapidamente em vez de deixarem a tela aparentemente travada.
+
+Antes de iniciar o bot, aplique manualmente, na ordem, os patches de `apps/amazon-imap-bot/sql/oracle/`. O aplicativo somente consulta as tabelas e nunca executa DDL ou DML de catálogo automaticamente.
+
 A `.config/**` já é protegida por git-crypt neste projeto.
 
 ## Uso
@@ -83,58 +109,42 @@ amazon-imap-bot --once
 
 ## Funções acionadas por e-mail
 
-As funções executáveis por e-mail são autorizadas fora do prompt da IA, em um mapa local:
+As definições e autorizações são carregadas do Oracle pela camada de aplicação do Amazon IMAP Bot. `functions.json` não é necessário no funcionamento normal.
 
-```text
-.config/amazon-imap-bot/functions.json
-```
+O catálogo é composto pelas tabelas:
 
-O caminho pode ser alterado em `settings.env` com:
+- `IMAP_BOT_FUNCTION_CATALOG`
+- `IMAP_BOT_REASONING_LEVELS`
+- `IMAP_BOT_FUNCTIONS`
+- `IMAP_BOT_FUNCTION_SENDERS`
+- `IMAP_BOT_SENDER_FUNCTIONS`
 
-```env
-FUNCTIONS_CONFIG=.config/amazon-imap-bot/functions.json
-```
+Os patches SQL idempotentes migram as funções atuais `api_zip_test` e `project_zip_edit`, suas estruturas de parâmetros, níveis e a autorização de `danielmaiax@gmail.com`. Também registram `function_catalog_admin`.
 
-A configuração inicial autoriza `danielmaiax@gmail.com` somente para `api_zip_test`. Outros remetentes não executam essa função, mesmo que escrevam o mesmo comando. O arquivo foi estruturado para que cada remetente possa receber uma lista diferente de funções no futuro.
+Fluxo:
 
-Níveis numéricos aceitos para chamadas da API:
+1. Na inicialização, o repositório Oracle carrega o catálogo para a camada de aplicação.
+2. O monitor, o roteador, a TUI e a API mobile consomem o mesmo `FunctionMap`.
+3. `GET /api/v1/functions` recarrega e retorna o catálogo do Oracle.
+4. O GPT recebe somente as funções autorizadas para o endereço `From`.
+5. O Python revalida remetente, função, nível e parâmetros antes de executar.
+6. Não existe fallback automático para JSON em runtime.
 
-```text
-0 = none
-1 = low
-2 = medium
-3 = high
-4 = xhigh
-5 = max
-```
+A classe ainda aceita uma fonte JSON somente quando ela é fornecida explicitamente por código, para rollback/importação controlada; esse modo legado não é usado pela inicialização normal do bot.
 
-Exemplo de comando no corpo ou assunto do e-mail:
+### Função `function_catalog_admin`
 
-```text
-Mande o arquivo teste usando o nível 1 e peça como retorno qual é a capital da África do Sul
-```
+A nova função administra o catálogo em memória sem fazer DDL/DML:
 
-Fluxo desse comando:
+- `operation=list`: lista versão, funções ativas e remetentes autorizados.
+- `operation=sync`: descarta o snapshot atual e recarrega definições e autorizações do Oracle.
 
-1. O Python lê `functions.json` e monta a lista de funções autorizadas especificamente para o endereço `From` recebido.
-2. Somente essas funções autorizadas são enviadas ao GPT como *function tools* da Responses API. O GPT interpreta o pedido semanticamente; não existe mais dependência de frase exata, alias ou palavra-chave para escolher a função.
-3. Se nenhuma função disponível combinar com o pedido, o GPT não chama ferramenta e o e-mail segue pelo fluxo normal de suporte.
-4. Se o GPT selecionar uma função, retorna uma chamada estruturada com nome e argumentos. O Python valida novamente remetente, nome da função e parâmetros antes de executar qualquer coisa.
-5. Para `api_zip_test`, valida o nível `0..5`, converte `1` para `low` e usa esse nível apenas na execução do ZIP, sem alterar o nível global.
-6. A decisão semântica aparece na área `API` como uma chamada `ROUTER`, com resultado `função=...` ou `nenhuma função selecionada`.
-7. Quando `api_zip_test` é escolhida, uma segunda linha `ZIP` aparece na mesma pilha e acompanha `PREPARANDO`, `ENVIANDO`, `AGUARDANDO`, `BAIXANDO`, `CONCLUÍDO` ou `ERRO`.
-8. O teste usa o mesmo ZIP da tecla `T`, envia a pergunta/instrução extraída pelo GPT e gera `RETORNO_OPENAI.txt` dentro do novo ZIP.
-9. O ZIP retornado é baixado para `OPENAI_OUTPUT_DIR`, por padrão `~/Downloads`.
-10. Ao concluir, o bot responde ao e-mail informando a função, nível utilizado, caminho do arquivo e o resumo textual retornado pela API.
-
-Durante esse fluxo o e-mail passa por `EXECUTANDO`, `CONCLUÍDO`, `ENVIANDO` e finalmente `RESPONDIDO`. Falhas da função aparecem como `ERRO FUNÇÃO`.
-
-A autorização atual é baseada no endereço `From` recebido. Para funções futuras que tenham permissão para alterar projetos, banco ou sistema operacional, deve-se acrescentar uma autenticação mais forte além do endereço de remetente.
+A mesma sincronização está disponível para clientes da API em `POST /api/v1/actions/functions-sync`. Alterações persistentes continuam sendo feitas exclusivamente pelos patches/comandos SQL aplicados manualmente.
 
 
 ## Função `project_zip_edit`
 
-Para remetentes autorizados em `.config/amazon-imap-bot/functions.json`, pedidos de alteração de projeto podem ser roteados para `project_zip_edit`. O fluxo usa duas chamadas independentes:
+Para remetentes autorizados no catálogo Oracle, pedidos de alteração de projeto podem ser roteados para `project_zip_edit`. O fluxo usa duas chamadas independentes:
 
 1. lista somente `*.zip` diretamente em `PROJECT_ZIP_SEARCH_ROOT` (padrão `~/Code`), sem entrar em subdiretórios e envia somente a lista + pedido original ao GPT para escolher o ZIP;
 2. valida localmente a escolha, envia apenas esse ZIP em uma nova chamada com o pedido original completo, baixa o ZIP final para `OPENAI_OUTPUT_DIR` (padrão `~/Downloads`).
@@ -144,7 +154,7 @@ Não existe mapeamento fixo de nomes de projetos. A seleção retornada pelo GPT
 
 ## API mobile e aplicativo Flutter
 
-A interface Flutter fica em `apps/amazon-imap-bot-mobile` e reproduz as áreas e operações relevantes da TUI por uma API própria: resumo/status e filas em processamento, entradas e respostas com detalhes, console persistente, contas, histórico/detalhes de chamadas da API, mapa de funções, atualização IMAP imediata, remoção confirmada de e-mail e teste ZIP.
+A interface Flutter fica em `apps/amazon-imap-bot-mobile` e reproduz as áreas e operações relevantes da TUI por uma API própria: resumo/status e filas em processamento, entradas e respostas com detalhes, console persistente, contas, histórico/detalhes de chamadas da API, catálogo Oracle de funções, atualização IMAP imediata, remoção confirmada de e-mail e teste ZIP.
 
 Configure em `.config/amazon-imap-bot/settings.env`:
 
@@ -171,4 +181,5 @@ Principais rotas:
 - `GET /api/v1/api-runs` e `/api-runs/{id}`
 - `POST /api/v1/actions/refresh`
 - `POST /api/v1/actions/api-zip-test`
+- `POST /api/v1/actions/functions-sync`
 - `DELETE /api/v1/messages/{id}`
