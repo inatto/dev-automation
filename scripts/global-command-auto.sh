@@ -16,7 +16,14 @@ RUNNING_PROJECTS_DIR="$STATE_DIR/running-projects"
 fail() { printf '[%s-auto] ERRO: %s\n' "${COMMAND_NAME:-global}" "$*" >&2; exit 1; }
 
 [[ -n "$COMMAND_NAME" ]] || fail "comando não informado"
-[[ -f "$SOURCE_FILE" ]] || fail "fonte não encontrada: $SOURCE_FILE"
+if [[ "$SOURCE_FILE" == */* ]]; then
+  [[ -f "$SOURCE_FILE" ]] || fail "fonte não encontrada: $SOURCE_FILE"
+  RUN_COMMAND=("$SOURCE_FILE")
+else
+  RESOLVED_COMMAND="$(command -v -- "$SOURCE_FILE" 2>/dev/null || true)"
+  [[ -n "$RESOLVED_COMMAND" ]] || fail "comando global não encontrado no PATH: $SOURCE_FILE"
+  RUN_COMMAND=("$SOURCE_FILE")
+fi
 [[ -d "$WATCH_DIR" ]] || fail "pasta monitorada não encontrada: $WATCH_DIR"
 [[ "$RESTART_ON_DESCENDANT" == "0" || "$RESTART_ON_DESCENDANT" == "1" ]] || fail "RESTART_ON_DESCENDANT inválido"
 
@@ -67,16 +74,28 @@ stop_child() {
   kill -KILL "$pid" 2>/dev/null || true
 }
 
+stop_dev_manager_runtime() {
+  [[ "$COMMAND_NAME" == "dev-manager" ]] || return 0
+  local manager_script="$WATCH_DIR/scripts/dev-manager.sh"
+  [[ -f "$manager_script" ]] || return 0
+  # A TUI é só a frente do Auto Code Manager. Ao reiniciar, matar apenas a TUI
+  # pode deixar o monitor/lock ativo e a próxima execução morre com código 3.
+  # Use a rotina oficial de parada para encerrar o monitor e liberar o lock.
+  bash "$manager_script" stop >/dev/null 2>&1 || true
+}
+
 on_restart() {
   RESTART_REQUESTED=1
   rm -f -- "$REQUEST_FILE" 2>/dev/null || true
   printf '\n[%s-auto] ZIP aplicado; reinício automático solicitado.\n' "$COMMAND_NAME"
   stop_child
+  stop_dev_manager_runtime
 }
 
 on_stop() {
   STOP_REQUESTED=1
   stop_child
+  stop_dev_manager_runtime
 }
 
 cleanup() {
@@ -95,7 +114,14 @@ fi
 
 while true; do
   RESTART_REQUESTED=0
-  bash "$SOURCE_FILE" "${ARGS[@]}" &
+  # A TUI do dev-manager precisa continuar ligada ao terminal real.
+  # Em shell não interativo, um comando iniciado com `&` pode receber stdin de /dev/null,
+  # fazendo o auto-code-manager cair no fallback/legacy.
+  if [[ "$COMMAND_NAME" == "dev-manager" && -r /dev/tty ]]; then
+    "${RUN_COMMAND[@]}" "${ARGS[@]}" </dev/tty &
+  else
+    "${RUN_COMMAND[@]}" "${ARGS[@]}" &
+  fi
   CHILD_PID=$!
   write_state
 

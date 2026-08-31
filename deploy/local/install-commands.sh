@@ -215,14 +215,21 @@ EOF_WRAPPER
       watch_dir="$PROJECT_ROOT"
       ;;
   esac
+  # Comandos globais AUTO são isolados pelo diretório exato. Em especial,
+  # dev-manager-auto não reinicia quando o ZIP pertence a subprojeto cadastrado.
   restart_descendants=0
-  [[ "$command_name" == "dev-manager" ]] && restart_descendants=1
+  auto_exec_file="$source_file"
+  if [[ "$command_name" == "dev-manager" ]]; then
+    # O AUTO do Dev Manager supervisiona o próprio comando global dev-manager.
+    # Assim cada reinício usa exatamente o wrapper dev-manager recém-instalado/atualizado.
+    auto_exec_file="dev-manager"
+  fi
   rm -f "$auto_target_file"
   cat > "$auto_target_file" <<EOF_AUTO_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
 bash "$CLEAR_TERMINAL_SOURCE"
-exec bash "$GLOBAL_AUTO_RUNNER" "$command_name" "$source_file" "$watch_dir" "$restart_descendants" "\$@"
+exec bash "$GLOBAL_AUTO_RUNNER" "$command_name" "$auto_exec_file" "$watch_dir" "$restart_descendants" "\$@"
 EOF_AUTO_WRAPPER
   chmod +x "$auto_target_file"
   log "criado: $command_name-auto -> monitora $watch_dir"

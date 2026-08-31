@@ -38,7 +38,7 @@ cat > "$AUTO_TARGET" <<EOF_WRAPPER
 #!/usr/bin/env bash
 # generated-by: dev-automation-global-command
 bash "$CLEAR_TERMINAL_SOURCE"
-exec bash "$GLOBAL_AUTO_RUNNER" "dev-manager" "$SOURCE" "$PROJECT_ROOT" "1" "\$@"
+exec bash "$GLOBAL_AUTO_RUNNER" "dev-manager" "dev-manager" "$PROJECT_ROOT" "0" "\$@"
 EOF_WRAPPER
 chmod +x "$AUTO_TARGET"
 
