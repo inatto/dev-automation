@@ -40,6 +40,7 @@ materialize_changed_protected_configs() {
     mkdir -p -- "$(dirname -- "$destination")"
 
     if ! result="$(python3 - "$source_root/$rel" "$local_target" "$destination" <<'PY_MERGE'
+import json
 import os
 import re
 import stat
@@ -95,6 +96,96 @@ def replace_url_password_with_local(incoming: str, local: str) -> str:
 
 incoming_text = decode(incoming_path)
 mode = stat.S_IMODE(incoming_path.stat().st_mode)
+
+if incoming_path.suffix.lower() == ".json":
+    try:
+        incoming_json = json.loads(incoming_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON protegido inválido: {incoming_path}: {exc}") from exc
+
+    if not local_path.exists():
+        if masked_token.search(incoming_text):
+            warn(f"{local_path}: placeholder JSON sem correspondente local; mantendo valor recebido")
+            result = "new-warning"
+        else:
+            result = "new-safe"
+        out_path.write_text(incoming_text, encoding="utf-8", newline="")
+        os.chmod(out_path, mode)
+        print(result)
+        raise SystemExit(0)
+
+    if not local_path.is_file():
+        raise ValueError(f"alvo local não é arquivo regular: {local_path}")
+
+    local_text = decode(local_path)
+    try:
+        local_json = json.loads(local_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON local protegido inválido: {local_path}: {exc}") from exc
+
+    missing = object()
+
+    def contains_sensitive(value, key=None):
+        if key is not None and secret_key.search(str(key)):
+            return True
+        if isinstance(value, dict):
+            return any(contains_sensitive(v, k) for k, v in value.items())
+        if isinstance(value, list):
+            return any(contains_sensitive(v) for v in value)
+        if isinstance(value, str):
+            return bool(masked_token.search(value) or url_password.search(value))
+        return False
+
+    def merge_json(incoming, local=missing, key=None):
+        if key is not None and secret_key.search(str(key)):
+            if local is missing:
+                warn(f"{local_path}:{key}: chave sensível JSON nova sem correspondente local; mantendo valor recebido")
+                return incoming
+            return local
+
+        if isinstance(incoming, dict):
+            local_dict = local if isinstance(local, dict) else {}
+            merged = {
+                k: merge_json(v, local_dict.get(k, missing), k)
+                for k, v in incoming.items()
+            }
+            # Chaves locais ausentes no JSON recebido só são preservadas quando
+            # contêm material sensível; campos comuns removidos pelo ZIP permanecem removidos.
+            for k, v in local_dict.items():
+                if k not in incoming and contains_sensitive(v, k):
+                    merged[k] = v
+            return merged
+
+        if isinstance(incoming, list):
+            local_list = local if isinstance(local, list) else []
+            return [
+                merge_json(v, local_list[i] if i < len(local_list) else missing)
+                for i, v in enumerate(incoming)
+            ]
+
+        if isinstance(incoming, str):
+            if masked_token.search(incoming):
+                if local is missing:
+                    warn(f"{local_path}: placeholder JSON sem correspondente local; mantendo valor recebido")
+                    return incoming
+                return local
+            if url_password.search(incoming):
+                if isinstance(local, str) and url_password.search(local):
+                    return replace_url_password_with_local(incoming, local)
+                if local is missing:
+                    warn(f"{local_path}: URL JSON com credencial sem correspondente local; mantendo valor recebido")
+            return incoming
+
+        return incoming
+
+    merged_json = merge_json(incoming_json, local_json)
+    out_path.write_text(
+        json.dumps(merged_json, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(out_path, mode)
+    print("merged-json")
+    raise SystemExit(0)
 
 if not local_path.exists():
     # Bootstrap em máquina nova: não existe segredo local para preservar.

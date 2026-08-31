@@ -15,7 +15,7 @@ mergeable_protected_config_relpath() {
   name="${rel##*/}"
   name="${name,,}"
   case "$name" in
-    env|.env|config|settings|.env.*|*.env|*.ini|*.conf|*.cfg|*.properties) return 0 ;;
+    env|.env|config|settings|.env.*|*.env|*.ini|*.conf|*.cfg|*.properties|*.json) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -69,7 +69,7 @@ def mergeable(path: Path) -> bool:
         name in {"env", ".env", "config", "settings"}
         or name.startswith(".env.")
         or name.endswith(".env")
-        or path.suffix.lower() in {".ini", ".conf", ".cfg", ".properties"}
+        or path.suffix.lower() in {".ini", ".conf", ".cfg", ".properties", ".json"}
     )
 
 
@@ -107,6 +107,49 @@ for path in root.rglob("*"):
     try:
         raw = path.read_bytes()
     except OSError:
+        continue
+
+    if path.suffix.lower() == ".json":
+        try:
+            import json
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            path.write_text(placeholder + "\n", encoding="utf-8")
+            changed_files += 1
+            fully_redacted += 1
+            continue
+
+        json_changed = False
+
+        def sanitize_json(value, key=None):
+            global json_changed, changed_values
+            if key is not None and secret_key.search(str(key)):
+                if value not in (None, "", placeholder):
+                    json_changed = True
+                    changed_values += 1
+                return placeholder
+            if isinstance(value, dict):
+                return {k: sanitize_json(v, k) for k, v in value.items()}
+            if isinstance(value, list):
+                return [sanitize_json(v) for v in value]
+            if isinstance(value, str):
+                masked, count = url_credentials.subn(
+                    lambda item: f"{item.group('prefix')}{placeholder}{item.group('suffix')}",
+                    value,
+                )
+                if count:
+                    json_changed = True
+                    changed_values += count
+                return masked
+            return value
+
+        sanitized = sanitize_json(data)
+        if json_changed:
+            path.write_text(
+                json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            changed_files += 1
         continue
 
     if b"\x00" in raw:
