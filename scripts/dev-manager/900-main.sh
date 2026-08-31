@@ -208,6 +208,7 @@ if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento no Linux ou polling no Downloads do Windows." clean_zone || true
 fi
 run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
+restart_dev_manager_if_requested
 run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia os DDLs por arquivo: SQL novo vira baseline sem ZIP; alteração posterior gera 1 ZIP com 1 SQL; na raiz Code fica somente o snapshot mais recente." reconcile_configured_sql_snapshots || true
 
 taskbar_status idle "Aguardando eventos"
@@ -235,6 +236,7 @@ while true; do
       if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
         LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
       fi
+      restart_dev_manager_if_requested
     fi
 
     if pending_change_work && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
@@ -306,6 +308,7 @@ while true; do
           if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido no Downloads do Windows; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
             LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
           fi
+          restart_dev_manager_if_requested
         fi
       fi
     fi

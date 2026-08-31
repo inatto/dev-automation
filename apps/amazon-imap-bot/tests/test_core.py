@@ -5,7 +5,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 
 from config import Account
-from message import Incoming, parse, should_reply
+from message import Incoming, IncomingAttachment, parse, should_reply
 from ses import SesSender
 from store import Store
 
@@ -22,6 +22,54 @@ def test_parse_and_reply_rule():
     assert item.subject == "Ajuda"
     assert should_reply(item, {"suporte@sindicatto.com"}) == (True, "ok")
 
+
+
+def test_parse_collects_email_attachments():
+    msg = EmailMessage()
+    msg["From"] = "Cliente <cliente@example.com>"
+    msg["To"] = "suporte@sindicatto.com"
+    msg["Subject"] = "Planilha"
+    msg["Message-ID"] = "<attach@example.com>"
+    msg.set_content("Verifique a planilha anexa no projeto.")
+    msg.add_attachment(
+        b"fake-xlsx",
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename="dados.xlsx",
+    )
+    item = parse(msg.as_bytes())
+    assert len(item.attachments) == 1
+    assert item.attachments[0].filename == "dados.xlsx"
+    assert item.attachments[0].data == b"fake-xlsx"
+    assert item.attachments[0].size == 9
+
+
+def test_ses_reply_can_attach_generated_file():
+    class FakeClient:
+        def __init__(self):
+            self.raw = b""
+
+        def send_raw_email(self, **kwargs):
+            self.raw = kwargs["RawMessage"]["Data"]
+            return {"MessageId": "ses-attachment"}
+
+    sender = SesSender.__new__(SesSender)
+    sender.client = FakeClient()
+    account = Account(email="suporte@example.com", password="x", display_name="Suporte")
+    incoming = Incoming(
+        message_id="<in@example.com>", thread_key="<in@example.com>", sender_name="Cliente",
+        sender_email="cliente@example.com", recipient="suporte@example.com", subject="Imagem", body="",
+        references="", auto_submitted="", precedence="", list_id="",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        image = Path(tmp) / "resultado.png"
+        image.write_bytes(b"PNGDATA")
+        sender.send_reply(account, incoming, "Segue o arquivo.", attachment_paths=[image])
+    parsed = BytesParser(policy=policy.default).parsebytes(sender.client.raw)
+    attachments = list(parsed.iter_attachments())
+    assert len(attachments) == 1
+    assert attachments[0].get_filename() == "resultado.png"
+    assert attachments[0].get_payload(decode=True) == b"PNGDATA"
 
 def test_no_reply_is_ignored():
     msg = EmailMessage()
@@ -696,3 +744,218 @@ def test_project_zip_query_completes_without_return_zip():
         assert row["status"] == "concluido"
         assert row["output_path"] == ""
         assert "processos" in row["response_summary"]
+
+
+def test_project_zip_query_uploads_email_attachments_and_downloads_generated_nonzip():
+    import json
+    import zipfile
+    from types import SimpleNamespace
+    from project_zip_runner import ProjectZipRunner
+
+    class FakeFiles:
+        def __init__(self):
+            self.names = []
+
+        def create(self, *, file, purpose):
+            assert purpose == "user_data"
+            self.names.append(Path(file.name).name)
+            return SimpleNamespace(id=f"file_{len(self.names)}")
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if kwargs["tools"][0]["type"] == "function":
+                return SimpleNamespace(
+                    id="resp_select_attach",
+                    output=[SimpleNamespace(
+                        type="function_call", name="select_project_zip",
+                        arguments=json.dumps({"selected_zip": "orbital-app.zip", "reason": "pedido menciona projeto"}),
+                    )],
+                )
+            return SimpleNamespace(
+                id="resp_query_attach",
+                output_text="A planilha é compatível com o importador. Segue imagem de validação.",
+                output=[SimpleNamespace(
+                    type="message",
+                    content=[SimpleNamespace(
+                        type="output_text",
+                        annotations=[SimpleNamespace(
+                            type="container_file_citation",
+                            container_id="cntr_attach",
+                            file_id="cfile_png",
+                            filename="validacao.png",
+                        )],
+                    )],
+                )],
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.files = FakeFiles()
+            self.responses = FakeResponses()
+
+    class TestRunner(ProjectZipRunner):
+        def _download_container_file(self, container_id, file_id, target):
+            assert container_id == "cntr_attach"
+            assert file_id == "cfile_png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"PNGRESULT")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "Code"
+        out = Path(tmp) / "Downloads"
+        root.mkdir()
+        source = root / "orbital-app.zip"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr("README.md", "Orbital App")
+        settings = SimpleNamespace(
+            project_zip_search_root=root, openai_model="gpt-5.6", openai_api_key="test",
+            openai_base_url="https://api.openai.com/v1", openai_timeout_seconds=300, openai_output_dir=out,
+        )
+        store = Store(Path(tmp) / "db.sqlite3")
+        client = FakeClient()
+        runner = TestRunner(settings, store, client=client)
+        attachment = IncomingAttachment(
+            filename="dados.xlsx",
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            data=b"EXCELDATA",
+        )
+        run_id = runner.run_project_request(
+            request_text="Verifique se a planilha está sendo importada corretamente no Orbital App e gere uma imagem de validação.",
+            reasoning_effort="medium", operation="query", source="email:danielmaiax@gmail.com",
+            attachments=(attachment,),
+        )
+        assert len(client.responses.calls) == 2
+        select_call, project_call = client.responses.calls
+        assert "dados.xlsx" in select_call["input"]
+        assert "nenhum binário nesta chamada" in select_call["input"]
+        assert client.files.names[0] == "orbital-app.zip"
+        assert client.files.names[1].endswith("dados.xlsx")
+        assert project_call["tools"][0]["container"]["file_ids"] == ["file_1", "file_2"]
+        assert "ANEXOS RECEBIDOS NO E-MAIL: 1 arquivo(s), 9 bytes" in project_call["input"]
+        outputs = runner.output_files_for_run(run_id)
+        assert len(outputs) == 1
+        assert outputs[0].name == "validacao.png"
+        assert outputs[0].read_bytes() == b"PNGRESULT"
+        row = store.get_api_run(run_id)
+        assert row["kind"] == "project-zip-query"
+        assert row["status"] == "concluido"
+        assert row["output_path"] == str(outputs[0])
+        assert row["output_file_count"] == 1
+        assert "validacao.png" in row["response_summary"]
+
+
+def test_api_run_records_final_email_notification_state():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "db.sqlite3")
+        run_id = store.add_api_run(
+            kind="project-zip-edit", status="concluido", model="gpt-5.6",
+            reasoning_effort="medium", input_path="/tmp/in.zip", output_path="/tmp/out.zip",
+            request_summary="teste",
+        )
+        store.update_api_run(run_id, notification_status="enviado", notification_error="")
+        row = store.get_api_run(run_id)
+        assert row["notification_status"] == "enviado"
+        assert row["notification_error"] == ""
+
+
+def test_function_receipt_is_sent_before_processing_without_function_details():
+    from monitor import Monitor
+
+    class FakeStore:
+        def __init__(self):
+            self.outbound = []
+        def add_event(self, *args, **kwargs):
+            pass
+        def add_outbound(self, **kwargs):
+            self.outbound.append(kwargs)
+
+    class FakeSes:
+        def __init__(self):
+            self.bodies = []
+        def send_reply(self, account, item, body, attachment_paths=()):
+            self.bodies.append(body)
+            return "<ack@example.com>", "ses-ack"
+
+    monitor = Monitor.__new__(Monitor)
+    monitor.store = FakeStore()
+    monitor.ses = FakeSes()
+    monitor.on_event = lambda text: None
+    account = Account(email="suporte@sindicatto.com", password="x", display_name="Suporte")
+    item = Incoming(
+        message_id="<in@example.com>", thread_key="<in@example.com>", sender_name="Daniel",
+        sender_email="danielmaiax@gmail.com", recipient="suporte@sindicatto.com",
+        subject="Alterar projeto", body="Faça a alteração", references="",
+        auto_submitted="", precedence="", list_id="",
+    )
+    assert monitor._send_function_receipt(account, item) is True
+    assert len(monitor.ses.bodies) == 1
+    body = monitor.ses.bodies[0]
+    assert "solicitação está sendo processada" in body
+    assert "project_zip_edit" not in body
+    assert len(monitor.store.outbound) == 1
+    assert monitor.store.outbound[0]["status"] == "sent"
+
+
+def test_completed_function_sends_final_email_and_marks_api_notification():
+    from monitor import Monitor, AccountState
+    from function_map import FunctionRequest
+
+    class FakeStore:
+        def __init__(self):
+            self.statuses = []
+            self.outbound = []
+            self.api_updates = []
+        def add_event(self, *args, **kwargs):
+            pass
+        def set_inbound_status(self, account, message_id, status):
+            self.statuses.append(status)
+        def get_api_run(self, run_id):
+            return {"output_path": "/home/daniel/Downloads/orbital-app.zip", "response_summary": "Alteração concluída."}
+        def update_api_run(self, run_id, **kwargs):
+            self.api_updates.append((run_id, kwargs))
+        def add_outbound(self, **kwargs):
+            self.outbound.append(kwargs)
+
+    class FakeProjectRunner:
+        def run_project_request(self, **kwargs):
+            return 42
+        def output_files_for_run(self, run_id):
+            return []
+
+    class FakeSes:
+        def __init__(self):
+            self.bodies = []
+        def send_reply(self, account, item, body, attachment_paths=()):
+            self.bodies.append(body)
+            return "<final@example.com>", "ses-final"
+
+    monitor = Monitor.__new__(Monitor)
+    monitor.store = FakeStore()
+    monitor.ses = FakeSes()
+    monitor.project_zip_runner = FakeProjectRunner()
+    monitor.api_runner = None
+    monitor.on_event = lambda text: None
+    account = Account(email="suporte@sindicatto.com", password="x", display_name="Suporte")
+    item = Incoming(
+        message_id="<in2@example.com>", thread_key="<in2@example.com>", sender_name="Daniel",
+        sender_email="danielmaiax@gmail.com", recipient="suporte@sindicatto.com",
+        subject="Alterar Orbital", body="Troque o título", references="",
+        auto_submitted="", precedence="", list_id="",
+    )
+    request = FunctionRequest(
+        name="project_zip_edit", sender="danielmaiax@gmail.com", reasoning_level=2,
+        reasoning_effort="medium", request_text="Troque o título",
+        arguments={"operation": "modify", "reasoning_level": 2, "request_text": "Troque o título"},
+    )
+    state = AccountState(account.email)
+    monitor._execute_function_request(account, item, request, state)
+    assert monitor.store.statuses[-1] == "replied"
+    assert state.replied == 1
+    assert len(monitor.ses.bodies) == 1
+    assert "Solicitação concluída com sucesso" in monitor.ses.bodies[0]
+    assert any(update.get("notification_status") == "enviado" for _, update in monitor.store.api_updates)
+    assert monitor.store.outbound[-1]["provider_message_id"] == "ses-final"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import shutil
+import re
+import tempfile
 import threading
 import time
 import urllib.request
@@ -12,6 +14,7 @@ from pathlib import Path
 from config import Settings
 from function_map import REASONING_LEVELS
 from store import Store
+from message import IncomingAttachment
 
 
 class ProjectZipRunner:
@@ -23,6 +26,7 @@ class ProjectZipRunner:
         self.on_event = on_event
         self._lock = threading.Lock()
         self._client_override = client
+        self._run_output_files: dict[int, list[Path]] = {}
 
     def _event(self, text: str, level: str = "INFO") -> None:
         try:
@@ -288,12 +292,50 @@ class ProjectZipRunner:
                     out.writestr(preserved, data)
         temp.replace(target)
 
-    def process_project_zip(self, selected: Path, request_text: str, reasoning_effort: str, operation: str, source: str) -> int:
+    @staticmethod
+    def _safe_output_filename(value: str, fallback: str = "arquivo-retorno.bin") -> str:
+        name = Path(str(value or "").replace("\\", "/")).name.replace("\x00", "").strip()
+        name = re.sub(r"[\r\n\t]+", " ", name).strip()[:180]
+        return name if name not in {"", ".", ".."} else fallback
+
+    @staticmethod
+    def _unique_target(output_dir: Path, filename: str) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe = ProjectZipRunner._safe_output_filename(filename)
+        target = output_dir / safe
+        if not target.exists():
+            return target
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = Path(safe)
+        candidate = output_dir / f"{base.stem}-{stamp}{base.suffix}"
+        index = 2
+        while candidate.exists():
+            candidate = output_dir / f"{base.stem}-{stamp}-{index}{base.suffix}"
+            index += 1
+        return candidate
+
+    @staticmethod
+    def _attachment_context(attachments: tuple[IncomingAttachment, ...]) -> str:
+        if not attachments:
+            return "(nenhum anexo recebido no e-mail)"
+        return "\n".join(
+            f"- {att.filename} | {att.content_type or 'application/octet-stream'} | {att.size} bytes"
+            for att in attachments
+        )
+
+    def output_files_for_run(self, run_id: int) -> list[Path]:
+        return list(self._run_output_files.get(int(run_id), ()))
+
+    def process_project_zip(
+        self, selected: Path, request_text: str, reasoning_effort: str, operation: str, source: str,
+        attachments: tuple[IncomingAttachment, ...] = (),
+    ) -> int:
         effort = self.normalize_reasoning_effort(reasoning_effort)
         operation = str(operation or "modify").strip().lower()
         if operation not in {"query", "modify"}:
             raise ValueError(f"operação de projeto inválida: {operation}")
         requires_zip_output = operation == "modify"
+        attachments = tuple(attachments or ())
         selected = selected.expanduser().resolve()
         root = self.settings.project_zip_search_root.expanduser().resolve()
         try:
@@ -305,6 +347,8 @@ class ProjectZipRunner:
 
         input_zip_bytes = selected.stat().st_size
         input_zip_files = self._zip_file_count(selected)
+        attachment_bytes = sum(att.size for att in attachments)
+        attachment_context = self._attachment_context(attachments)
         task_rule = (
             "A demanda é de MODIFICAÇÃO. Inspecione o projeto antes de alterar e implemente somente o pedido original, "
             "sem melhorias paralelas nem mudanças não solicitadas. Ao final é OBRIGATÓRIO devolver um único ZIP completo alterado."
@@ -314,26 +358,33 @@ class ProjectZipRunner:
             "e NÃO gere ZIP de retorno, a menos que o próprio pedido peça explicitamente a criação de um arquivo."
         )
         prompt = (
-            "Trabalhe exclusivamente no arquivo ZIP anexado usando Code Interpreter. "
+            "Trabalhe no ZIP do projeto e nos anexos do e-mail disponibilizados no mesmo Code Interpreter. "
             "Esta é uma chamada independente: todo o contexto necessário está nesta mensagem. "
             f"{task_rule} "
+            "Todos os anexos do e-mail são contexto autorizado desta demanda: planilhas, imagens, PDFs, documentos, ZIPs ou outros arquivos. "
+            "Use-os quando forem relevantes ao pedido. "
+            "Se o usuário pedir uma imagem, planilha, documento, relatório, print ou qualquer outro arquivo adicional, crie o arquivo real no container "
+            "e cite/anexe explicitamente esse arquivo na resposta para que o bot possa baixá-lo. "
+            "Arquivos adicionais NÃO substituem o ZIP completo obrigatório quando a operação for MODIFY. "
             "Preserve a hierarquia do ZIP quando houver modificação. "
             "\n\nREGRA DE EFICIÊNCIA OBRIGATÓRIA PARA O ZIP:\n"
-            "- Há exatamente UM ZIP de entrada anexado.\n"
+            "- Há exatamente UM ZIP principal de projeto, identificado abaixo. Os demais arquivos são anexos do e-mail e não devem ser confundidos com o projeto.\n"
             "- NÃO extraia/descompacte o projeto inteiro para uma árvore de arquivos no container.\n"
             "- NÃO copie, clone ou duplique a árvore do projeto.\n"
-            "- Use Python zipfile para listar TODAS as entradas do ZIP e ler diretamente do arquivo compactado apenas os conteúdos necessários.\n"
+            "- Use Python zipfile para listar TODAS as entradas do ZIP principal e ler diretamente do arquivo compactado apenas os conteúdos necessários.\n"
             "- Pesquise nomes/caminhos e, quando necessário, leia arquivos candidatos diretamente via zipfile sem extração global.\n"
             "- Se a demanda for de modificação, produza diretamente UM NOVO ZIP: copie cada entrada do ZIP original para o ZIP de saída e substitua "
             "somente as entradas realmente alteradas. Não crie uma segunda árvore completa em disco.\n"
-            "- Se a demanda for de consulta/análise, apenas leia o necessário diretamente do ZIP e responda em texto; não reconstrua o ZIP.\n"
-            "- Quando houver ZIP de saída, ele deve conter o projeto COMPLETO, inclusive tudo que não foi alterado.\n"
+            "- Se a demanda for de consulta/análise, apenas leia o necessário diretamente do ZIP e responda em texto; não reconstrua o ZIP, salvo pedido explícito.\n"
+            "- Quando houver ZIP de saída de modificação, ele deve conter o projeto COMPLETO, inclusive tudo que não foi alterado.\n"
             "- Preserve nomes, hierarquia e metadados na medida do possível.\n"
             "Ao terminar, valide o que for possível sem deploy. Se for modificação, explique brevemente o que mudou e cite/anexe "
-            "explicitamente o ÚNICO ZIP final para download. Se for consulta, responda de forma objetiva e fundamentada no conteúdo do projeto.\n\n"
+            "explicitamente o ÚNICO ZIP final para download. Em qualquer operação, cite/anexe também TODO arquivo adicional criado como resultado do pedido.\n\n"
             f"OPERAÇÃO: {operation.upper()}\n"
-            f"ZIP SELECIONADO LOCALMENTE: {selected.name}\n"
+            f"ZIP PRINCIPAL DO PROJETO: {selected.name}\n"
             f"ZIP DE ENTRADA: {input_zip_bytes} bytes; {input_zip_files} arquivos internos (diretórios não contam).\n"
+            f"ANEXOS RECEBIDOS NO E-MAIL: {len(attachments)} arquivo(s), {attachment_bytes} bytes no total.\n"
+            f"{attachment_context}\n"
             "PEDIDO ORIGINAL DO E-MAIL:\n---\n"
             f"{request_text.strip()}\n"
             "---"
@@ -346,33 +397,51 @@ class ProjectZipRunner:
             reasoning_effort=effort,
             input_path=str(selected),
             output_path="",
-            request_summary=f"origem={source} | {request_text[:1700]}",
+            request_summary=f"origem={source} | anexos_email={len(attachments)} | {request_text[:1650]}",
             request_payload=prompt,
             request_bytes=prompt_bytes,
             input_file_bytes=input_zip_bytes,
             input_file_count=input_zip_files,
-            listed_item_count=1,
+            listed_item_count=1 + len(attachments),
         )
+        self._run_output_files[run_id] = []
         started = time.monotonic()
         downloaded_temp: Path | None = None
         self._event(
             f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: preparando {selected.name} effort={effort} | "
-            f"1 ZIP, {input_zip_bytes} bytes, {input_zip_files} arquivos internos"
+            f"ZIP={input_zip_bytes} bytes/{input_zip_files} arquivos internos | anexos_email={len(attachments)}/{attachment_bytes} bytes"
         )
         try:
             client = self._client()
             self.store.update_api_run(run_id, status="enviando")
+            uploaded_ids: list[str] = []
             with selected.open("rb") as fh:
                 uploaded = client.files.create(file=fh, purpose="user_data")
-            self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: upload concluído file_id={uploaded.id}")
-            self.store.update_api_run(run_id, status="aguardando-resposta")
+            uploaded_ids.append(str(uploaded.id))
+            self._event(f"PROJECT ZIP #{run_id}: upload ZIP principal {selected.name} -> {uploaded.id}")
 
+            # Anexos do e-mail são enviados integralmente por padrão, sem interpretação local do conteúdo.
+            if attachments:
+                with tempfile.TemporaryDirectory(prefix="amazon-imap-attachments-") as tmp:
+                    tmp_root = Path(tmp)
+                    for index, att in enumerate(attachments, 1):
+                        name = self._safe_output_filename(att.filename, f"anexo-{index:02d}.bin")
+                        path = tmp_root / name
+                        path.write_bytes(att.data)
+                        with path.open("rb") as fh:
+                            uploaded_att = client.files.create(file=fh, purpose="user_data")
+                        uploaded_ids.append(str(uploaded_att.id))
+                        self._event(
+                            f"PROJECT ZIP #{run_id}: upload anexo {att.filename} ({att.size} bytes, {att.content_type}) -> {uploaded_att.id}"
+                        )
+
+            self.store.update_api_run(run_id, status="aguardando-resposta")
             response = client.responses.create(
                 model=self.settings.openai_model,
                 reasoning={"effort": effort},
                 tools=[{
                     "type": "code_interpreter",
-                    "container": {"type": "auto", "file_ids": [uploaded.id]},
+                    "container": {"type": "auto", "file_ids": uploaded_ids},
                 }],
                 tool_choice="required",
                 input=prompt,
@@ -386,53 +455,87 @@ class ProjectZipRunner:
                 response_summary=text[:1800],
                 response_bytes=len(text.encode("utf-8")),
             )
-            self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: resposta recebida response_id={response_id or '-'}")
+            self._event(f"PROJECT ZIP #{run_id}: resposta recebida response_id={response_id or '-'}")
 
             files = self._container_files(response)
             zip_files = [item for item in files if item["filename"].lower().endswith(".zip")]
-            if not requires_zip_output:
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                self.store.update_api_run(
-                    run_id, status="concluido", output_path="", output_file_bytes=0, output_file_count=0,
-                    elapsed_ms=elapsed_ms, finished=True,
-                )
-                self._event(f"PROJECT ZIP QUERY #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s | resposta textual")
-                return run_id
-            if not zip_files:
-                raise RuntimeError("a API respondeu a uma solicitação de modificação, mas não retornou um arquivo ZIP de container")
-            chosen = zip_files[-1]
+            non_zip_files = [item for item in files if not item["filename"].lower().endswith(".zip")]
             output_dir = self.settings.openai_output_dir.expanduser()
             output_dir.mkdir(parents=True, exist_ok=True)
-            target = output_dir / selected.name
-            if target.exists():
-                stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-                target = output_dir / f"{selected.stem}-{stamp}{selected.suffix}"
-            downloaded_temp = output_dir / f".{target.name}.download-{run_id}.tmp.zip"
-            self._download_container_file(chosen["container_id"], chosen["file_id"], downloaded_temp)
-            if not zipfile.is_zipfile(downloaded_temp):
-                raise RuntimeError("o arquivo retornado pela API não é um ZIP válido")
-            self._preserve_existing_zip_metadata(selected, downloaded_temp, target)
-            if not zipfile.is_zipfile(target):
-                raise RuntimeError(f"falha ao produzir ZIP final válido: {target}")
-            if downloaded_temp.exists():
-                downloaded_temp.unlink()
-                downloaded_temp = None
+            generated_paths: list[Path] = []
 
-            output_zip_bytes = target.stat().st_size
-            output_zip_files = self._zip_file_count(target)
+            # Todo arquivo adicional retornado pela API é salvo em Downloads e ficará disponível para anexo no e-mail.
+            for index, item in enumerate(non_zip_files, 1):
+                filename = self._safe_output_filename(item.get("filename", ""), f"resultado-{run_id}-{index}.bin")
+                target_extra = self._unique_target(output_dir, filename)
+                self._download_container_file(item["container_id"], item["file_id"], target_extra)
+                generated_paths.append(target_extra)
+                self._event(f"PROJECT ZIP #{run_id}: arquivo adicional baixado -> {target_extra} ({target_extra.stat().st_size} bytes)")
+
+            main_output_path = ""
+            output_zip_bytes = 0
+            output_zip_files = 0
+            if requires_zip_output:
+                if not zip_files:
+                    raise RuntimeError("a API respondeu a uma solicitação de modificação, mas não retornou um arquivo ZIP de container")
+                chosen = zip_files[-1]
+                target = self._unique_target(output_dir, selected.name)
+                downloaded_temp = output_dir / f".{target.name}.download-{run_id}.tmp.zip"
+                self._download_container_file(chosen["container_id"], chosen["file_id"], downloaded_temp)
+                if not zipfile.is_zipfile(downloaded_temp):
+                    raise RuntimeError("o arquivo retornado pela API não é um ZIP válido")
+                self._preserve_existing_zip_metadata(selected, downloaded_temp, target)
+                if not zipfile.is_zipfile(target):
+                    raise RuntimeError(f"falha ao produzir ZIP final válido: {target}")
+                if downloaded_temp.exists():
+                    downloaded_temp.unlink()
+                    downloaded_temp = None
+                output_zip_bytes = target.stat().st_size
+                output_zip_files = self._zip_file_count(target)
+                main_output_path = str(target)
+                # ZIP é salvo em Downloads, mas por regra não é anexado automaticamente ao e-mail.
+            elif zip_files:
+                # Consulta pode gerar ZIP se o próprio pedido exigir; salva, mas continua não anexando ZIP automaticamente ao e-mail.
+                for index, item in enumerate(zip_files, 1):
+                    filename = self._safe_output_filename(item.get("filename", ""), f"resultado-{run_id}-{index}.zip")
+                    target_zip = self._unique_target(output_dir, filename)
+                    self._download_container_file(item["container_id"], item["file_id"], target_zip)
+                    if zipfile.is_zipfile(target_zip):
+                        main_output_path = main_output_path or str(target_zip)
+                        output_zip_bytes += target_zip.stat().st_size
+                        output_zip_files += self._zip_file_count(target_zip)
+                    else:
+                        target_zip.unlink(missing_ok=True)
+
+            self._run_output_files[run_id] = generated_paths
             elapsed_ms = int((time.monotonic() - started) * 1000)
+            generated_summary = ""
+            if generated_paths:
+                generated_summary = "\nArquivos adicionais: " + ", ".join(
+                    f"{path.name} ({path.stat().st_size} bytes)" for path in generated_paths if path.is_file()
+                )
+                if not main_output_path:
+                    main_output_path = str(generated_paths[0])
+            response_summary = (text + generated_summary).strip()[:1800]
+            if requires_zip_output:
+                metric_bytes = output_zip_bytes
+                metric_count = output_zip_files
+            else:
+                metric_bytes = sum(path.stat().st_size for path in generated_paths if path.is_file())
+                metric_count = len(generated_paths)
             self.store.update_api_run(
                 run_id,
                 status="concluido",
-                output_path=str(target),
-                output_file_bytes=output_zip_bytes,
-                output_file_count=output_zip_files,
+                output_path=main_output_path,
+                response_summary=response_summary,
+                output_file_bytes=metric_bytes,
+                output_file_count=metric_count,
                 elapsed_ms=elapsed_ms,
                 finished=True,
             )
             self._event(
-                f"PROJECT ZIP EDIT #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s -> {target} | "
-                f"{output_zip_bytes} bytes, {output_zip_files} arquivos internos"
+                f"PROJECT ZIP #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s | "
+                f"zip_retorno={main_output_path or '-'} | arquivos_adicionais={len(generated_paths)}"
             )
             return run_id
         except Exception as exc:
@@ -446,20 +549,24 @@ class ProjectZipRunner:
             self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: ERRO {exc}", "ERROR")
             raise
 
-    def run_project_request(self, *, request_text: str, reasoning_effort: str, operation: str = "modify", source: str = "email") -> int:
+    def run_project_request(self, *, request_text: str, reasoning_effort: str, operation: str = "modify", source: str = "email", attachments: tuple[IncomingAttachment, ...] = ()) -> int:
         if not self._lock.acquire(blocking=False):
             raise RuntimeError("já existe uma demanda de projeto ZIP em andamento")
         try:
             request = str(request_text or "").strip()
             if not request:
                 raise ValueError("pedido sobre o projeto vazio")
-            selected, _selection_run_id = self.select_project_zip(request)
-            return self.process_project_zip(selected, request, reasoning_effort, operation, source)
+            selection_request = request
+            if attachments:
+                selection_request += "\n\nANEXOS DO E-MAIL (somente nomes/tipos/tamanhos; nenhum binário nesta chamada):\n"
+                selection_request += self._attachment_context(tuple(attachments))
+            selected, _selection_run_id = self.select_project_zip(selection_request)
+            return self.process_project_zip(selected, request, reasoning_effort, operation, source, attachments=attachments)
         finally:
             self._lock.release()
 
-    def run_project_edit(self, *, request_text: str, reasoning_effort: str, source: str = "email") -> int:
+    def run_project_edit(self, *, request_text: str, reasoning_effort: str, source: str = "email", attachments: tuple[IncomingAttachment, ...] = ()) -> int:
         """Compatibilidade com chamadas antigas: equivale a operation=modify."""
         return self.run_project_request(
-            request_text=request_text, reasoning_effort=reasoning_effort, operation="modify", source=source
+            request_text=request_text, reasoning_effort=reasoning_effort, operation="modify", source=source, attachments=attachments
         )

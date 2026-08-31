@@ -240,6 +240,7 @@ handle_watch_event() {
         import_downloads; then
         LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
       fi
+      restart_dev_manager_if_requested
     fi
     return 0
   fi

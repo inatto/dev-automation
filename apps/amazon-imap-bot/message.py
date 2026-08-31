@@ -4,9 +4,21 @@ import email
 import hashlib
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from email.header import decode_header, make_header
 from email.message import Message
 from email.utils import parseaddr, parsedate_to_datetime
+
+
+@dataclass(frozen=True)
+class IncomingAttachment:
+    filename: str
+    content_type: str
+    data: bytes
+
+    @property
+    def size(self) -> int:
+        return len(self.data)
 
 
 @dataclass(frozen=True)
@@ -23,6 +35,7 @@ class Incoming:
     precedence: str
     list_id: str
     mail_date: str = ""
+    attachments: tuple[IncomingAttachment, ...] = ()
 
 
 def _single_line(value: str) -> str:
@@ -77,6 +90,57 @@ def _plain_body(msg: Message) -> str:
     return body.strip()[:12000]
 
 
+
+def _safe_attachment_filename(value: str, index: int, content_type: str) -> str:
+    raw = _single_line(value or "")
+    try:
+        decoded = str(make_header(decode_header(raw))) if raw else ""
+    except Exception:
+        decoded = raw
+    name = Path(decoded.replace("\\", "/")).name.strip().replace("\x00", "")
+    if name in {"", ".", ".."}:
+        import mimetypes
+        ext = mimetypes.guess_extension(content_type or "") or ".bin"
+        name = f"anexo-{index:02d}{ext}"
+    # Evita caracteres de controle e nomes absurdamente longos; preserva Unicode legível.
+    name = re.sub(r"[\r\n\t]+", " ", name).strip()[:180]
+    return name or f"anexo-{index:02d}.bin"
+
+
+def _attachments(msg: Message) -> tuple[IncomingAttachment, ...]:
+    if not msg.is_multipart():
+        return ()
+    result: list[IncomingAttachment] = []
+    used: set[str] = set()
+    index = 0
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        disposition = str(part.get("Content-Disposition", "") or "").lower()
+        filename = part.get_filename() or ""
+        # Considera anexo explícito ou qualquer parte com filename (inclui imagens inline anexadas).
+        if "attachment" not in disposition and not filename:
+            continue
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            try:
+                content = part.get_content()
+                payload = content.encode(part.get_content_charset() or "utf-8") if isinstance(content, str) else bytes(content)
+            except Exception:
+                payload = b""
+        index += 1
+        content_type = str(part.get_content_type() or "application/octet-stream")
+        safe = _safe_attachment_filename(filename, index, content_type)
+        base = safe
+        suffix = 2
+        while safe.lower() in used:
+            path = Path(base)
+            safe = f"{path.stem}-{suffix}{path.suffix}"
+            suffix += 1
+        used.add(safe.lower())
+        result.append(IncomingAttachment(filename=safe, content_type=content_type, data=payload or b""))
+    return tuple(result)
+
 def parse(raw: bytes) -> Incoming:
     msg = email.message_from_bytes(raw)
     sender_name, sender_email = parseaddr(_header(msg, "From"))
@@ -100,6 +164,7 @@ def parse(raw: bytes) -> Incoming:
         precedence=_header(msg, "Precedence").lower(),
         list_id=_header(msg, "List-Id"),
         mail_date=_mail_date(msg),
+        attachments=_attachments(msg),
     )
 
 

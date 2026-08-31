@@ -184,6 +184,28 @@ runtime_state_value() {
   ' "$state_file" 2>/dev/null
 }
 
+project_affects_dev_manager() {
+  local project="$1"
+  local project_dir manager_dir
+
+  project_dir="$(project_path "$project")"
+  [ -d "$project_dir" ] || return 1
+  project_dir="$(cd -- "$project_dir" && pwd -P)" || return 1
+  manager_dir="$(cd -- "$PROJECT_ROOT" && pwd -P)" || return 1
+
+  [ "$project_dir" = "$manager_dir" ] || [[ "$project_dir" == "$manager_dir/"* ]]
+}
+
+request_dev_manager_restart_after_import() {
+  local project="$1"
+
+  project_affects_dev_manager "$project" || return 0
+  [ "${MONITOR_LOCK_OWNED:-false}" = true ] || return 0
+
+  DEV_MANAGER_RESTART_REQUESTED=true
+  log "DEV MANAGER: reinício automático agendado após atualização confirmada de $project."
+}
+
 signal_auto_deploys_after_import() {
   local project="$1" scope="${2:-both}"
   local project_dir state_file runtime_dir auto_mode pid request_file temp_request deploy_mode

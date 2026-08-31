@@ -71,6 +71,16 @@ class Monitor:
         value = " ".join(str(text or "").split())
         return value if len(value) <= limit else value[:limit - 1] + "…"
 
+    @staticmethod
+    def _attachment_summary(item) -> str:
+        attachments = tuple(getattr(item, "attachments", ()) or ())
+        if not attachments:
+            return ""
+        lines = ["ANEXOS DO E-MAIL (metadados; o conteúdo será enviado à função de projeto quando selecionada):"]
+        for att in attachments:
+            lines.append(f"- {att.filename} | {att.content_type} | {att.size} bytes")
+        return "\n".join(lines)
+
     def _event(self, text: str, category: str = "SYSTEM", level: str = "INFO") -> None:
         stamp = datetime.now().strftime("%H:%M:%S")
         try:
@@ -79,8 +89,64 @@ class Monitor:
             pass
         self.on_event(f"{stamp} [{category}] {text}")
 
+    def _send_tracked_reply(self, account: Account, item, body: str, *, purpose: str, attachment_paths=()):
+        """Envia uma resposta SES e sempre registra sucesso ou falha no histórico."""
+        self._event(
+            f"{purpose} SEND para={item.sender_email} assunto={self._preview(item.subject or '(sem assunto)', 90)}",
+            "SES",
+        )
+        try:
+            local_id, ses_id = self.ses.send_reply(account, item, body, attachment_paths=attachment_paths)
+        except Exception as exc:
+            try:
+                self.store.add_outbound(
+                    account=account.email,
+                    message_id=f"<error-{uuid.uuid4()}@local>",
+                    thread_key=item.thread_key,
+                    sender=account.email,
+                    recipient=item.sender_email,
+                    subject=item.subject,
+                    body=body,
+                    reply_to=item.message_id,
+                    provider_message_id="",
+                    status="error",
+                    error=f"{purpose}: {exc}",
+                )
+            except Exception:
+                pass
+            self._event(f"{purpose} ERRO para={item.sender_email}: {exc}", "SES", "ERROR")
+            raise
+
+        self.store.add_outbound(
+            account=account.email,
+            message_id=local_id,
+            thread_key=item.thread_key,
+            sender=account.email,
+            recipient=item.sender_email,
+            subject=item.subject,
+            body=body,
+            reply_to=item.message_id,
+            provider_message_id=ses_id,
+            status="sent",
+        )
+        self._event(f"{purpose} OK para={item.sender_email} MessageId={ses_id}", "SES")
+        return local_id, ses_id
+
+    def _send_function_receipt(self, account: Account, item) -> bool:
+        """Confirma imediatamente o recebimento antes de uma função potencialmente demorada."""
+        body = (
+            "Recebemos sua mensagem e a solicitação está sendo processada. "
+            "Retornaremos por este mesmo e-mail quando o processamento for concluído."
+        )
+        try:
+            self._send_tracked_reply(account, item, body, purpose="CONFIRMAÇÃO")
+            return True
+        except Exception:
+            # Falha na confirmação não deve impedir a execução autorizada da função.
+            return False
+
     def _execute_function_request(self, account: Account, item, request: FunctionRequest, state: AccountState) -> None:
-        """Executa uma função explicitamente autorizada pelo functions.json."""
+        """Executa uma função autorizada e notifica o remetente ao concluir."""
         self.store.set_inbound_status(account.email, item.message_id, "executing")
         self._event(
             f"EXECUTANDO função={request.name} remetente={request.sender} "
@@ -91,6 +157,7 @@ class Monitor:
             part for part in [
                 f"Assunto: {item.subject}" if item.subject else "",
                 item.body or "",
+                self._attachment_summary(item),
             ] if part
         ).strip()
         if request.name == "api_zip_test":
@@ -106,12 +173,21 @@ class Monitor:
                 reasoning_effort=request.reasoning_effort,
                 operation=operation,
                 source=f"email:{request.sender}",
+                attachments=tuple(getattr(item, "attachments", ()) or ()),
             )
         else:
             raise RuntimeError(f"função não implementada: {request.name}")
+
         api_run = self.store.get_api_run(run_id) or {}
         output_path = str(api_run.get("output_path") or "")
         result = str(api_run.get("response_summary") or "").strip()
+        if request.name == "project_zip_edit":
+            reply_attachments = self.project_zip_runner.output_files_for_run(run_id)
+        elif request.name == "api_zip_test":
+            reply_attachments = self.api_runner.output_files_for_run(run_id)
+        else:
+            reply_attachments = []
+
         self.store.set_inbound_status(account.email, item.message_id, "completed")
         self._event(
             f"CONCLUÍDO função={request.name} run=#{run_id} arquivo={output_path or '-'}",
@@ -119,32 +195,63 @@ class Monitor:
         )
 
         reply_lines = [
-            f"Função {request.name} executada com sucesso.",
-            f"Nível: {request.reasoning_level} ({request.reasoning_effort}).",
+            "Solicitação concluída com sucesso.",
+            f"Nível utilizado: {request.reasoning_level} ({request.reasoning_effort}).",
         ]
         if output_path:
             reply_lines.append(f"Arquivo de retorno salvo em: {output_path}")
+        if reply_attachments:
+            reply_lines.append(
+                "Arquivo(s) adicional(is) anexado(s) a este e-mail: " + ", ".join(path.name for path in reply_attachments)
+            )
         if result:
-            reply_lines.extend(["", "Resultado da API:", result[:2500]])
+            reply_lines.extend(["", "Resultado:", result[:4000]])
         reply_body = "\n".join(reply_lines)
 
         self.store.set_inbound_status(account.email, item.message_id, "sending")
-        local_id, ses_id = self.ses.send_reply(account, item, reply_body)
-        self.store.add_outbound(
-            account=account.email,
-            message_id=local_id,
-            thread_key=item.thread_key,
-            sender=account.email,
-            recipient=item.sender_email,
-            subject=item.subject,
-            body=reply_body,
-            reply_to=item.message_id,
-            provider_message_id=ses_id,
-            status="sent",
-        )
+        self.store.update_api_run(run_id, notification_status="enviando")
+        try:
+            self._send_tracked_reply(
+                account, item, reply_body, purpose="RESULTADO API", attachment_paths=reply_attachments
+            )
+        except Exception as mail_exc:
+            # Se um anexo impedir a entrega, ainda tentamos entregar o feedback textual.
+            if reply_attachments:
+                fallback_body = (
+                    reply_body
+                    + "\n\nATENÇÃO: os arquivos adicionais não puderam ser anexados na primeira tentativa; "
+                      "o resultado textual está sendo enviado sem anexos."
+                )
+                try:
+                    self._send_tracked_reply(account, item, fallback_body, purpose="RESULTADO API SEM ANEXOS")
+                except Exception as fallback_exc:
+                    self.store.update_api_run(
+                        run_id, notification_status="erro", notification_error=str(fallback_exc)
+                    )
+                    self.store.set_inbound_status(account.email, item.message_id, "completed-email-error")
+                    self._event(
+                        f"API concluída run=#{run_id}, mas o e-mail final falhou: {fallback_exc}",
+                        "SES", "ERROR",
+                    )
+                    return
+                else:
+                    self.store.update_api_run(
+                        run_id, notification_status="enviado-sem-anexos", notification_error=str(mail_exc)
+                    )
+            else:
+                self.store.update_api_run(run_id, notification_status="erro", notification_error=str(mail_exc))
+                self.store.set_inbound_status(account.email, item.message_id, "completed-email-error")
+                self._event(
+                    f"API concluída run=#{run_id}, mas o e-mail final falhou: {mail_exc}",
+                    "SES", "ERROR",
+                )
+                return
+        else:
+            self.store.update_api_run(run_id, notification_status="enviado", notification_error="")
+
         self.store.set_inbound_status(account.email, item.message_id, "replied")
         state.replied += 1
-        self._event(f"OK função={request.name} resposta enviada para={item.sender_email} MessageId={ses_id}", "SES")
+
 
     def run_account_once(self, account: Account) -> None:
         state = self.states[account.email]
@@ -210,8 +317,17 @@ class Monitor:
 
                 function_request = None
                 authorized_functions = self.function_map.authorized_function_names(item.sender_email)
+                routing_body = item.body
+                attachment_summary = self._attachment_summary(item)
+                if attachment_summary:
+                    routing_body = (routing_body + "\n\n" + attachment_summary).strip()
+                    self._event(
+                        f"ANEXOS recebidos de {item.sender_email}: {len(item.attachments)} arquivo(s), "
+                        f"{sum(att.size for att in item.attachments)} bytes",
+                        "EMAIL",
+                    )
                 if authorized_functions:
-                    router_payload = self.function_router.audit_payload(item.sender_email, item.subject, item.body)
+                    router_payload = self.function_router.audit_payload(item.sender_email, item.subject, routing_body)
                     router_run_id = self.store.add_api_run(
                         kind="function-router",
                         status="aguardando-resposta",
@@ -236,7 +352,7 @@ class Monitor:
                         "GPT",
                     )
                     try:
-                        route = self.function_router.route(item.sender_email, item.subject, item.body)
+                        route = self.function_router.route(item.sender_email, item.subject, routing_body)
                         function_request = route.request
                         if function_request is None:
                             route_summary = "nenhuma função selecionada"
@@ -273,6 +389,8 @@ class Monitor:
                         function_request = None
 
                 if function_request is not None:
+                    # O roteamento é interno e não gera e-mail. A solicitação real recebe uma confirmação imediata.
+                    self._send_function_receipt(account, item)
                     try:
                         self._execute_function_request(account, item, function_request, state)
                     except Exception as exc:
@@ -283,18 +401,17 @@ class Monitor:
                             "ERROR",
                         )
                         failure_body = (
-                            f"A função {function_request.name} foi reconhecida, mas não foi concluída. "
-                            "O erro foi registrado no console do bot para análise."
+                            "A solicitação foi recebida, mas a execução não foi concluída.\n"
+                            f"Erro: {self._preview(str(exc), 1200)}"
                         )
                         try:
-                            local_id, ses_id = self.ses.send_reply(account, item, failure_body)
-                            self.store.add_outbound(
-                                account=account.email, message_id=local_id, thread_key=item.thread_key,
-                                sender=account.email, recipient=item.sender_email, subject=item.subject,
-                                body=failure_body, reply_to=item.message_id, provider_message_id=ses_id, status="sent",
-                            )
+                            self._send_tracked_reply(account, item, failure_body, purpose="ERRO API")
+                            state.replied += 1
                         except Exception as reply_exc:
-                            self._event(f"Falha ao avisar erro da função para {item.sender_email}: {reply_exc}", "SES", "ERROR")
+                            self._event(
+                                f"Falha ao enviar o feedback de erro para {item.sender_email}: {reply_exc}",
+                                "SES", "ERROR",
+                            )
                     continue
 
                 if not self.settings.auto_reply_enabled:
