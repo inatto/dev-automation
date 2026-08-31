@@ -74,8 +74,6 @@ class Store:
         self._ensure_column("api_runs", "response_bytes", "INTEGER")
         self._ensure_column("api_runs", "output_file_bytes", "INTEGER")
         self._ensure_column("api_runs", "output_file_count", "INTEGER")
-        self._ensure_column("api_runs", "notification_status", "TEXT")
-        self._ensure_column("api_runs", "notification_error", "TEXT")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_messages_direction_id ON messages(direction, id DESC)")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_events_id ON events(id DESC)")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_api_runs_id ON api_runs(id DESC)")
@@ -217,8 +215,7 @@ class Store:
                        request_payload: str | None = None, request_bytes: int | None = None,
                        input_file_bytes: int | None = None, input_file_count: int | None = None,
                        listed_item_count: int | None = None, response_bytes: int | None = None,
-                       output_file_bytes: int | None = None, output_file_count: int | None = None,
-                       notification_status: str | None = None, notification_error: str | None = None) -> None:
+                       output_file_bytes: int | None = None, output_file_count: int | None = None) -> None:
         values = []
         params = []
         for column, value in (
@@ -228,7 +225,6 @@ class Store:
             ("input_file_bytes", input_file_bytes), ("input_file_count", input_file_count),
             ("listed_item_count", listed_item_count), ("response_bytes", response_bytes),
             ("output_file_bytes", output_file_bytes), ("output_file_count", output_file_count),
-            ("notification_status", notification_status), ("notification_error", notification_error),
         ):
             if value is not None:
                 values.append(f"{column}=?")
@@ -249,7 +245,7 @@ class Store:
                 """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
                           request_summary,response_summary,error,elapsed_ms,started_at,finished_at,
                           request_payload,request_bytes,input_file_bytes,input_file_count,listed_item_count,
-                          response_bytes,output_file_bytes,output_file_count,notification_status,notification_error
+                          response_bytes,output_file_bytes,output_file_count
                    FROM api_runs ORDER BY id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -261,7 +257,7 @@ class Store:
                 """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
                           request_summary,response_summary,error,elapsed_ms,started_at,finished_at,
                           request_payload,request_bytes,input_file_bytes,input_file_count,listed_item_count,
-                          response_bytes,output_file_bytes,output_file_count,notification_status,notification_error
+                          response_bytes,output_file_bytes,output_file_count
                    FROM api_runs WHERE id=?""", (run_id,)
             ).fetchone()
         return dict(row) if row else None

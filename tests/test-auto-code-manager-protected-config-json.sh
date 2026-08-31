@@ -21,14 +21,7 @@ JSON
 
 source "$ROOT/scripts/dev-manager/100-protected-config.sh"
 sanitize_backup_config_passwords "$BACKUP" >/dev/null
-python3 - "$BACKUP/.config/amazon-imap-bot/functions.json" <<'PY'
-import json, sys
-p = sys.argv[1]
-data = json.load(open(p, encoding="utf-8"))
-assert data["version"] == 1
-assert data["functions"]["project_zip_edit"]["enabled"] is True
-assert data["api_token"] == "********"
-PY
+test "$(tr -d '\r\n' < "$BACKUP/.config/amazon-imap-bot/functions.json")" = '********'
 
 cat > "$PROJECT/.config/amazon-imap-bot/functions.json" <<'JSON'
 {
@@ -41,7 +34,7 @@ cat > "$SOURCE/.config/amazon-imap-bot/functions.json" <<'JSON'
 {
   "version": 2,
   "functions": {"project_zip_edit": {"enabled": true}},
-  "api_token": "********"
+  "api_token": "new-secret"
 }
 JSON
 
@@ -53,14 +46,14 @@ project_relpath_belongs_to_registered_subproject(){ return 1; }
 log(){ :; }
 
 materialize_changed_protected_configs demo "$SOURCE" "$FILTERED"
-python3 - "$FILTERED/.config/amazon-imap-bot/functions.json" <<'PY'
+test ! -e "$FILTERED/.config/amazon-imap-bot/functions.json"
+python3 - "$PROJECT/.config/amazon-imap-bot/functions.json" <<'PY'
 import json, sys
-p = sys.argv[1]
-data = json.load(open(p, encoding="utf-8"))
-assert data["version"] == 2
-assert "project_zip_edit" in data["functions"]
-assert "old" not in data["functions"]
+with open(sys.argv[1], encoding='utf-8') as fh:
+    data = json.load(fh)
+assert data["version"] == 1
+assert "old" in data["functions"]
 assert data["api_token"] == "local-secret"
 PY
 
-echo 'OK: JSON em .config é importável e preserva segredo local'
+echo 'OK: JSON em .config é preservado localmente e nunca passa pelo merge protegido'

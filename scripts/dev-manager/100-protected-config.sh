@@ -15,7 +15,7 @@ mergeable_protected_config_relpath() {
   name="${rel##*/}"
   name="${name,,}"
   case "$name" in
-    env|.env|config|settings|.env.*|*.env|*.ini|*.conf|*.cfg|*.properties|*.json) return 0 ;;
+    env|.env|config|settings|.env.*|*.env|*.ini|*.conf|*.cfg|*.properties) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -69,7 +69,7 @@ def mergeable(path: Path) -> bool:
         name in {"env", ".env", "config", "settings"}
         or name.startswith(".env.")
         or name.endswith(".env")
-        or path.suffix.lower() in {".ini", ".conf", ".cfg", ".properties", ".json"}
+        or path.suffix.lower() in {".ini", ".conf", ".cfg", ".properties"}
     )
 
 

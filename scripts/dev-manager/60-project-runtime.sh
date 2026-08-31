@@ -184,31 +184,9 @@ runtime_state_value() {
   ' "$state_file" 2>/dev/null
 }
 
-project_affects_dev_manager() {
-  local project="$1"
-  local project_dir manager_dir
-
-  project_dir="$(project_path "$project")"
-  [ -d "$project_dir" ] || return 1
-  project_dir="$(cd -- "$project_dir" && pwd -P)" || return 1
-  manager_dir="$(cd -- "$PROJECT_ROOT" && pwd -P)" || return 1
-
-  [ "$project_dir" = "$manager_dir" ] || [[ "$project_dir" == "$manager_dir/"* ]]
-}
-
-request_dev_manager_restart_after_import() {
-  local project="$1"
-
-  project_affects_dev_manager "$project" || return 0
-  [ "${MONITOR_LOCK_OWNED:-false}" = true ] || return 0
-
-  DEV_MANAGER_RESTART_REQUESTED=true
-  log "DEV MANAGER: reinício automático agendado após atualização confirmada de $project."
-}
-
 signal_auto_deploys_after_import() {
   local project="$1" scope="${2:-both}"
-  local project_dir state_file runtime_dir auto_mode pid request_file temp_request deploy_mode
+  local project_dir state_file runtime_dir auto_mode pid request_file temp_request deploy_mode restart_on_descendant defer_restart
   local signaled=0 stale=0
   local nullglob_was_set=false
 
@@ -228,7 +206,14 @@ signal_auto_deploys_after_import() {
     [ "$auto_mode" = "1" ] || continue
 
     runtime_dir="$(runtime_state_value "$state_file" PROJECT_DIR)"
-    [ "$runtime_dir" = "$project_dir" ] || continue
+    restart_on_descendant="$(runtime_state_value "$state_file" RESTART_ON_DESCENDANT)"
+    if [ "$runtime_dir" != "$project_dir" ]; then
+      if [ "$restart_on_descendant" = "1" ] && [[ "$project_dir" == "$runtime_dir/"* ]]; then
+        : # supervisor do pai também acompanha atualizações dos filhos
+      else
+        continue
+      fi
+    fi
 
     pid="$(runtime_state_value "$state_file" PID)"
     if ! [[ "$pid" =~ ^[0-9]+$ ]] || ! kill -0 "$pid" 2>/dev/null; then
@@ -242,7 +227,16 @@ signal_auto_deploys_after_import() {
     printf '%s\n' "$scope" > "$temp_request"
     mv -f -- "$temp_request" "$request_file"
 
-    if kill -USR1 "$pid" 2>/dev/null; then
+    defer_restart="$(runtime_state_value "$state_file" DEFER_RESTART)"
+    if [ "$defer_restart" = "1" ]; then
+      # O próprio Dev Manager pode estar concluindo esta importação. Agenda o
+      # sinal para depois do retorno da operação indivisível, evitando matar o
+      # importador no meio da finalização/log.
+      ( sleep 1; kill -USR1 "$pid" 2>/dev/null || true ) &
+      deploy_mode="$(runtime_state_value "$state_file" DEPLOY_MODE)"
+      log "AUTO: reinício seguro agendado para $project (${deploy_mode:-desconhecido}, PID $pid)."
+      signaled=$((signaled + 1))
+    elif kill -USR1 "$pid" 2>/dev/null; then
       deploy_mode="$(runtime_state_value "$state_file" DEPLOY_MODE)"
       log "AUTO: reinício solicitado para $project (${deploy_mode:-desconhecido}, PID $pid)."
       signaled=$((signaled + 1))

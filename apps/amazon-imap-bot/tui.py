@@ -33,7 +33,6 @@ STATUS_LABELS = {
     "replied": "RESPONDIDO",
     "reply-error": "ERRO RESPOSTA",
     "function-error": "ERRO FUNÇÃO",
-    "completed-email-error": "CONCLUÍDO / E-MAIL ERRO",
     "sent": "ENVIADO",
     "error": "ERRO",
 }
@@ -457,7 +456,6 @@ def _api_kind_label(kind: str) -> str:
         "email-reply": "E-MAIL",
         "project-zip-select": "ESCOLHE ZIP",
         "project-zip-edit": "PROJETO",
-        "project-zip-query": "PROJETO",
     }
     return labels.get(str(kind or ""), str(kind or "API").upper())
 
@@ -512,37 +510,20 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
 
     if kind == "project-zip-select":
         input_path_label = "Raiz consultada"
-        attachment_line = "Arquivos enviados: 0 — somente lista textual de nomes/caminhos de ZIP"
+        attachment_line = "Anexos enviados: 0 — somente lista textual de nomes/caminhos de ZIP"
         listed_label = "ZIPs listados"
-        input_count_label = "Arquivos internos no ZIP de entrada"
-        output_count_label = "Arquivos internos no ZIP de retorno"
-    elif kind in {"project-zip-edit", "project-zip-query"}:
-        input_path_label = "ZIP principal de entrada"
-        attachment_line = "Arquivos enviados ao container: ZIP principal + anexos do e-mail (veja a lista no conteúdo abaixo)"
-        listed_label = "Arquivos enviados ao container"
-        input_count_label = "Arquivos internos no ZIP principal"
-        output_count_label = (
-            "Arquivos internos no ZIP de retorno" if kind == "project-zip-edit"
-            else "Arquivos adicionais gerados pela API"
-        )
-    elif kind == "zip-test":
+    elif kind in {"project-zip-edit", "zip-test"}:
         input_path_label = "ZIP de entrada"
-        attachment_line = "Arquivos enviados: 1 ZIP"
-        listed_label = "Arquivos enviados"
-        input_count_label = "Arquivos internos no ZIP de entrada"
-        output_count_label = "Arquivos internos no ZIP de retorno"
+        attachment_line = "Anexos enviados: 1 ZIP"
+        listed_label = "Anexos"
     elif kind == "function-router":
         input_path_label = "Arquivo de entrada"
-        attachment_line = "Anexos binários enviados: 0 — apenas metadados de anexos entram no texto do roteador"
+        attachment_line = "Anexos enviados: 0"
         listed_label = "Funções listadas"
-        input_count_label = "Arquivos internos no ZIP de entrada"
-        output_count_label = "Arquivos internos no ZIP de retorno"
     else:
         input_path_label = "Arquivo de entrada"
         attachment_line = "Anexos enviados: 0"
         listed_label = "Itens listados"
-        input_count_label = "Arquivos internos no ZIP de entrada"
-        output_count_label = "Arquivos internos no ZIP de retorno"
 
     lines: list[str] = [
         f"ID: #{row.get('id')}",
@@ -554,8 +535,6 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
         f"Fim: {row.get('finished_at') or '-'}",
         f"Tempo: {elapsed_text}",
         f"Response ID: {row.get('response_id') or '-'}",
-        f"E-mail final: {row.get('notification_status') or '-'}",
-        f"Erro no e-mail final: {row.get('notification_error') or '-'}",
         "",
         "=== ENVIO PARA API ===",
         f"Texto/contexto enviado: {_byte_detail(row.get('request_bytes'))}",
@@ -563,13 +542,13 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
         f"{listed_label}: {row.get('listed_item_count') if row.get('listed_item_count') is not None else '-'}",
         f"{input_path_label}: {input_path or '-'}",
         f"Bytes do ZIP/arquivo de entrada: {_byte_detail(row.get('input_file_bytes'))}",
-        f"{input_count_label}: {row.get('input_file_count') if row.get('input_file_count') is not None else '-'}",
+        f"Arquivos internos no ZIP de entrada: {row.get('input_file_count') if row.get('input_file_count') is not None else '-'}",
         "",
         "=== RETORNO DA API ===",
         f"Texto recebido: {_byte_detail(row.get('response_bytes'))}",
         f"ZIP/arquivo de retorno: {output_path or '-'}",
         f"Bytes do ZIP/arquivo de retorno: {_byte_detail(row.get('output_file_bytes'))}",
-        f"{output_count_label}: {row.get('output_file_count') if row.get('output_file_count') is not None else '-'}",
+        f"Arquivos internos no ZIP de retorno: {row.get('output_file_count') if row.get('output_file_count') is not None else '-'}",
         "",
         f"Pedido resumido: {row.get('request_summary') or '-'}",
         f"Resposta resumida: {response_summary or '-'}",

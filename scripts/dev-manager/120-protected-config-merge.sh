@@ -98,6 +98,14 @@ incoming_text = decode(incoming_path)
 mode = stat.S_IMODE(incoming_path.stat().st_mode)
 
 if incoming_path.suffix.lower() == ".json":
+    # Um JSON que não pôde ser sanitizado no backup é substituído integralmente
+    # por ********. Na importação isso significa "preserve o arquivo local", não
+    # "tente interpretar o placeholder como JSON".
+    if masked_token.fullmatch(incoming_text.strip()):
+        warn(f"{local_path}: JSON totalmente redigido no ZIP; preservando configuração local")
+        print("preserved-redacted-json")
+        raise SystemExit(0)
+
     try:
         incoming_json = json.loads(incoming_text)
     except json.JSONDecodeError as exc:

@@ -290,7 +290,6 @@ import_one_zip() {
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
   signal_auto_deploys_after_import "$project" "$runtime_scope"
-  request_dev_manager_restart_after_import "$project"
   soft_beep
   line
 }

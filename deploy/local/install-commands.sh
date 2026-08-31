@@ -37,6 +37,7 @@ DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
 CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 G512_RGB_SOURCE="$PROJECT_ROOT/scripts/g512-rgb.sh"
+GLOBAL_AUTO_RUNNER="$PROJECT_ROOT/scripts/global-command-auto.sh"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 LRDP_DIR="${LRDP_DIR:-$PROJECT_ROOT/apps/lrdp}"
 LRDP_TUI_SOURCE="${LRDP_TUI_SOURCE:-$LRDP_DIR/lrdp}"
@@ -133,13 +134,14 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 [[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
 [[ -f "$G512_RGB_SOURCE" ]] || fail "script não encontrado: $G512_RGB_SOURCE"
+[[ -f "$GLOBAL_AUTO_RUNNER" ]] || fail "supervisor AUTO não encontrado: $GLOBAL_AUTO_RUNNER"
 [[ -f "$LRDP_TUI_SOURCE" ]] || fail "script não encontrado: $LRDP_TUI_SOURCE"
 [[ -f "$LRDP1_SOURCE" ]] || fail "script não encontrado: $LRDP1_SOURCE"
 [[ -f "$LRDP2_SOURCE" ]] || fail "script não encontrado: $LRDP2_SOURCE"
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -203,6 +205,27 @@ exec bash "$source_file" "\$@"
 EOF_WRAPPER
   chmod +x "$target_file"
   log "criado: $command_name -> $source_file"
+
+  auto_target_file="$TARGET_DIR/$command_name-auto"
+  case "$source_file" in
+    "$PROJECT_ROOT"/apps/*)
+      watch_dir="$(dirname -- "$source_file")"
+      ;;
+    *)
+      watch_dir="$PROJECT_ROOT"
+      ;;
+  esac
+  restart_descendants=0
+  [[ "$command_name" == "dev-manager" ]] && restart_descendants=1
+  rm -f "$auto_target_file"
+  cat > "$auto_target_file" <<EOF_AUTO_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+bash "$CLEAR_TERMINAL_SOURCE"
+exec bash "$GLOBAL_AUTO_RUNNER" "$command_name" "$source_file" "$watch_dir" "$restart_descendants" "\$@"
+EOF_AUTO_WRAPPER
+  chmod +x "$auto_target_file"
+  log "criado: $command_name-auto -> monitora $watch_dir"
 done
 
 ORACLE_MONITOR_TARGET="$TARGET_DIR/oracle-monitor"
@@ -214,6 +237,15 @@ exec bash "$PROJECT_RUNNER" "oracle-monitor" "$ORACLE_MONITOR_DIR" "local" "\$@"
 EOF_WRAPPER
 chmod +x "$ORACLE_MONITOR_TARGET"
 log "criado: oracle-monitor -> $ORACLE_MONITOR_DIR"
+ORACLE_MONITOR_AUTO_TARGET="$TARGET_DIR/oracle-monitor-auto"
+rm -f "$ORACLE_MONITOR_AUTO_TARGET"
+cat > "$ORACLE_MONITOR_AUTO_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec bash "$PROJECT_RUNNER" "oracle-monitor-auto" "$ORACLE_MONITOR_DIR" "local" "\$@"
+EOF_WRAPPER
+chmod +x "$ORACLE_MONITOR_AUTO_TARGET"
+log "criado: oracle-monitor-auto -> $ORACLE_MONITOR_DIR"
 
 LRDP_TUI_TARGET="$TARGET_DIR/lrdp"
 rm -f "$LRDP_TUI_TARGET"
@@ -228,6 +260,15 @@ exec bash "$LRDP_TUI_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$LRDP_TUI_TARGET"
 log "criado: lrdp -> $LRDP_TUI_SOURCE"
+LRDP_TUI_AUTO_TARGET="$TARGET_DIR/lrdp-auto"
+rm -f "$LRDP_TUI_AUTO_TARGET"
+cat > "$LRDP_TUI_AUTO_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec bash "$GLOBAL_AUTO_RUNNER" "lrdp" "$LRDP_TUI_SOURCE" "$LRDP_DIR" "0" "\$@"
+EOF_WRAPPER
+chmod +x "$LRDP_TUI_AUTO_TARGET"
+log "criado: lrdp-auto -> monitora $LRDP_DIR"
 
 # lrdp1/lrdp2 continuam atalhos diretos. Qualquer futuro lrdp3/lrdp4...
 # em apps/lrdp também ganha comando global automaticamente.
@@ -256,6 +297,16 @@ exec bash "$lrdp_source" "\$@"
 EOF_WRAPPER
   chmod +x "$lrdp_target"
   log "criado: $lrdp_name -> $lrdp_source"
+
+  lrdp_auto_target="$TARGET_DIR/$lrdp_name-auto"
+  rm -f "$lrdp_auto_target"
+  cat > "$lrdp_auto_target" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec bash "$GLOBAL_AUTO_RUNNER" "$lrdp_name" "$lrdp_source" "$LRDP_DIR" "0" "\$@"
+EOF_WRAPPER
+  chmod +x "$lrdp_auto_target"
+  log "criado: $lrdp_name-auto -> monitora $LRDP_DIR"
 done
 
 TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" "$PROJECT_INSTALLER"

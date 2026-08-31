@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import mimetypes
 import re
-from pathlib import Path
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid, parseaddr
 
@@ -33,7 +31,7 @@ class SesSender:
         session = boto3.Session(profile_name=profile, region_name=region)
         self.client = session.client("ses", config=Config(retries={"max_attempts": 5, "mode": "standard"}))
 
-    def send_reply(self, account: Account, incoming: Incoming, body: str, attachment_paths: list[Path] | tuple[Path, ...] = ()) -> tuple[str, str]:
+    def send_reply(self, account: Account, incoming: Incoming, body: str) -> tuple[str, str]:
         from_email = _safe_address(account.email)
         to_email = _safe_address(incoming.sender_email)
         display_name = _safe_header(account.display_name)
@@ -53,19 +51,6 @@ class SesSender:
         if references:
             msg["References"] = references
         msg.set_content(body)
-
-        for raw_path in attachment_paths or ():
-            path = Path(raw_path).expanduser()
-            if not path.is_file():
-                raise FileNotFoundError(f"anexo de resposta não encontrado: {path}")
-            content_type, _ = mimetypes.guess_type(path.name)
-            maintype, subtype = (content_type or "application/octet-stream").split("/", 1)
-            msg.add_attachment(
-                path.read_bytes(),
-                maintype=maintype,
-                subtype=subtype,
-                filename=_safe_header(path.name),
-            )
 
         result = self.client.send_raw_email(
             Source=from_email,
