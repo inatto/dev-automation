@@ -28,16 +28,10 @@ fail() { printf '[desktops] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$PROJECTS_FILE" ]] || fail "arquivo de projetos não encontrado: $PROJECTS_FILE"
 
 projects=()
-while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-  line="${raw_line%%#*}"
-  line="${line#"${line%%[![:space:]]*}"}"
-  line="${line%"${line##*[![:space:]]}"}"
-  line="${line#./}"
-  line="${line%/}"
+while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -n "$line" ]] || continue
-  [[ "${line,,}" == *.zip ]] && continue
   projects+=("$(basename -- "$line")")
-done < "$PROJECTS_FILE"
+done < <(dev_desktop_projects "$PROJECTS_FILE")
 
 ((${#projects[@]} > 0)) || fail "nenhum projeto ativo configurado"
 
@@ -98,7 +92,7 @@ case "${1:-}" in
   --help|-h|help)
     cat <<'HELP'
 Uso:
-  desktops --list   Mostra LAZER + projetos reais + lrdp1 + lrdp2; ignora agregadores *.zip
+  desktops --list   Mostra LAZER + projetos raiz + lrdp1 + lrdp2; ignora *.zip e subprojetos <pai>/apps/...
   desktops --close              Solicita fechamento de todas as janelas dos workspaces 2..N; preserva LAZER
   desktops --ensure-controller  Instala/recarrega apenas o controlador GNOME, sem renomear workspaces
   desktops                      Sincroniza os workspaces e seus nomes

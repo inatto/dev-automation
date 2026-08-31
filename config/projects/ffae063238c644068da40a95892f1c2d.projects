@@ -7,7 +7,6 @@
 #orgs/orbital/orbital-marketing
 #orgs/orbital/orbital-vouchers
 #orgs/sind-vault
-#social/murm-app
 bots/dev-automation
 bots/dev-automation/apps/amazon-imap-bot
 bots/general-crawler
@@ -26,7 +25,8 @@ orgs/orbital/orbital-fin
 orgs/orbital/orbital-legal
 orgs/orbital/orbital-mail
 orgs/orbital/orbital-reports
-orgs/orbital/orbital-ui
 orgs/orbital/orbital-tasks
+orgs/orbital/orbital-ui
 orgs/site-sinproprev-v2
 orgs/station-app
+social/murm-app

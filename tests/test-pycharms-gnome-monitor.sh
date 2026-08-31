@@ -21,14 +21,14 @@ grep -q "close.request" "$EXT" || { echo 'FALHOU: extensão não recebe pedido d
 grep -q "_closePyCharmWindows" "$EXT" || { echo 'FALHOU: extensão não fecha todas as janelas PyCharm' >&2; exit 1; }
 grep -q "window.delete(timestamp)" "$EXT" || { echo 'FALHOU: extensão não usa fechamento gracioso do Mutter' >&2; exit 1; }
 grep -q -- "--close|close" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não expõe pycharms --close' >&2; exit 1; }
-grep -q "já aberto; ignorando workspace" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não ignora projeto já aberto' >&2; exit 1; }
-grep -q "PYCHARMS_STARTUP_SETTLE_SECONDS" "$UBUNTU" || { echo 'FALHOU: backend não possui janela de estabilização configurável' >&2; exit 1; }
+grep -q "já aberto; realinhando para workspace" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não reconhece projeto já aberto para realinhamento' >&2; exit 1; }
 grep -q "DESKTOPS_SCRIPT" "$UBUNTU" || { echo 'FALHOU: backend não garante workspaces antes de abrir' >&2; exit 1; }
-grep -q "finish_batch_later" "$UBUNTU" || { echo 'FALHOU: backend não controla estabilização da primeira fase' >&2; exit 1; }
-grep -q "Rode pycharms novamente para organizar" "$UBUNTU" || { echo 'FALHOU: backend não implementa fluxo explícito em duas chamadas' >&2; exit 1; }
+grep -q "wait_for_all_projects_open" "$UBUNTU" || { echo 'FALHOU: backend não aguarda os projetos faltantes antes da reconciliação final' >&2; exit 1; }
+grep -q "FASE: REALINHAMENTO INICIAL" "$UBUNTU" || { echo 'FALHOU: backend não realinha janelas existentes na mesma chamada' >&2; exit 1; }
+grep -q "FASE: CONFIRMAÇÃO E REALINHAMENTO FINAL" "$UBUNTU" || { echo 'FALHOU: backend não faz reconciliação final na mesma chamada' >&2; exit 1; }
 grep -q 'gnome-extensions disable "$UUID"' "$HELPER" || { echo 'FALHOU: helper não recarrega extensão atualizada' >&2; exit 1; }
 grep -q "gnome-wayland.sh" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não integra helper GNOME' >&2; exit 1; }
 grep -q "XDG_SESSION_TYPE" "$UBUNTU" || { echo 'FALHOU: backend Ubuntu não detecta Wayland' >&2; exit 1; }
 ! grep -q "window.activate(global.get_current_time())" "$EXT" || { echo 'FALHOU: extensão ainda ativa janela e muda contexto do usuário' >&2; exit 1; }
 
-echo 'OK: PyCharm Ubuntu/Wayland usa duas fases: primeira chamada só abre; segunda reconcilia workspace, maior monitor 4K e maximização.'
+echo 'OK: PyCharm Ubuntu/Wayland realinha existentes, abre faltantes e reconcilia workspace/monitor/maximização na mesma chamada.'

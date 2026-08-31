@@ -29,15 +29,8 @@ load_projects() {
   local raw line path
   project_entries=()
   project_dirs=()
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    raw="${raw%$'\r'}"
-    line="${raw%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    line="${line#./}"
-    line="${line%/}"
-    [[ -n "$line" && "${line,,}" != *.zip ]] || continue
-
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
     project_entries+=("$line")
     path="$CODE_ROOT/$line"
     if [[ -d "$path" ]]; then
@@ -45,7 +38,7 @@ load_projects() {
     else
       project_dirs+=("$CODE_ROOT")
     fi
-  done < "$PROJECTS_FILE"
+  done < <(dev_desktop_projects "$PROJECTS_FILE")
 
   project_entries+=("lrdp1" "lrdp2")
   project_dirs+=("$HOME" "$HOME")
@@ -90,6 +83,24 @@ acquire_lock() {
   local lock_dir="$STATE_DIR/terminals.lock.d"
   mkdir "$lock_dir" 2>/dev/null || fail 'já existe outra execução de terminals em andamento.'
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
+}
+
+reset_previous_managed_batch() {
+  [[ -s "$STATE_DIR/terminals.batch" ]] || return 0
+
+  local fields managed overflow rc=0
+  fields="$(printf 'count=%s' "$count")"
+  log 'REALINHAMENTO: lote anterior detectado; fechando somente os terminais gerenciados pelo Dev Automation.'
+  gnome_placement_prepare terminals managed-reset "$fields" || rc=$?
+  case "$rc" in
+    0) ;;
+    75) fail "o controlador GNOME foi atualizado no disco, mas a sessão ainda usa o código antigo. Faça logout/login UMA vez e rode 'terminals' novamente." ;;
+    76) fail "o controlador GNOME carregado não suporta o reset seguro do lote de terminals. Rode 'desktops --ensure-controller', faça logout/login UMA vez e execute 'terminals' novamente." ;;
+    *) fail "não foi possível limpar o lote anterior de terminals${GNOME_PLACEMENT_LAST_ERROR:+: $GNOME_PLACEMENT_LAST_ERROR}." ;;
+  esac
+  managed="$(gnome_placement_ready_field managed 2>/dev/null || printf '0')"
+  overflow="$(gnome_placement_ready_field overflow 2>/dev/null || printf '0')"
+  log "REALINHAMENTO: fechamento solicitado para $((managed + overflow)) terminal(is) gerenciado(s); terminais manuais foram preservados."
 }
 
 # O reset mantém o protocolo estável para conseguir limpar o lote antigo mesmo
@@ -164,8 +175,8 @@ case "${1:-}" in
     ;;
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
-    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda 1 segundo antes do próximo.\n'
-    printf 'LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
+    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda o intervalo configurado antes do próximo.\n'
+    printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
     exit 0
     ;;
   '') ;;
@@ -181,6 +192,7 @@ acquire_lock
 IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
   fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
 ensure_workspaces_on_all_monitors
+reset_previous_managed_batch
 
 log 'FLUXO ÚNICO: cada terminal será aberto diretamente no seu workspace e na pasta do projeto.'
 log "Terminal: $terminal_kind -> $terminal"

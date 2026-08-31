@@ -59,6 +59,9 @@ fake_proc_entry() {
 fake_proc_entry "$main_pid" "$TMP/bin/chrome" "$TMP/bin/chrome\00030\000"
 fake_proc_entry "$renderer_pid" "$TMP/bin/chrome" "$TMP/bin/chrome\000--type=renderer\000"
 fake_proc_entry "$files_pid" "$TMP/bin/nautilus" "$TMP/bin/nautilus\00030\000"
+# Reproduz Chrome antigo/reutilizado cujo processo principal não herdou o
+# identificador gráfico atual. chromes-close ainda deve fechá-lo por ser do usuário.
+printf 'WAYLAND_DISPLAY=stale-display\0XDG_SESSION_ID=stale-session\0' > "$TMP/proc/$main_pid/environ"
 
 wait_dead() {
   local pid="$1" attempt stat

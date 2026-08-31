@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Backend Ubuntu/Linux do comando `pycharms`.
-# Fluxo em duas fases: 1ª chamada abre somente projetos faltantes; 2ª chamada,
-# quando todos já estiverem abertos, reconcilia workspace/monitor/maximização.
+# Uma única chamada reconcilia os projetos já abertos, abre apenas os faltantes
+# e reconcilia novamente quando as novas janelas estiverem disponíveis.
 set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
@@ -10,7 +10,6 @@ source "$PROJECT_ROOT/scripts/lib/project-config.sh"
 CONFIG_FILE="${PYCHARMS_PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PYCHARMS_OPEN_DELAY_SECONDS:-1}"
-STARTUP_SETTLE_SECONDS="${PYCHARMS_STARTUP_SETTLE_SECONDS:-15}"
 GNOME_WAYLAND_HELPER="$SCRIPT_DIR/gnome-wayland.sh"
 DESKTOPS_SCRIPT="$PROJECT_ROOT/scripts/desktops.sh"
 STATE_DIR="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/pycharms"
@@ -76,44 +75,28 @@ show_diagnose() {
 load_projects() {
   [[ -f "$CONFIG_FILE" ]] || fail "configuração não encontrada: $CONFIG_FILE"
   resolved_projects=(); resolved_workspace_indexes=(); resolved_project_names=()
-  configured_projects=(); configured_workspace_indexes=(); effective_projects=()
-  declare -gA effective_set=(); declare -gA seen_projects=()
-  local raw line candidate parent path real skip workspace_index=2
+  configured_projects=(); configured_workspace_indexes=()
+  declare -gA seen_projects=()
+  local line path real workspace_index=2
 
-  # Mesma ordem do comando desktops: Workspace 1 é LAZER; cada linha ativa
-  # cadastrada ocupa sua posição, mesmo que a pasta ainda não exista.
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    raw="${raw%$'\r'}"; line="${raw%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%"${line##*[![:space:]]}"}"; line="${line#./}"; line="${line%/}"
-    [[ -n "$line" && "${line,,}" != *.zip ]] || continue
+  # Exatamente a mesma grade usada por `desktops` e `terminals`: agregadores
+  # *.zip e subprojetos dentro de <pai>/apps/... não consomem workspace.
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
     configured_projects+=("$line")
     configured_workspace_indexes+=("$workspace_index")
     ((workspace_index += 1))
-  done < "$CONFIG_FILE"
-
-  for line in "${configured_projects[@]}"; do
-    path="$CODE_ROOT/$line"
-    if [[ ! -d "$path" ]]; then
-      warn "fora do grid; projeto ainda ausente: $path"
-      continue
-    fi
-    effective_set[$line]=1
-    effective_projects+=("$line")
-  done
+  done < <(dev_desktop_projects "$CONFIG_FILE")
 
   local idx
   for ((idx=0; idx<${#configured_projects[@]}; idx++)); do
     line="${configured_projects[$idx]}"
-    [[ -n "${effective_set[$line]:-}" ]] || continue
-    candidate="$line"; skip=0
-    while [[ "$candidate" == */apps/* ]]; do
-      parent="${candidate%/apps/*}"
-      if [[ -n "${effective_set[$parent]:-}" ]]; then skip=1; break; fi
-      candidate="$parent"
-    done
-    ((skip==0)) || continue
-
     path="$CODE_ROOT/$line"
+    if [[ ! -d "$path" ]]; then
+      warn "fora do grid da IDE; projeto ainda ausente: $path"
+      continue
+    fi
+
     real="$(cd -- "$path" && pwd -P)"
     [[ -z "${seen_projects[$real]:-}" ]] || continue
     seen_projects[$real]=1
@@ -122,7 +105,6 @@ load_projects() {
     resolved_project_names+=("$(basename -- "$line")")
   done
 }
-
 write_workspace_map() {
   mkdir -p "$STATE_DIR"
   local tmp="$WORKSPACE_MAP.tmp.$$" i
@@ -283,53 +265,30 @@ ensure_gnome_workspaces() {
   fi
 }
 
-batch_marker_active() {
-  [[ -f "$BATCH_MARKER" ]] || return 1
-  local expiry now
-  expiry="$(cat "$BATCH_MARKER" 2>/dev/null || true)"
-  [[ "$expiry" =~ ^[0-9]+$ ]] || { rm -f -- "$BATCH_MARKER"; return 1; }
-  now="$(date +%s)"
-  if (( now <= expiry )); then
-    return 0
-  fi
-  rm -f -- "$BATCH_MARKER"
-  return 1
-}
-
-wait_for_previous_batch() {
-  [[ "${XDG_SESSION_TYPE:-}" == wayland ]] || return 0
-  batch_marker_active || return 0
-
-  local max_wait="${PYCHARMS_BATCH_WAIT_SECONDS:-30}" attempt max_attempts
-  [[ "$max_wait" =~ ^[0-9]+$ ]] || max_wait=30
-  max_attempts=$((max_wait * 10))
-  log "lote anterior ainda está estabilizando; aguardando até ${max_wait}s para preservar idempotência..."
-  for ((attempt=0; attempt<max_attempts; attempt++)); do
-    batch_marker_active || return 0
-    sleep 0.1
-  done
-  fail 'lote PyCharm anterior ainda está em estabilização; abortando para não abrir projetos duplicados. Aguarde alguns segundos e rode pycharms novamente.'
-}
-
 begin_batch() {
   mkdir -p "$STATE_DIR"
-  # Expiração de segurança: se o comando for interrompido, a extensão não fica
-  # bloqueada indefinidamente esperando o fim de um lote que morreu.
+  # Expiração de segurança caso o comando seja interrompido durante a abertura.
   printf '%s\n' "$(( $(date +%s) + 180 ))" > "$BATCH_MARKER"
 }
 
-finish_batch_later() {
-  local settle="$STARTUP_SETTLE_SECONDS"
-  [[ "$settle" =~ ^[0-9]+$ ]] || settle=15
-  (
-    sleep "$settle"
-    rm -f -- "$BATCH_MARKER"
-  ) >/dev/null 2>&1 &
-  disown 2>/dev/null || true
-  log "FASE ABERTURA CONCLUÍDA: aguardando ${settle}s para as janelas estabilizarem."
-  log 'PRÓXIMA CHAMADA: pycharms entrará em FASE MOVIMENTAÇÃO se todas as janelas forem detectadas como abertas.'
-}
+wait_for_all_projects_open() {
+  local timeout="${PYCHARMS_OPEN_WAIT_SECONDS:-75}" attempt max_attempts missing project
+  [[ "$timeout" =~ ^[0-9]+$ ]] || timeout=75
+  max_attempts=$((timeout * 2))
 
+  for ((attempt=0; attempt<max_attempts; attempt++)); do
+    refresh_open_projects
+    missing=0
+    for project in "${resolved_projects[@]}"; do
+      if [[ -z "${open_project_set[$project]:-}" ]]; then
+        ((missing += 1))
+      fi
+    done
+    ((missing == 0)) && return 0
+    sleep 0.5
+  done
+  return 1
+}
 open_project() {
   local mode="$1" target="$2" project="$3"
   case "$mode" in
@@ -370,7 +329,7 @@ if ((list_only)); then printf '%s\n' "${resolved_projects[@]}"; exit 0; fi
 log "VERSÃO: $BUILD_VERSION"
 ((${#resolved_projects[@]})) || fail 'nenhum projeto existente para abrir.'
 ensure_gnome_workspaces
-wait_for_previous_batch
+rm -f -- "$BATCH_MARKER"
 refresh_open_projects
 
 projects_to_open=()
@@ -379,31 +338,31 @@ for ((i=0; i<${#resolved_projects[@]}; i++)); do
   project="${resolved_projects[$i]}"
   workspace="${resolved_workspace_indexes[$i]}"
   if [[ -n "${open_project_set[$project]:-}" ]]; then
-    log "já aberto; ignorando workspace $workspace: $project"
+    log "já aberto; realinhando para workspace $workspace: $project"
     continue
   fi
   projects_to_open+=("$project")
   workspaces_to_open+=("$workspace")
 done
 
+if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
+  log 'FASE: REALINHAMENTO INICIAL'
+  request_reconcile || fail 'GNOME não confirmou o realinhamento das janelas PyCharm já abertas.'
+fi
+
 if ((${#projects_to_open[@]} == 0)); then
-  rm -f -- "$BATCH_MARKER"
-  log 'FASE: MOVIMENTAÇÃO'
-  log "ABERTURA: 0 projeto(s). Todos os ${#resolved_projects[@]} projeto(s) foram detectados como já abertos."
-  if request_reconcile; then
-    log 'todos os projetos já estão abertos; nenhuma nova janela criada. Reconciliação solicitada.'
-    exit 0
-  fi
-  fail 'GNOME não confirmou a tentativa de movimentação das janelas.'
+  log "ABERTURA: 0 projeto(s). Todos os ${#resolved_projects[@]} projeto(s) já estão abertos e foram reconciliados com a grade atual."
+  log 'CONCLUÍDO: nenhuma janela duplicada foi criada.'
+  exit 0
 fi
 
 IFS=$'\t' read -r mode target < <(pycharm_mode) || fail 'PyCharm não encontrado. Rode: pycharms --diagnose'
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
   begin_batch
 fi
-log 'FASE: ABERTURA'
+log 'FASE: ABERTURA DOS FALTANTES'
 log "Ubuntu backend: $mode -> $target"
-log "ABERTURA: ${#projects_to_open[@]} projeto(s) faltando de ${#resolved_projects[@]} configurado(s). Nesta chamada NÃO haverá movimentação."
+log "ABERTURA: ${#projects_to_open[@]} projeto(s) faltando de ${#resolved_projects[@]} configurado(s)."
 for ((i=0; i<${#projects_to_open[@]}; i++)); do
   project="${projects_to_open[$i]}"
   workspace="${workspaces_to_open[$i]}"
@@ -411,8 +370,17 @@ for ((i=0; i<${#projects_to_open[@]}; i++)); do
   open_project "$mode" "$target" "$project"
   sleep "$OPEN_DELAY_SECONDS"
 done
+
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]]; then
-  finish_batch_later
+  log 'FASE: CONFIRMAÇÃO E REALINHAMENTO FINAL'
+  if ! wait_for_all_projects_open; then
+    rm -f -- "$BATCH_MARKER"
+    request_reconcile >/dev/null 2>&1 || true
+    fail 'nem todas as janelas PyCharm apareceram dentro do limite; as detectadas foram realinhadas, mas o lote ficou incompleto.'
+  fi
+  rm -f -- "$BATCH_MARKER"
+  request_reconcile || fail 'as janelas abriram, mas o GNOME não confirmou o realinhamento final.'
+  log 'CONCLUÍDO: projetos existentes realinhados e faltantes abertos na mesma chamada.'
 else
-  log 'primeira fase concluída: projetos faltantes foram abertos. Rode pycharms novamente para organizar quando estiverem carregados.'
+  log 'CONCLUÍDO: projetos faltantes abertos; realinhamento de workspace exige GNOME/Wayland.'
 fi

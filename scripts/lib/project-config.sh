@@ -32,3 +32,37 @@ dev_projects_file() {
   [[ -f "$default_file" ]] || return 1
   printf '%s\n' "$default_file"
 }
+
+# Lista os projetos que recebem workspace/desktop próprio.
+# Um projeto cadastrado dentro de <outro-projeto-cadastrado>/apps/... continua
+# sendo projeto para backup/ZIP/comandos, mas não consome desktop.
+dev_desktop_projects() {
+  local projects_file="$1" raw line candidate parent is_app_child
+  local -a configured=()
+
+  [[ -f "$projects_file" ]] || return 1
+
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    raw="${raw%$'\r'}"
+    line="${raw%%#*}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    line="${line#./}"
+    line="${line%/}"
+    [[ -n "$line" && "${line,,}" != *.zip ]] || continue
+    configured+=("$line")
+  done < "$projects_file"
+
+  for candidate in "${configured[@]}"; do
+    is_app_child=0
+    for parent in "${configured[@]}"; do
+      [[ "$candidate" != "$parent" ]] || continue
+      if [[ "$candidate" == "$parent/apps/"* ]]; then
+        is_app_child=1
+        break
+      fi
+    done
+    (( is_app_child == 0 )) && printf '%s\n' "$candidate"
+  done
+}
+

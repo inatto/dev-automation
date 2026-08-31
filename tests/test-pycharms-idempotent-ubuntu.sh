@@ -49,8 +49,7 @@ mapfile -t opened < "$LOG"
   printf 'FALHOU: primeira execução deveria abrir somente proj-b. Log:\n%s\n' "$(cat "$LOG")" >&2
   exit 1
 }
-grep -Fq 'já aberto; ignorando workspace 2' <<<"$out1" || { echo 'FALHOU: não informou que proj-a já estava aberto' >&2; exit 1; }
-! grep -Fq 'Reconciliação solicitada' <<<"$out1" || { echo 'FALHOU: primeira fase tentou reconciliar enquanto ainda abria projeto' >&2; exit 1; }
+grep -Fq 'já aberto; realinhando para workspace 2' <<<"$out1" || { echo 'FALHOU: não informou que proj-a já estava aberto' >&2; exit 1; }
 
 out2="$(run_pycharms)"
 sleep 0.3
@@ -59,8 +58,12 @@ mapfile -t opened2 < "$LOG"
   printf 'FALHOU: segunda execução abriu projeto duplicado. Log:\n%s\n' "$(cat "$LOG")" >&2
   exit 1
 }
-grep -Fq 'todos os projetos já estão abertos; nenhuma nova janela criada' <<<"$out2" || {
+grep -Fq 'ABERTURA: 0 projeto(s).' <<<"$out2" || {
   echo 'FALHOU: segunda execução não reconheceu estado idempotente' >&2
+  exit 1
+}
+grep -Fq 'nenhuma janela duplicada foi criada' <<<"$out2" || {
+  echo 'FALHOU: segunda execução não confirmou ausência de duplicação' >&2
   exit 1
 }
 

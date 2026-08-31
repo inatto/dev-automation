@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Helper interno para encerrar aplicações gráficas do usuário/sessão atual.
+# Helper interno para encerrar aplicações gráficas do usuário.
 # Fecha somente o processo principal da aplicação com SIGTERM; processos filhos
-# são encerrados pela própria aplicação, evitando matar shells ou processos Java
-# genéricos por engano.
+# são encerrados pela própria aplicação. Para Chrome/Chromium, `chromes-close`
+# procura todos os processos principais do usuário, mesmo se um processo antigo
+# não tiver herdado WAYLAND_DISPLAY/DISPLAY/XDG_SESSION_ID.
 set -euo pipefail
 
 app="${1:-}"
@@ -57,28 +58,31 @@ belongs_to_current_graphical_session() {
 }
 
 is_target_process() {
-  local pid="$1" exe_name="$2" arg
+  local pid="$1" exe_name="$2" arg first_arg='' command_name=''
   case "$app" in
     files)
       [[ "$exe_name" == nautilus ]]
       ;;
     chromes)
-      case "$exe_name" in
-        chrome|chrome-beta|chrome-unstable|google-chrome|google-chrome-stable|google-chrome-beta|google-chrome-unstable|chromium|chromium-browser)
+      while IFS= read -r arg; do
+        [[ -n "$first_arg" ]] || first_arg="$arg"
+        [[ "$arg" == --type=* ]] && return 1
+      done < <(tr '\0' '\n' < "$proc_root/$pid/cmdline" 2>/dev/null || true)
+      command_name="${first_arg##*/}"
+
+      # /proc/<pid>/exe normalmente termina em "chrome", mas snap/wrappers podem
+      # expor o nome apenas no argv[0]. Aceitamos ambos e seguimos excluindo
+      # renderer/GPU/zygote pelo --type= acima.
+      case "$exe_name:$command_name" in
+        chrome:*|chrome-beta:*|chrome-unstable:*|google-chrome:*|google-chrome-stable:*|google-chrome-beta:*|google-chrome-unstable:*|chromium:*|chromium-browser:*|\
+        *:chrome|*:chrome-beta|*:chrome-unstable|*:google-chrome|*:google-chrome-stable|*:google-chrome-beta|*:google-chrome-unstable|*:chromium|*:chromium-browser)
+          return 0
           ;;
         *) return 1 ;;
       esac
-
-      # Chrome usa o mesmo executável para renderers, GPU, zygote e utilitários.
-      # Somente o processo principal não possui argumento --type=.
-      while IFS= read -r arg; do
-        [[ "$arg" == --type=* ]] && return 1
-      done < <(tr '\0' '\n' < "$proc_root/$pid/cmdline" 2>/dev/null || true)
-      return 0
       ;;
   esac
 }
-
 collect_pids() {
   local proc_dir pid proc_uid exe exe_name
   target_pids=()
@@ -96,14 +100,16 @@ collect_pids() {
     [[ -n "$exe" ]] || continue
     exe_name="${exe##*/}"
     is_target_process "$pid" "$exe_name" || continue
-    belongs_to_current_graphical_session "$pid" || continue
+    if [[ "$app" != chromes ]]; then
+      belongs_to_current_graphical_session "$pid" || continue
+    fi
     target_pids+=("$pid")
   done
 }
 
 collect_pids
 if ((${#target_pids[@]} == 0)); then
-  log "nenhum $description aberto nesta sessão."
+  log "nenhum $description aberto para este usuário."
   exit 0
 fi
 

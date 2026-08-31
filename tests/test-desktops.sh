@@ -10,7 +10,9 @@ PROJECTS_FILE="$TEMP_ROOT/projects"
 cat > "$PROJECTS_FILE" <<'PROJECTS'
 #orgs/disabled
 bots/dev-automation
+bots/dev-automation/apps/amazon-imap-bot
 infra/amazon-infra
+infra/amazon-infra/apps/monitor-app
 orgs/orbital.zip
 orgs/orbital/orbital-app
 PROJECTS
@@ -23,7 +25,7 @@ expected=$'1\tLAZER (preservado)\n2\tdev-automation\n3\tamazon-infra\n4\torbital
   exit 1
 }
 
-printf 'OK: Desktop 1 preservado; agregadores *.zip não viram desktops; projetos reais mantêm a ordem\n'
+printf 'OK: Desktop 1 preservado; *.zip e subprojetos dentro de <pai>/apps não viram desktops; projetos raiz mantêm a ordem\n'
 
 FAKE_BIN="$TEMP_ROOT/bin"
 mkdir -p "$FAKE_BIN"
