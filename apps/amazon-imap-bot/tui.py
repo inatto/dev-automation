@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+import json
 import queue
 import textwrap
 import threading
@@ -17,7 +18,8 @@ TAB_REPLIES = 1
 TAB_CONSOLE = 2
 TAB_ACCOUNTS = 3
 TAB_API = 4
-TAB_NAMES = ("F1 ENTRADA", "F2 RESPOSTAS", "F3 CONSOLE", "F4 CONTAS", "F6 API")
+TAB_FUNCTIONS = 5
+TAB_NAMES = ("ENTRADA", "RESPOSTAS", "CONSOLE", "CONTAS", "API", "FUNÇÕES")
 
 STATUS_LABELS = {
     "received": "RECEBIDO",
@@ -318,6 +320,134 @@ def _popup_confirm_delete(stdscr, row: dict, p: Palette) -> bool:
 
 
 
+
+def _wrap_labeled(lines: list[str], prefix: str, value: object, width: int) -> None:
+    text = str(value if value not in (None, "") else "-")
+    usable = max(20, width - len(prefix))
+    chunks = textwrap.wrap(text, width=usable, replace_whitespace=False) or [""]
+    lines.append(prefix + chunks[0])
+    continuation = ("│ " + " " * max(0, len(prefix) - 2)) if prefix.startswith("│") else (" " * len(prefix))
+    lines.extend(continuation + chunk for chunk in chunks[1:])
+
+
+def _function_view_lines(path, width: int) -> list[str]:
+    """Representa functions.json como uma visão humana; lê o arquivo atual a cada renderização."""
+    width = max(48, width)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return [
+            "CONFIGURAÇÃO DE FUNÇÕES",
+            f"Arquivo: {path}",
+            "ERRO: functions.json não encontrado.",
+        ]
+    except OSError as exc:
+        return ["CONFIGURAÇÃO DE FUNÇÕES", f"Arquivo: {path}", f"ERRO: {exc}"]
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return [
+            "CONFIGURAÇÃO DE FUNÇÕES",
+            f"Arquivo: {path}",
+            f"ERRO: JSON inválido na linha {exc.lineno}, coluna {exc.colno}: {exc.msg}",
+        ]
+    if not isinstance(payload, dict):
+        return ["CONFIGURAÇÃO DE FUNÇÕES", f"Arquivo: {path}", "ERRO: raiz do JSON precisa ser um objeto."]
+
+    functions = payload.get("functions") if isinstance(payload.get("functions"), dict) else {}
+    senders = payload.get("senders") if isinstance(payload.get("senders"), dict) else {}
+    levels = payload.get("reasoning_levels") if isinstance(payload.get("reasoning_levels"), dict) else {}
+    lines: list[str] = [
+        "CONFIGURAÇÃO DE FUNÇÕES",
+        f"Arquivo: {path}",
+        f"Versão: {payload.get('version', '-')}   Funções: {len(functions)}   Remetentes configurados: {len(senders)}",
+        "",
+        "NÍVEIS DE RACIOCÍNIO",
+    ]
+    if levels:
+        ordered = []
+        for key, value in sorted(levels.items(), key=lambda item: int(item[0]) if str(item[0]).isdigit() else 999):
+            ordered.append(f"{key}={value}")
+        _wrap_labeled(lines, "  ", "   ".join(ordered), width)
+    else:
+        lines.append("  Nenhum nível declarado no arquivo.")
+
+    lines.extend(["", "FUNÇÕES DISPONÍVEIS"])
+    if not functions:
+        lines.append("  Nenhuma função configurada.")
+    for name, raw_entry in functions.items():
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        enabled = bool(entry.get("enabled", True))
+        state = "ATIVA" if enabled else "DESATIVADA"
+        border = max(20, min(width - 2, 100))
+        lines.append("┌" + "─" * (border - 2) + "┐")
+        lines.append(f"│ FUNÇÃO: {name}   [{state}]")
+        _wrap_labeled(lines, "│ Descrição: ", entry.get("description") or "-", width - 2)
+        default_level = entry.get("default_reasoning_level", "-")
+        default_name = str(levels.get(str(default_level), "")) if default_level != "-" else ""
+        default_text = f"{default_level}" + (f" ({default_name})" if default_name else "")
+        lines.append(f"│ Nível padrão: {default_text}")
+        allowed = entry.get("allowed_reasoning_levels")
+        if isinstance(allowed, list):
+            allowed_text = ", ".join(
+                f"{item}={levels.get(str(item), '?')}" for item in allowed
+            ) or "-"
+        else:
+            allowed_text = "todos os níveis válidos"
+        _wrap_labeled(lines, "│ Níveis permitidos: ", allowed_text, width - 2)
+        params = entry.get("parameters") if isinstance(entry.get("parameters"), dict) else {}
+        props = params.get("properties") if isinstance(params.get("properties"), dict) else {}
+        required = set(params.get("required") if isinstance(params.get("required"), list) else [])
+        lines.append("│ Parâmetros:")
+        if not props:
+            lines.append("│   (nenhum)")
+        for param_name, raw_param in props.items():
+            param = raw_param if isinstance(raw_param, dict) else {}
+            req = "OBRIGATÓRIO" if param_name in required else "opcional"
+            type_name = param.get("type") or "-"
+            enum = param.get("enum")
+            head = f"│   • {param_name}  [{type_name} | {req}]"
+            lines.append(head)
+            if isinstance(enum, list):
+                _wrap_labeled(lines, "│     Valores: ", ", ".join(map(str, enum)), width - 2)
+            if param.get("description"):
+                _wrap_labeled(lines, "│     Descrição: ", param.get("description"), width - 2)
+        lines.append("└" + "─" * (border - 2) + "┘")
+        lines.append("")
+
+    lines.append("AUTORIZAÇÕES POR REMETENTE")
+    if not senders:
+        lines.append("  Nenhum remetente configurado.")
+    for sender, raw_entry in senders.items():
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        enabled = bool(entry.get("enabled", True))
+        state = "ATIVO" if enabled else "DESATIVADO"
+        lines.append(f"┌ REMETENTE: {sender}   [{state}]")
+        fn_names = entry.get("functions") if isinstance(entry.get("functions"), list) else []
+        if fn_names:
+            for fn_name in fn_names:
+                fn = functions.get(str(fn_name), {}) if isinstance(functions, dict) else {}
+                fn_enabled = bool(fn.get("enabled", True)) if isinstance(fn, dict) else False
+                lines.append(f"│   • {fn_name}   [{'PERMITIDA' if fn_enabled else 'FUNÇÃO DESATIVADA'}]")
+        else:
+            lines.append("│   (nenhuma função permitida)")
+        lines.append("└")
+        lines.append("")
+    return lines
+
+
+def _function_line_attr(line: str, p: Palette) -> int:
+    upper = line.upper()
+    if "ERRO:" in upper or "DESATIVAD" in upper or "FUNÇÃO DESATIVADA" in upper:
+        return p.ERROR
+    if "[ATIVA]" in upper or "[ATIVO]" in upper or "[PERMITIDA]" in upper:
+        return p.OK
+    if line.startswith("CONFIGURAÇÃO") or line in {"FUNÇÕES DISPONÍVEIS", "AUTORIZAÇÕES POR REMETENTE", "NÍVEIS DE RACIOCÍNIO"}:
+        return p.BORDER | curses.A_BOLD
+    if line.startswith("┌") or line.startswith("└"):
+        return p.BORDER
+    return 0
+
 def _api_status_label(status: str) -> str:
     labels = {
         "preparando": "PREPARANDO",
@@ -408,6 +538,7 @@ def run(settings: Settings) -> int:
         stdscr.keypad(True)
         p = _init_colors()
         active_tab = TAB_INBOX
+        menu_focus = True
         selected = {idx: 0 for idx in range(len(TAB_NAMES))}
         offsets = {idx: 0 for idx in range(len(TAB_NAMES))}
         checking = False
@@ -468,13 +599,16 @@ def run(settings: Settings) -> int:
                 attr = p.TAB_ACTIVE if idx == active_tab else p.TAB
                 _safe_add(stdscr, 4, x, label, len(label), attr)
                 x += len(label) + 1
+            if menu_focus:
+                _safe_add(stdscr, 4, min(w - 18, x + 1), "←/→  ↓ entrar", 16, p.DIM)
 
             box_top = 5
             box_height = h - 8
-            box = _draw_box(stdscr, box_top, 0, box_height, w, TAB_NAMES[active_tab].split(" ", 1)[1], p)
+            box = _draw_box(stdscr, box_top, 0, box_height, w, TAB_NAMES[active_tab], p)
             usable = max(1, box_height - 3)
 
             rows: list[dict] = []
+            function_lines: list[str] = []
             if active_tab == TAB_INBOX:
                 rows = store.list_messages("in", 500)
                 _safe_add(box, 1, 2, "DATA        REMETENTE                         ASSUNTO                                  STATUS", w - 4, p.DIM)
@@ -497,7 +631,7 @@ def run(settings: Settings) -> int:
                     for email, state in monitor.states.items()
                 ]
                 _safe_add(box, 1, 2, "STATUS     CONTA                                      REC   RESP   ÚLTIMA VERIFICAÇÃO", w - 4, p.DIM)
-            else:
+            elif active_tab == TAB_API:
                 rows = store.list_api_runs(200)
                 cfg1 = f"Modelo={settings.openai_model}  Raciocínio={settings.openai_reasoning_effort}  Timeout={settings.openai_timeout_seconds}s  Chave={'CONFIGURADA' if settings.openai_api_key else 'AUSENTE'}"
                 cfg2 = f"Base URL={settings.openai_base_url}"
@@ -506,103 +640,164 @@ def run(settings: Settings) -> int:
                 _safe_add(box, 2, 2, cfg2, w - 4, p.DIM)
                 _safe_add(box, 3, 2, cfg3, w - 4, p.DIM)
                 _safe_add(box, 4, 2, "ID    TIPO    INÍCIO      ESTADO         MODELO             NÍVEL   TEMPO     RESULTADO", w - 4, p.DIM)
-
-            page = max(1, usable - (4 if active_tab == TAB_API else 1))
-            if rows:
-                selected[active_tab] = min(selected[active_tab], len(rows) - 1)
             else:
-                selected[active_tab] = 0
-            sel = selected[active_tab]
-            off = offsets[active_tab]
-            if sel < off:
-                off = sel
-            if sel >= off + page:
-                off = sel - page + 1
-            off = max(0, min(off, max(0, len(rows) - page)))
-            offsets[active_tab] = off
+                function_lines = _function_view_lines(settings.functions_config, w - 6)
 
-            for pos, row in enumerate(rows[off:off + page]):
-                absolute = off + pos
-                y = (5 if active_tab == TAB_API else 2) + pos
-                attr = p.SELECTED if absolute == sel else 0
-                if active_tab in (TAB_INBOX, TAB_REPLIES):
-                    date = _format_date(row.get("mail_date") or row.get("created_at") or "-")
-                    peer = row.get("sender") if active_tab == TAB_INBOX else row.get("recipient")
-                    subject = row.get("subject") or "(sem assunto)"
-                    status = row.get("status") or "-"
-                    status_label = _status_label(status)
-                    line = f"{date:<11} {str(peer or '-')[:34]:<34} {str(subject)[:40]:<40} {status_label[:18]}"
-                    if absolute != sel:
-                        attr = _status_attr(status, p)
-                    _safe_add(box, y, 2, line, w - 4, attr)
-                elif active_tab == TAB_CONSOLE:
-                    date = _format_date(row.get("created_at") or "-")
-                    category = str(row.get("category") or "-")[:8]
-                    level = str(row.get("level") or "-")[:6]
-                    text = str(row.get("text") or "")
-                    line = f"{date:<11} {category:<8} {level:<6} {text}"
-                    if absolute != sel:
-                        attr = _status_attr(level, p)
-                    _safe_add(box, y, 2, line, w - 4, attr)
-                elif active_tab == TAB_ACCOUNTS:
-                    status = "ONLINE" if row["connected"] else ("ERRO" if row["last_error"] else "INICIANDO")
-                    line = f"{status:<10} {row['email'][:42]:<42} {row['received']:<5} {row['replied']:<6} {row['last_check']}"
-                    if absolute != sel:
-                        attr = _status_attr(status, p)
-                    _safe_add(box, y, 2, line, w - 4, attr)
+            if active_tab == TAB_FUNCTIONS:
+                page = max(1, usable - 1)
+                off = offsets[TAB_FUNCTIONS]
+                off = max(0, min(off, max(0, len(function_lines) - page)))
+                offsets[TAB_FUNCTIONS] = off
+                for pos, line in enumerate(function_lines[off:off + page]):
+                    _safe_add(box, 1 + pos, 2, line, w - 4, _function_line_attr(line, p))
+                if len(function_lines) > page:
+                    _safe_add(box, box_height - 2, max(2, w - 28), f"linhas {off + 1}-{min(len(function_lines), off + page)}/{len(function_lines)}", 24, p.DIM)
+            else:
+                page = max(1, usable - (4 if active_tab == TAB_API else 1))
+                if rows:
+                    selected[active_tab] = min(selected[active_tab], len(rows) - 1)
                 else:
-                    status = row.get("status") or "-"
-                    elapsed = row.get("elapsed_ms")
-                    elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
-                    result = row.get("output_path") or row.get("response_summary") or row.get("input_path") or "-"
-                    kind_map = {"zip-test": "ZIP", "function-router": "ROUTER", "email-reply": "EMAIL"}
-                    kind = kind_map.get(str(row.get("kind") or ""), str(row.get("kind") or "API").upper()[:7])
-                    line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
-                    if absolute != sel:
-                        attr = _status_attr("error" if status == "erro" else ("completed" if status == "concluido" else "analyzing"), p)
-                    _safe_add(box, y, 2, line, w - 4, attr)
+                    selected[active_tab] = 0
+                sel = selected[active_tab]
+                off = offsets[active_tab]
+                if sel < off:
+                    off = sel
+                if sel >= off + page:
+                    off = sel - page + 1
+                off = max(0, min(off, max(0, len(rows) - page)))
+                offsets[active_tab] = off
 
-            if not rows:
-                empty = "Nenhum registro ainda."
-                _safe_add(box, 3, 3, empty, w - 6, p.DIM)
+                for pos, row in enumerate(rows[off:off + page]):
+                    absolute = off + pos
+                    y = (5 if active_tab == TAB_API else 2) + pos
+                    attr = p.SELECTED if absolute == sel and not menu_focus else 0
+                    if active_tab in (TAB_INBOX, TAB_REPLIES):
+                        date = _format_date(row.get("mail_date") or row.get("created_at") or "-")
+                        peer = row.get("sender") if active_tab == TAB_INBOX else row.get("recipient")
+                        subject = row.get("subject") or "(sem assunto)"
+                        status = row.get("status") or "-"
+                        status_label = _status_label(status)
+                        line = f"{date:<11} {str(peer or '-')[:34]:<34} {str(subject)[:40]:<40} {status_label[:18]}"
+                        if absolute != sel or menu_focus:
+                            attr = _status_attr(status, p)
+                        _safe_add(box, y, 2, line, w - 4, attr)
+                    elif active_tab == TAB_CONSOLE:
+                        date = _format_date(row.get("created_at") or "-")
+                        category = str(row.get("category") or "-")[:8]
+                        level = str(row.get("level") or "-")[:6]
+                        text = str(row.get("text") or "")
+                        line = f"{date:<11} {category:<8} {level:<6} {text}"
+                        if absolute != sel or menu_focus:
+                            attr = _status_attr(level, p)
+                        _safe_add(box, y, 2, line, w - 4, attr)
+                    elif active_tab == TAB_ACCOUNTS:
+                        status = "ONLINE" if row["connected"] else ("ERRO" if row["last_error"] else "INICIANDO")
+                        line = f"{status:<10} {row['email'][:42]:<42} {row['received']:<5} {row['replied']:<6} {row['last_check']}"
+                        if absolute != sel or menu_focus:
+                            attr = _status_attr(status, p)
+                        _safe_add(box, y, 2, line, w - 4, attr)
+                    else:
+                        status = row.get("status") or "-"
+                        elapsed = row.get("elapsed_ms")
+                        elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
+                        result = row.get("output_path") or row.get("response_summary") or row.get("input_path") or "-"
+                        kind_map = {"zip-test": "ZIP", "function-router": "ROUTER", "email-reply": "EMAIL"}
+                        kind = kind_map.get(str(row.get("kind") or ""), str(row.get("kind") or "API").upper()[:7])
+                        line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
+                        if absolute != sel or menu_focus:
+                            attr = _status_attr("error" if status == "erro" else ("completed" if status == "concluido" else "analyzing"), p)
+                        _safe_add(box, y, 2, line, w - 4, attr)
 
-            footer = "F1 Entrada  F2 Respostas  F3 Console  F4 Contas  F5 Atualizar  F6 API  T teste ZIP  Enter abrir  Q sair"
+                if not rows:
+                    _safe_add(box, 3, 3, "Nenhum registro ainda.", w - 6, p.DIM)
+
+            if menu_focus:
+                footer = "←/→ selecionar menu  ↓ ou Enter entrar  F5 atualizar agora  Q sair"
+            elif active_tab == TAB_INBOX:
+                footer = "↑/↓ navegar  Enter abrir  D remover  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+            elif active_tab == TAB_API:
+                footer = "↑/↓ navegar  Enter abrir  T teste ZIP  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+            elif active_tab == TAB_FUNCTIONS:
+                footer = "↑/↓ rolar  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+            else:
+                footer = "↑/↓ navegar  Enter abrir quando disponível  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
             _safe_add(stdscr, h - 2, 1, footer, w - 2, p.DIM)
             if notice and time.time() < notice_until:
                 _safe_add(stdscr, h - 1, 1, notice, w - 2, notice_attr)
             else:
                 notice = ""
-                _safe_add(
-                    stdscr, h - 1, 1,
-                    ("T na aba API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
-                     "D remove da ENTRADA com confirmação e move o e-mail para a lixeira do servidor."),
-                    w - 2, p.DIM,
+                hint = (
+                    "FUNÇÕES mostra o conteúdo atual de functions.json em formato humano." if active_tab == TAB_FUNCTIONS else
+                    "T na área API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
+                    "D remove da ENTRADA com confirmação e move o e-mail para a lixeira do servidor." if active_tab == TAB_INBOX else
+                    "Use ↑/Esc para voltar ao menu superior."
                 )
+                _safe_add(stdscr, h - 1, 1, hint, w - 2, p.DIM)
             stdscr.refresh()
 
             try:
                 ch = stdscr.getch()
             except curses.error:
                 ch = -1
+
             if ch in (ord("q"), ord("Q")):
                 monitor.stop()
                 break
-            if ch == curses.KEY_F1:
-                active_tab = TAB_INBOX
-            elif ch == curses.KEY_F2:
-                active_tab = TAB_REPLIES
-            elif ch == curses.KEY_F3:
-                active_tab = TAB_CONSOLE
-            elif ch == curses.KEY_F4:
-                active_tab = TAB_ACCOUNTS
-            elif ch == curses.KEY_F6:
-                active_tab = TAB_API
-            elif ch in (9, curses.KEY_RIGHT):
-                active_tab = (active_tab + 1) % len(TAB_NAMES)
-            elif ch == curses.KEY_LEFT:
-                active_tab = (active_tab - 1) % len(TAB_NAMES)
-            elif ch == curses.KEY_UP and rows:
-                selected[active_tab] = max(0, selected[active_tab] - 1)
+
+            if ch in (curses.KEY_F5, ord("r"), ord("R")) and not checking:
+                checking = True
+                notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
+                notice_attr = p.WARN
+                notice_until = time.time() + 3
+
+                def do_check():
+                    nonlocal checking
+                    try:
+                        monitor.run_once()
+                    finally:
+                        checking = False
+                threading.Thread(target=do_check, daemon=True).start()
+                time.sleep(0.12)
+                continue
+
+            if menu_focus:
+                if ch in (9, curses.KEY_RIGHT):
+                    active_tab = (active_tab + 1) % len(TAB_NAMES)
+                elif ch == curses.KEY_LEFT:
+                    active_tab = (active_tab - 1) % len(TAB_NAMES)
+                elif ch in (curses.KEY_DOWN, 10, 13, curses.KEY_ENTER):
+                    menu_focus = False
+                time.sleep(0.12)
+                continue
+
+            if ch == 27:
+                menu_focus = True
+                time.sleep(0.12)
+                continue
+
+            if active_tab == TAB_FUNCTIONS:
+                max_off = max(0, len(function_lines) - page)
+                if ch == curses.KEY_UP:
+                    if offsets[TAB_FUNCTIONS] <= 0:
+                        menu_focus = True
+                    else:
+                        offsets[TAB_FUNCTIONS] = max(0, offsets[TAB_FUNCTIONS] - 1)
+                elif ch == curses.KEY_DOWN:
+                    offsets[TAB_FUNCTIONS] = min(max_off, offsets[TAB_FUNCTIONS] + 1)
+                elif ch == curses.KEY_PPAGE:
+                    offsets[TAB_FUNCTIONS] = max(0, offsets[TAB_FUNCTIONS] - page)
+                elif ch == curses.KEY_NPAGE:
+                    offsets[TAB_FUNCTIONS] = min(max_off, offsets[TAB_FUNCTIONS] + page)
+                time.sleep(0.12)
+                continue
+
+            if ch == curses.KEY_UP and rows:
+                if selected[active_tab] == 0:
+                    menu_focus = True
+                else:
+                    selected[active_tab] = max(0, selected[active_tab] - 1)
+            elif ch == curses.KEY_UP and not rows:
+                menu_focus = True
             elif ch == curses.KEY_DOWN and rows:
                 selected[active_tab] = min(len(rows) - 1, selected[active_tab] + 1)
             elif ch == curses.KEY_PPAGE and rows:
@@ -676,6 +871,7 @@ def run(settings: Settings) -> int:
                     notice = f"Teste ZIP iniciado. O retorno será salvo em {settings.openai_output_dir}."
                     notice_attr = p.WARN
                     notice_until = time.time() + 5
+
                     def do_api_test():
                         nonlocal api_testing
                         try:
@@ -685,18 +881,6 @@ def run(settings: Settings) -> int:
                         finally:
                             api_testing = False
                     threading.Thread(target=do_api_test, daemon=True).start()
-            elif ch in (curses.KEY_F5, ord("r"), ord("R")) and not checking:
-                checking = True
-                notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
-                notice_attr = p.WARN
-                notice_until = time.time() + 3
-                def do_check():
-                    nonlocal checking
-                    try:
-                        monitor.run_once()
-                    finally:
-                        checking = False
-                threading.Thread(target=do_check, daemon=True).start()
             time.sleep(0.12)
 
     try:

@@ -363,3 +363,57 @@ def test_api_runner_validates_reasoning_effort():
     assert ApiTestRunner.normalize_reasoning_effort("xhigh") == "xhigh"
     with pytest.raises(ValueError):
         ApiTestRunner.normalize_reasoning_effort("impossivel")
+
+
+def test_tui_menu_reserves_function_keys_and_has_functions_area():
+    from tui import TAB_NAMES
+
+    assert TAB_NAMES == ("ENTRADA", "RESPOSTAS", "CONSOLE", "CONTAS", "API", "FUNÇÕES")
+    assert all(not (len(name) > 1 and name[0] == "F" and name[1].isdigit()) for name in TAB_NAMES)
+
+
+def test_functions_view_reads_real_json_as_human_interface():
+    import json
+    from tui import _function_view_lines
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        path.write_text(json.dumps({
+            "version": 7,
+            "reasoning_levels": {"0": "none", "1": "low", "2": "medium"},
+            "senders": {
+                "danielmaiax@gmail.com": {
+                    "enabled": True,
+                    "functions": ["api_zip_test"],
+                }
+            },
+            "functions": {
+                "api_zip_test": {
+                    "enabled": True,
+                    "description": "Executa o teste ZIP.",
+                    "default_reasoning_level": 2,
+                    "allowed_reasoning_levels": [0, 1, 2],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "reasoning_level": {"type": "integer", "enum": [0, 1, 2]},
+                            "request_text": {"type": "string", "description": "Pedido do remetente."},
+                        },
+                        "required": ["reasoning_level", "request_text"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }), encoding="utf-8")
+
+        lines = _function_view_lines(path, 100)
+        text = "\n".join(lines)
+        assert "Versão: 7" in text
+        assert "FUNÇÃO: api_zip_test" in text
+        assert "[ATIVA]" in text
+        assert "Nível padrão: 2 (medium)" in text
+        assert "reasoning_level" in text
+        assert "OBRIGATÓRIO" in text
+        assert "REMETENTE: danielmaiax@gmail.com" in text
+        assert "[PERMITIDA]" in text
+        assert '"functions"' not in text

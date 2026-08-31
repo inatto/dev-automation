@@ -17,24 +17,25 @@ Monitor de caixas IMAP Amazon com painel TUI navegável, confirmação automáti
 
 ## TUI
 
-O painel possui cinco áreas:
+O painel possui seis áreas no menu superior:
 
-- `F1 ENTRADA`: mensagens recebidas pelo monitor, com data, remetente, assunto e status.
-- `F2 RESPOSTAS`: respostas geradas/enviadas, inclusive tentativas com erro.
-- `F3 CONSOLE`: chamadas IMAP, GPT e SES, sem exibir senhas, API keys ou credenciais AWS.
-- `F4 CONTAS`: estado de cada caixa monitorada.
-- `F6 API`: configuração efetiva da OpenAI e pilha/histórico das chamadas de API (e-mail e teste ZIP), com estado, modelo, nível de raciocínio, tempo, Response ID e arquivo de retorno.
+- `ENTRADA`: mensagens recebidas pelo monitor, com data, remetente, assunto e status.
+- `RESPOSTAS`: respostas geradas/enviadas, inclusive tentativas com erro.
+- `CONSOLE`: chamadas IMAP, GPT e SES, sem exibir senhas, API keys ou credenciais AWS.
+- `CONTAS`: estado de cada caixa monitorada.
+- `API`: configuração efetiva da OpenAI e pilha/histórico das chamadas de API (e-mail e teste ZIP), com estado, modelo, nível de raciocínio, tempo, Response ID e arquivo de retorno.
+- `FUNÇÕES`: leitura do `functions.json` atual em interface humana, mostrando funções, estado, descrição, níveis, parâmetros e permissões por remetente sem exibir JSON cru.
 
-Use `↑/↓` para navegar, `Enter` para abrir detalhes, `PgUp/PgDn` para paginação, `F5` ou `R` para verificar o IMAP imediatamente e `Q` para sair. `Tab` ou `←/→` também alternam as áreas. Na aba `F6 API`, pressione `T` para executar o teste de ZIP.
+As teclas `F1`, `F2`, `F3`, `F4` e `F6` ficam livres para uso futuro. No menu superior, use `←/→` para escolher uma área e `↓` ou `Enter` para entrar. Dentro da área, use `↑/↓`, `PgUp/PgDn` e `Enter` quando houver detalhes; `Esc` ou `↑` no primeiro item retorna ao menu. `F5` é global e executa imediatamente a mesma verificação IMAP do poll automático de 30 segundos. `R` permanece como atalho alternativo. `Q` sai. Na área `API`, `T` executa o teste de ZIP.
 
-Na aba `F1 ENTRADA`, `D` remove a mensagem. A TUI sempre exige confirmação e diferencia visualmente os casos:
+Na área `ENTRADA`, `D` remove a mensagem. A TUI sempre exige confirmação e diferencia visualmente os casos:
 
 - `RESPONDIDO`: confirmação verde informando que a resposta já foi enviada.
 - `ERRO RESPOSTA` ou qualquer mensagem ainda não respondida: alerta vermelho antes da remoção.
 - `IGNORADO` / `AGUARDANDO CONF.`: alerta amarelo informando que não houve resposta.
 - Estados em processamento (`ANALISANDO`, `ENTENDIDO`, `ENVIANDO`, `EXECUTANDO`) bloqueiam a remoção até a etapa terminar.
 
-A remoção move o e-mail no servidor IMAP para a pasta marcada como `\Trash`. Se o servidor não anunciar essa pasta, usa `Deleted Items`. A linha fica oculta da Entrada, mas o registro de deduplicação é preservado no SQLite para impedir reprocessamento acidental. As respostas continuam em `F2 RESPOSTAS` como histórico do que foi enviado.
+A remoção move o e-mail no servidor IMAP para a pasta marcada como `\Trash`. Se o servidor não anunciar essa pasta, usa `Deleted Items`. A linha fica oculta da Entrada, mas o registro de deduplicação é preservado no SQLite para impedir reprocessamento acidental. As respostas continuam em `RESPOSTAS` como histórico do que foi enviado.
 
 ## Configuração
 
@@ -120,7 +121,7 @@ Fluxo desse comando:
 3. Se nenhuma função disponível combinar com o pedido, o GPT não chama ferramenta e o e-mail segue pelo fluxo normal de suporte.
 4. Se o GPT selecionar uma função, retorna uma chamada estruturada com nome e argumentos. O Python valida novamente remetente, nome da função e parâmetros antes de executar qualquer coisa.
 5. Para `api_zip_test`, valida o nível `0..5`, converte `1` para `low` e usa esse nível apenas na execução do ZIP, sem alterar o nível global.
-6. A decisão semântica aparece na aba `F6 API` como uma chamada `ROUTER`, com resultado `função=...` ou `nenhuma função selecionada`.
+6. A decisão semântica aparece na área `API` como uma chamada `ROUTER`, com resultado `função=...` ou `nenhuma função selecionada`.
 7. Quando `api_zip_test` é escolhida, uma segunda linha `ZIP` aparece na mesma pilha e acompanha `PREPARANDO`, `ENVIANDO`, `AGUARDANDO`, `BAIXANDO`, `CONCLUÍDO` ou `ERRO`.
 8. O teste usa o mesmo ZIP da tecla `T`, envia a pergunta/instrução extraída pelo GPT e gera `RETORNO_OPENAI.txt` dentro do novo ZIP.
 9. O ZIP retornado é baixado para `OPENAI_OUTPUT_DIR`, por padrão `~/Downloads`.
