@@ -22,13 +22,20 @@ class ReplyGenerator:
         self.reasoning_effort = reasoning_effort
         self.last_response_id = ""
 
-    def generate(self, item: Incoming) -> str:
+    @staticmethod
+    def build_prompt(item: Incoming) -> str:
         content = item.body.strip() or "(mensagem recebida sem corpo textual)"
-        prompt = (
+        return (
             f"Remetente: {item.sender_name or item.sender_email}\n"
             f"Assunto: {item.subject or '(sem assunto)'}\n"
             f"Mensagem:\n{content}"
         )
+
+    def audit_payload(self, item: Incoming) -> str:
+        return "INSTRUCTIONS:\n" + SYSTEM + "\n\nINPUT:\n" + self.build_prompt(item)
+
+    def generate(self, item: Incoming) -> str:
+        prompt = self.build_prompt(item)
         response = self.client.responses.create(
             model=self.model,
             instructions=SYSTEM,

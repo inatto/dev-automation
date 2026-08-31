@@ -55,7 +55,7 @@ class ProjectZipRunner:
         if not root.is_dir():
             raise RuntimeError(f"diretório de projetos não encontrado: {root}")
         candidates: list[Path] = []
-        for path in root.rglob("*.zip"):
+        for path in root.glob("*.zip"):
             try:
                 resolved = path.resolve()
             except OSError:
@@ -139,15 +139,17 @@ class ProjectZipRunner:
 
     @staticmethod
     def _candidate_listing(root: Path, candidates: list[Path]) -> str:
-        lines = []
-        for idx, path in enumerate(candidates, 1):
-            rel = path.relative_to(root).as_posix()
-            try:
-                size = path.stat().st_size
-            except OSError:
-                size = -1
-            lines.append(f"{idx}. {rel} | bytes={size}")
-        return "\n".join(lines)
+        # Esta chamada envia SOMENTE nomes/caminhos relativos dos ZIPs. Nenhum ZIP é anexado aqui.
+        return "\n".join(
+            f"{idx}. {path.relative_to(root).as_posix()}"
+            for idx, path in enumerate(candidates, 1)
+        )
+
+    @staticmethod
+    def _zip_file_count(path: Path) -> int:
+        """Conta somente arquivos reais dentro do ZIP; diretórios não entram na métrica."""
+        with zipfile.ZipFile(path, "r") as zf:
+            return sum(1 for info in zf.infolist() if not info.is_dir())
 
     def select_project_zip(self, request_text: str) -> tuple[Path, int]:
         root = self.settings.project_zip_search_root.expanduser().resolve()
@@ -155,6 +157,20 @@ class ProjectZipRunner:
         if not candidates:
             raise RuntimeError(f"nenhum arquivo .zip encontrado em {root}")
 
+        listing = self._candidate_listing(root, candidates)
+        prompt = (
+                "Você deve apenas identificar qual arquivo ZIP corresponde ao projeto pedido pelo usuário. "
+                "Não execute a alteração e não invente caminhos. Escolha EXATAMENTE um caminho relativo da lista fornecida. "
+                "Se nomes forem parecidos, use o contexto do pedido para selecionar o mais provável. "
+                "IMPORTANTE: esta chamada recebeu somente uma lista textual de nomes/caminhos de ZIP; nenhum arquivo ZIP foi anexado.\n\n"
+                "PEDIDO ORIGINAL:\n---\n"
+                f"{request_text.strip()}\n"
+                "---\n\n"
+                f"RAIZ LOCAL: {root}\n"
+                "ZIPS DISPONÍVEIS (somente nomes/caminhos; nenhum arquivo anexado):\n"
+                f"{listing}"
+            )
+        prompt_bytes = len(prompt.encode("utf-8"))
         run_id = self.store.add_api_run(
             kind="project-zip-select",
             status="aguardando-resposta",
@@ -163,22 +179,19 @@ class ProjectZipRunner:
             input_path=str(root),
             output_path="",
             request_summary=(request_text or "")[:1800],
+            request_payload=prompt,
+            request_bytes=prompt_bytes,
+            input_file_bytes=0,
+            input_file_count=0,
+            listed_item_count=len(candidates),
         )
         started = time.monotonic()
-        self._event(f"PROJECT ZIP SELECT #{run_id}: analisando {len(candidates)} ZIP(s) em {root}")
+        self._event(
+            f"PROJECT ZIP SELECT #{run_id}: enviando somente {len(candidates)} nome(s) de ZIP "
+            f"({prompt_bytes} bytes de texto), sem anexos"
+        )
         try:
-            listing = self._candidate_listing(root, candidates)
-            prompt = (
-                "Você deve apenas identificar qual arquivo ZIP corresponde ao projeto pedido pelo usuário. "
-                "Não execute a alteração e não invente caminhos. Escolha EXATAMENTE um caminho relativo da lista fornecida. "
-                "Se nomes forem parecidos, use o contexto do pedido para selecionar o mais provável.\n\n"
-                "PEDIDO ORIGINAL:\n---\n"
-                f"{request_text.strip()}\n"
-                "---\n\n"
-                f"RAIZ LOCAL: {root}\n"
-                "ZIPS DISPONÍVEIS:\n"
-                f"{listing}"
-            )
+            # Não há client.files.create nesta etapa: é apenas texto + function calling.
             client = self._client()
             response = client.responses.create(
                 model=self.settings.openai_model,
@@ -225,12 +238,14 @@ class ProjectZipRunner:
                 raise RuntimeError(f"o arquivo selecionado não é um ZIP válido: {selected}")
             elapsed_ms = int((time.monotonic() - started) * 1000)
             response_id = str(getattr(response, "id", "") or "")
+            response_summary = f"ZIP={selected_rel} | {reason}"[:1800]
             self.store.update_api_run(
                 run_id,
                 status="concluido",
                 output_path=str(selected),
                 response_id=response_id,
-                response_summary=f"ZIP={selected_rel} | {reason}"[:1800],
+                response_summary=response_summary,
+                response_bytes=len(response_summary.encode("utf-8")),
                 elapsed_ms=elapsed_ms,
                 finished=True,
             )
@@ -284,6 +299,32 @@ class ProjectZipRunner:
         if not selected.is_file() or not zipfile.is_zipfile(selected):
             raise RuntimeError(f"ZIP selecionado inválido: {selected}")
 
+        input_zip_bytes = selected.stat().st_size
+        input_zip_files = self._zip_file_count(selected)
+        prompt = (
+            "Trabalhe exclusivamente no arquivo ZIP anexado usando Code Interpreter. "
+            "Esta é uma chamada independente: todo o contexto necessário está nesta mensagem. "
+            "Inspecione o projeto antes de alterar e implemente somente o pedido original abaixo, sem melhorias paralelas, "
+            "sem mudanças cosméticas não solicitadas e sem alterar arquivos sem necessidade. Preserve a hierarquia do ZIP. "
+            "\n\nREGRA DE EFICIÊNCIA OBRIGATÓRIA PARA O ZIP:\n"
+            "- Há exatamente UM ZIP de entrada anexado.\n"
+            "- NÃO extraia/descompacte o projeto inteiro para uma árvore de arquivos no container.\n"
+            "- NÃO copie, clone ou duplique a árvore do projeto.\n"
+            "- Use Python zipfile para listar TODAS as entradas do ZIP e ler diretamente do arquivo compactado apenas os conteúdos necessários.\n"
+            "- Pesquise nomes/caminhos e, quando necessário, leia arquivos candidatos diretamente via zipfile sem extração global.\n"
+            "- Para produzir o resultado, crie diretamente UM NOVO ZIP: copie cada entrada do ZIP original para o ZIP de saída e substitua "
+            "somente as entradas realmente alteradas. Não crie uma segunda árvore completa em disco.\n"
+            "- O ZIP de saída deve conter o projeto COMPLETO, inclusive tudo que não foi alterado.\n"
+            "- Preserve nomes, hierarquia e metadados na medida do possível.\n"
+            "Ao terminar, valide o que for possível sem deploy. Na resposta final, explique brevemente o que mudou e cite/anexe "
+            "explicitamente o ÚNICO ZIP final para download.\n\n"
+            f"ZIP SELECIONADO LOCALMENTE: {selected.name}\n"
+            f"ZIP DE ENTRADA: {input_zip_bytes} bytes; {input_zip_files} arquivos internos (diretórios não contam).\n"
+            "PEDIDO ORIGINAL DO E-MAIL:\n---\n"
+            f"{request_text.strip()}\n"
+            "---"
+        )
+        prompt_bytes = len(prompt.encode("utf-8"))
         run_id = self.store.add_api_run(
             kind="project-zip-edit",
             status="preparando",
@@ -292,10 +333,18 @@ class ProjectZipRunner:
             input_path=str(selected),
             output_path="",
             request_summary=f"origem={source} | {request_text[:1700]}",
+            request_payload=prompt,
+            request_bytes=prompt_bytes,
+            input_file_bytes=input_zip_bytes,
+            input_file_count=input_zip_files,
+            listed_item_count=1,
         )
         started = time.monotonic()
         downloaded_temp: Path | None = None
-        self._event(f"PROJECT ZIP EDIT #{run_id}: preparando {selected.name} effort={effort}")
+        self._event(
+            f"PROJECT ZIP EDIT #{run_id}: preparando {selected.name} effort={effort} | "
+            f"1 ZIP, {input_zip_bytes} bytes, {input_zip_files} arquivos internos"
+        )
         try:
             client = self._client()
             self.store.update_api_run(run_id, status="enviando")
@@ -304,19 +353,6 @@ class ProjectZipRunner:
             self._event(f"PROJECT ZIP EDIT #{run_id}: upload concluído file_id={uploaded.id}")
             self.store.update_api_run(run_id, status="aguardando-resposta")
 
-            prompt = (
-                "Trabalhe exclusivamente no arquivo ZIP anexado usando Code Interpreter. "
-                "Esta é uma chamada independente: todo o contexto necessário está nesta mensagem. "
-                "Inspecione o projeto antes de alterar. Implemente somente o pedido original abaixo, sem melhorias paralelas, "
-                "sem mudanças cosméticas não solicitadas e sem alterar arquivos sem necessidade. Preserve a hierarquia do ZIP. "
-                "Ao terminar, valide o que for possível dentro do projeto sem executar deploy. "
-                "Gere um NOVO ZIP contendo o projeto completo já alterado. Não devolva patch isolado. "
-                "Na resposta final, explique de forma curta o que foi alterado e cite/anexe explicitamente o ZIP final para download.\n\n"
-                f"ZIP SELECIONADO LOCALMENTE: {selected.name}\n"
-                "PEDIDO ORIGINAL DO E-MAIL:\n---\n"
-                f"{request_text.strip()}\n"
-                "---"
-            )
             response = client.responses.create(
                 model=self.settings.openai_model,
                 reasoning={"effort": effort},
@@ -334,6 +370,7 @@ class ProjectZipRunner:
                 status="baixando",
                 response_id=response_id,
                 response_summary=text[:1800],
+                response_bytes=len(text.encode("utf-8")),
             )
             self._event(f"PROJECT ZIP EDIT #{run_id}: resposta recebida response_id={response_id or '-'}")
 
@@ -359,15 +396,22 @@ class ProjectZipRunner:
                 downloaded_temp.unlink()
                 downloaded_temp = None
 
+            output_zip_bytes = target.stat().st_size
+            output_zip_files = self._zip_file_count(target)
             elapsed_ms = int((time.monotonic() - started) * 1000)
             self.store.update_api_run(
                 run_id,
                 status="concluido",
                 output_path=str(target),
+                output_file_bytes=output_zip_bytes,
+                output_file_count=output_zip_files,
                 elapsed_ms=elapsed_ms,
                 finished=True,
             )
-            self._event(f"PROJECT ZIP EDIT #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s -> {target}")
+            self._event(
+                f"PROJECT ZIP EDIT #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s -> {target} | "
+                f"{output_zip_bytes} bytes, {output_zip_files} arquivos internos"
+            )
             return run_id
         except Exception as exc:
             if downloaded_temp is not None and downloaded_temp.exists():

@@ -448,6 +448,31 @@ def _function_line_attr(line: str, p: Palette) -> int:
         return p.BORDER
     return 0
 
+
+def _api_kind_label(kind: str) -> str:
+    labels = {
+        "zip-test": "ZIP TESTE",
+        "function-router": "ROUTER",
+        "email-reply": "E-MAIL",
+        "project-zip-select": "ESCOLHE ZIP",
+        "project-zip-edit": "PROJETO",
+    }
+    return labels.get(str(kind or ""), str(kind or "API").upper())
+
+
+def _byte_detail(value) -> str:
+    if value is None:
+        return "-"
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if n < 1024:
+        return f"{n} bytes"
+    if n < 1024 * 1024:
+        return f"{n} bytes ({n / 1024:.2f} KiB)"
+    return f"{n} bytes ({n / (1024 * 1024):.2f} MiB)"
+
 def _api_status_label(status: str) -> str:
     labels = {
         "preparando": "PREPARANDO",
@@ -462,8 +487,8 @@ def _api_status_label(status: str) -> str:
 
 def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
     h, w = stdscr.getmaxyx()
-    ph = max(12, min(h - 2, 24))
-    pw = max(60, min(w - 4, 110))
+    ph = max(12, min(h - 2, 28))
+    pw = max(60, min(w - 4, 124))
     top = max(0, (h - ph) // 2)
     left = max(0, (w - pw) // 2)
     win = curses.newwin(ph, pw, top, left)
@@ -474,10 +499,35 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
         win.attroff(p.BORDER)
     except curses.error:
         pass
+
+    kind = str(row.get("kind") or "")
     elapsed = row.get("elapsed_ms")
     elapsed_text = f"{int(elapsed)/1000:.2f}s" if elapsed is not None else "em andamento"
-    lines = [
+    input_path = str(row.get("input_path") or "")
+    output_path = str(row.get("output_path") or "")
+    request_payload = str(row.get("request_payload") or "")
+    response_summary = str(row.get("response_summary") or "")
+
+    if kind == "project-zip-select":
+        input_path_label = "Raiz consultada"
+        attachment_line = "Anexos enviados: 0 — somente lista textual de nomes/caminhos de ZIP"
+        listed_label = "ZIPs listados"
+    elif kind in {"project-zip-edit", "zip-test"}:
+        input_path_label = "ZIP de entrada"
+        attachment_line = "Anexos enviados: 1 ZIP"
+        listed_label = "Anexos"
+    elif kind == "function-router":
+        input_path_label = "Arquivo de entrada"
+        attachment_line = "Anexos enviados: 0"
+        listed_label = "Funções listadas"
+    else:
+        input_path_label = "Arquivo de entrada"
+        attachment_line = "Anexos enviados: 0"
+        listed_label = "Itens listados"
+
+    lines: list[str] = [
         f"ID: #{row.get('id')}",
+        f"Tipo: {_api_kind_label(kind)}",
         f"Estado: {_api_status_label(row.get('status') or '')}",
         f"Modelo: {row.get('model') or '-'}",
         f"Raciocínio: {row.get('reasoning_effort') or '-'}",
@@ -485,39 +535,71 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
         f"Fim: {row.get('finished_at') or '-'}",
         f"Tempo: {elapsed_text}",
         f"Response ID: {row.get('response_id') or '-'}",
-        f"ZIP entrada: {row.get('input_path') or '-'}",
-        f"ZIP retorno: {row.get('output_path') or '-'}",
         "",
-        f"Pedido: {row.get('request_summary') or '-'}",
-        f"Resposta: {row.get('response_summary') or '-'}",
+        "=== ENVIO PARA API ===",
+        f"Texto/contexto enviado: {_byte_detail(row.get('request_bytes'))}",
+        attachment_line,
+        f"{listed_label}: {row.get('listed_item_count') if row.get('listed_item_count') is not None else '-'}",
+        f"{input_path_label}: {input_path or '-'}",
+        f"Bytes do ZIP/arquivo de entrada: {_byte_detail(row.get('input_file_bytes'))}",
+        f"Arquivos internos no ZIP de entrada: {row.get('input_file_count') if row.get('input_file_count') is not None else '-'}",
+        "",
+        "=== RETORNO DA API ===",
+        f"Texto recebido: {_byte_detail(row.get('response_bytes'))}",
+        f"ZIP/arquivo de retorno: {output_path or '-'}",
+        f"Bytes do ZIP/arquivo de retorno: {_byte_detail(row.get('output_file_bytes'))}",
+        f"Arquivos internos no ZIP de retorno: {row.get('output_file_count') if row.get('output_file_count') is not None else '-'}",
+        "",
+        f"Pedido resumido: {row.get('request_summary') or '-'}",
+        f"Resposta resumida: {response_summary or '-'}",
     ]
     if row.get("error"):
         lines.extend(["", f"ERRO: {row.get('error')}"])
-    wrapped=[]
+
+    lines.extend(["", "=== CONTEÚDO ENVIADO À API ==="] )
+    if request_payload:
+        lines.extend(request_payload.splitlines() or [request_payload])
+    else:
+        lines.append("(registro antigo: conteúdo detalhado não foi gravado)")
+
+    wrapped: list[str] = []
+    width = max(20, pw - 8)
     for line in lines:
-        wrapped.extend(textwrap.wrap(str(line), max(20, pw - 8), replace_whitespace=False) or [""])
-    _safe_add(win, 0, 2, " CHAMADA API ", pw - 4, p.HEADER)
-    offset=0
-    page=max(1, ph-4)
+        if line == "":
+            wrapped.append("")
+            continue
+        wrapped.extend(textwrap.wrap(str(line), width, replace_whitespace=False, drop_whitespace=False) or [""])
+
+    _safe_add(win, 0, 2, " CHAMADA API — DETALHES ", pw - 4, p.HEADER)
+    offset = 0
+    page = max(1, ph - 4)
     while True:
-        for y in range(1, ph-2):
-            _safe_add(win, y, 2, " " * max(0, pw-4), pw-4)
-        for i, line in enumerate(wrapped[offset:offset+page]):
-            attr = p.ERROR if line.startswith("ERRO:") else 0
-            _safe_add(win, 1+i, 3, line, pw-6, attr)
-        _safe_add(win, ph-2, 3, "↑↓/PgUp/PgDn rolar   Enter/Esc fechar", pw-6, p.DIM)
+        for y in range(1, ph - 2):
+            _safe_add(win, y, 2, " " * max(0, pw - 4), pw - 4)
+        for i, line in enumerate(wrapped[offset:offset + page]):
+            upper = line.upper()
+            if line.startswith("ERRO:"):
+                attr = p.ERROR
+            elif upper.startswith("=== ENVIO") or upper.startswith("=== RETORNO") or upper.startswith("=== CONTEÚDO"):
+                attr = p.BORDER | curses.A_BOLD
+            elif "ANEXOS ENVIADOS: 0" in upper and kind == "project-zip-select":
+                attr = p.OK
+            else:
+                attr = 0
+            _safe_add(win, 1 + i, 3, line, pw - 6, attr)
+        _safe_add(win, ph - 2, 3, "↑↓/PgUp/PgDn rolar   Enter/Esc fechar", pw - 6, p.DIM)
         win.refresh()
-        ch=win.getch()
-        if ch in (27,10,13,curses.KEY_ENTER,ord('q'),ord('Q')):
+        ch = win.getch()
+        if ch in (27, 10, 13, curses.KEY_ENTER, ord('q'), ord('Q')):
             break
         if ch == curses.KEY_UP:
-            offset=max(0,offset-1)
+            offset = max(0, offset - 1)
         elif ch == curses.KEY_DOWN:
-            offset=min(max(0,len(wrapped)-page),offset+1)
+            offset = min(max(0, len(wrapped) - page), offset + 1)
         elif ch == curses.KEY_PPAGE:
-            offset=max(0,offset-page)
+            offset = max(0, offset - page)
         elif ch == curses.KEY_NPAGE:
-            offset=min(max(0,len(wrapped)-page),offset+page)
+            offset = min(max(0, len(wrapped) - page), offset + page)
     stdscr.touchwin()
     stdscr.refresh()
 
@@ -701,14 +783,12 @@ def run(settings: Settings) -> int:
                         elapsed = row.get("elapsed_ms")
                         elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
                         result = row.get("output_path") or row.get("response_summary") or row.get("input_path") or "-"
-                        kind_map = {
-                            "zip-test": "ZIP",
-                            "function-router": "ROUTER",
-                            "email-reply": "EMAIL",
-                            "project-zip-select": "ESCOLHE",
-                            "project-zip-edit": "PROJETO",
-                        }
-                        kind = kind_map.get(str(row.get("kind") or ""), str(row.get("kind") or "API").upper()[:7])
+                        kind = _api_kind_label(str(row.get("kind") or ""))
+                        if kind == "ZIP TESTE":
+                            kind = "ZIP"
+                        elif kind == "ESCOLHE ZIP":
+                            kind = "ESCOLHE"
+                        kind = kind[:7]
                         line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
                         if absolute != sel or menu_focus:
                             attr = _status_attr("error" if status == "erro" else ("completed" if status == "concluido" else "analyzing"), p)

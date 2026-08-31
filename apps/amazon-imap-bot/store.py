@@ -65,6 +65,15 @@ class Store:
               finished_at TEXT
             )
         """)
+        # Métricas/auditoria são colunas aditivas para manter bancos SQLite existentes compatíveis.
+        self._ensure_column("api_runs", "request_payload", "TEXT")
+        self._ensure_column("api_runs", "request_bytes", "INTEGER")
+        self._ensure_column("api_runs", "input_file_bytes", "INTEGER")
+        self._ensure_column("api_runs", "input_file_count", "INTEGER")
+        self._ensure_column("api_runs", "listed_item_count", "INTEGER")
+        self._ensure_column("api_runs", "response_bytes", "INTEGER")
+        self._ensure_column("api_runs", "output_file_bytes", "INTEGER")
+        self._ensure_column("api_runs", "output_file_count", "INTEGER")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_messages_direction_id ON messages(direction, id DESC)")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_events_id ON events(id DESC)")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_api_runs_id ON api_runs(id DESC)")
@@ -185,23 +194,38 @@ class Store:
             ).fetchall()
         return [tuple(row) for row in rows]
     def add_api_run(self, *, kind: str, status: str, model: str, reasoning_effort: str, input_path: str,
-                    output_path: str, request_summary: str) -> int:
+                    output_path: str, request_summary: str, request_payload: str = "",
+                    request_bytes: int | None = None, input_file_bytes: int | None = None,
+                    input_file_count: int | None = None, listed_item_count: int | None = None) -> int:
         with self._lock:
             cur = self._db.execute(
-                """INSERT INTO api_runs(kind,status,model,reasoning_effort,input_path,output_path,request_summary,started_at)
-                   VALUES(?,?,?,?,?,?,?,?)""",
-                (kind, status, model, reasoning_effort, input_path, output_path, request_summary, self._now()),
+                """INSERT INTO api_runs(
+                       kind,status,model,reasoning_effort,input_path,output_path,request_summary,request_payload,
+                       request_bytes,input_file_bytes,input_file_count,listed_item_count,started_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (kind, status, model, reasoning_effort, input_path, output_path, request_summary, request_payload,
+                 request_bytes, input_file_bytes, input_file_count, listed_item_count, self._now()),
             )
             self._db.commit()
             return int(cur.lastrowid)
 
     def update_api_run(self, run_id: int, *, status: str | None = None, output_path: str | None = None,
                        response_id: str | None = None, response_summary: str | None = None,
-                       error: str | None = None, elapsed_ms: int | None = None, finished: bool = False) -> None:
+                       error: str | None = None, elapsed_ms: int | None = None, finished: bool = False,
+                       request_payload: str | None = None, request_bytes: int | None = None,
+                       input_file_bytes: int | None = None, input_file_count: int | None = None,
+                       listed_item_count: int | None = None, response_bytes: int | None = None,
+                       output_file_bytes: int | None = None, output_file_count: int | None = None) -> None:
         values = []
         params = []
-        for column, value in (("status", status), ("output_path", output_path), ("response_id", response_id),
-                              ("response_summary", response_summary), ("error", error), ("elapsed_ms", elapsed_ms)):
+        for column, value in (
+            ("status", status), ("output_path", output_path), ("response_id", response_id),
+            ("response_summary", response_summary), ("error", error), ("elapsed_ms", elapsed_ms),
+            ("request_payload", request_payload), ("request_bytes", request_bytes),
+            ("input_file_bytes", input_file_bytes), ("input_file_count", input_file_count),
+            ("listed_item_count", listed_item_count), ("response_bytes", response_bytes),
+            ("output_file_bytes", output_file_bytes), ("output_file_count", output_file_count),
+        ):
             if value is not None:
                 values.append(f"{column}=?")
                 params.append(value)
@@ -219,7 +243,9 @@ class Store:
         with self._lock:
             rows = self._db.execute(
                 """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
-                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at
+                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at,
+                          request_payload,request_bytes,input_file_bytes,input_file_count,listed_item_count,
+                          response_bytes,output_file_bytes,output_file_count
                    FROM api_runs ORDER BY id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
@@ -229,7 +255,9 @@ class Store:
         with self._lock:
             row = self._db.execute(
                 """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
-                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at
+                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at,
+                          request_payload,request_bytes,input_file_bytes,input_file_count,listed_item_count,
+                          response_bytes,output_file_bytes,output_file_count
                    FROM api_runs WHERE id=?""", (run_id,)
             ).fetchone()
         return dict(row) if row else None

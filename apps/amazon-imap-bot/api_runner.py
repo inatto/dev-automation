@@ -49,6 +49,11 @@ class ApiTestRunner:
         return effort
 
     @staticmethod
+    def _zip_file_count(path: Path) -> int:
+        with zipfile.ZipFile(path, "r") as zf:
+            return sum(1 for info in zf.infolist() if not info.is_dir())
+
+    @staticmethod
     def _plain(value):
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
@@ -125,6 +130,9 @@ class ApiTestRunner:
             input_path = self.ensure_test_zip()
             output_dir = self.settings.openai_output_dir
             output_dir.mkdir(parents=True, exist_ok=True)
+            input_zip_bytes = input_path.stat().st_size
+            input_zip_files = self._zip_file_count(input_path)
+            prompt_bytes = len(prompt.encode("utf-8"))
             run_id = self.store.add_api_run(
                 kind="zip-test",
                 status="preparando",
@@ -133,8 +141,16 @@ class ApiTestRunner:
                 input_path=str(input_path),
                 output_path="",
                 request_summary=f"origem={source} | {requested[:900]}",
+                request_payload=prompt,
+                request_bytes=prompt_bytes,
+                input_file_bytes=input_zip_bytes,
+                input_file_count=input_zip_files,
+                listed_item_count=1,
             )
-            self._event(f"ZIP TEST #{run_id}: preparando {input_path} effort={effort} origem={source}")
+            self._event(
+                f"ZIP TEST #{run_id}: preparando {input_path} effort={effort} origem={source} | "
+                f"{input_zip_bytes} bytes, {input_zip_files} arquivos internos"
+            )
             self.store.update_api_run(run_id, status="enviando")
 
             from openai import OpenAI
@@ -174,7 +190,10 @@ class ApiTestRunner:
             response_id = str(getattr(response, "id", "") or "")
             text = str(getattr(response, "output_text", "") or "").strip()
             self._event(f"ZIP TEST #{run_id}: resposta recebida response_id={response_id or '-'}")
-            self.store.update_api_run(run_id, status="baixando", response_id=response_id, response_summary=text[:1000])
+            self.store.update_api_run(
+                run_id, status="baixando", response_id=response_id, response_summary=text[:1000],
+                response_bytes=len(text.encode("utf-8")),
+            )
 
             files = self._container_files(response)
             zip_files = [item for item in files if item["filename"].lower().endswith(".zip")]
@@ -190,11 +209,15 @@ class ApiTestRunner:
             if not zipfile.is_zipfile(target):
                 raise RuntimeError(f"arquivo retornado não é um ZIP válido: {target}")
 
+            output_zip_bytes = target.stat().st_size
+            output_zip_files = self._zip_file_count(target)
             elapsed_ms = int((time.monotonic() - started) * 1000)
             self.store.update_api_run(
                 run_id,
                 status="concluido",
                 output_path=str(target),
+                output_file_bytes=output_zip_bytes,
+                output_file_count=output_zip_files,
                 elapsed_ms=elapsed_ms,
                 finished=True,
             )

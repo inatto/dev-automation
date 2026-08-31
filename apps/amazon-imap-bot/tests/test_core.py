@@ -482,8 +482,10 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
     class FakeFiles:
         def __init__(self):
             self.uploaded_name = None
+            self.create_calls = 0
 
         def create(self, *, file, purpose):
+            self.create_calls += 1
             self.uploaded_name = Path(file.name).name
             assert purpose == "user_data"
             return SimpleNamespace(id="file_project_zip")
@@ -501,7 +503,7 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
                         type="function_call",
                         name="select_project_zip",
                         arguments=json.dumps({
-                            "selected_zip": "orgs/orbital/orbital-app.zip",
+                            "selected_zip": "orbital-app.zip",
                             "reason": "O pedido menciona explicitamente Orbital App.",
                         }),
                     )],
@@ -541,12 +543,17 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp) / "Code"
         output = Path(tmp) / "Downloads"
-        project_zip = root / "orgs" / "orbital" / "orbital-app.zip"
-        project_zip.parent.mkdir(parents=True)
+        project_zip = root / "orbital-app.zip"
+        root.mkdir(parents=True)
         with zipfile.ZipFile(project_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
             info = zipfile.ZipInfo("apps/orbital-app/index.html", (2025, 1, 2, 3, 4, 4))
             info.external_attr = 0o755 << 16
             zf.writestr(info, "<title>Orbital App</title>")
+
+        nested = root / "orgs" / "ignored.zip"
+        nested.parent.mkdir(parents=True)
+        with zipfile.ZipFile(nested, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("ignored.txt", "ignored")
 
         settings = SimpleNamespace(
             project_zip_search_root=root,
@@ -572,12 +579,18 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
         assert "previous_response_id" not in edit_call
         assert select_call["reasoning"]["effort"] == "low"
         assert edit_call["reasoning"]["effort"] == "high"
-        assert "orgs/orbital/orbital-app.zip" in select_call["input"]
+        assert "orbital-app.zip" in select_call["input"]
+        assert "orgs/ignored.zip" not in select_call["input"]
+        assert "bytes=" not in select_call["input"]
+        assert "nenhum arquivo ZIP foi anexado" in select_call["input"]
         assert request in select_call["input"]
         assert request in edit_call["input"]
+        assert "NÃO extraia/descompacte o projeto inteiro" in edit_call["input"]
+        assert "Use Python zipfile" in edit_call["input"]
         assert edit_call["tools"][0]["type"] == "code_interpreter"
         assert edit_call["tools"][0]["container"]["file_ids"] == ["file_project_zip"]
         assert client.files.uploaded_name == "orbital-app.zip"
+        assert client.files.create_calls == 1  # somente a chamada PROJETO faz upload; ESCOLHE é texto puro
 
         final_row = store.get_api_run(final_run_id)
         assert final_row["kind"] == "project-zip-edit"
@@ -598,3 +611,16 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
         select_row = next(row for row in runs if row["kind"] == "project-zip-select")
         assert select_row["status"] == "concluido"
         assert select_row["output_path"] == str(project_zip.resolve())
+        assert select_row["input_file_count"] == 0
+        assert select_row["input_file_bytes"] == 0
+        assert select_row["listed_item_count"] == 1
+        assert select_row["request_bytes"] == len(select_row["request_payload"].encode("utf-8"))
+        assert "1. orbital-app.zip" in select_row["request_payload"]
+        assert "orgs/ignored.zip" not in select_row["request_payload"]
+
+        edit_row = next(row for row in runs if row["kind"] == "project-zip-edit")
+        assert edit_row["input_file_count"] == 1
+        assert edit_row["input_file_bytes"] == project_zip.stat().st_size
+        assert edit_row["output_file_count"] == 1
+        assert edit_row["output_file_bytes"] == Path(edit_row["output_path"]).stat().st_size
+        assert edit_row["request_bytes"] == len(edit_row["request_payload"].encode("utf-8"))

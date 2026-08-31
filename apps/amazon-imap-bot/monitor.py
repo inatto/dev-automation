@@ -209,6 +209,7 @@ class Monitor:
                 function_request = None
                 authorized_functions = self.function_map.authorized_function_names(item.sender_email)
                 if authorized_functions:
+                    router_payload = self.function_router.audit_payload(item.sender_email, item.subject, item.body)
                     router_run_id = self.store.add_api_run(
                         kind="function-router",
                         status="aguardando-resposta",
@@ -220,6 +221,11 @@ class Monitor:
                             f"Roteamento de {item.sender_email} | funções={','.join(authorized_functions)} | "
                             f"{self._preview(item.subject or '(sem assunto)', 160)}"
                         ),
+                        request_payload=router_payload,
+                        request_bytes=len(router_payload.encode("utf-8")),
+                        input_file_bytes=0,
+                        input_file_count=0,
+                        listed_item_count=len(authorized_functions),
                     )
                     router_started = time.monotonic()
                     self.store.set_inbound_status(account.email, item.message_id, "analyzing")
@@ -243,6 +249,7 @@ class Monitor:
                             status="concluido",
                             response_id=route.response_id,
                             response_summary=route_summary,
+                            response_bytes=len(route_summary.encode("utf-8")),
                             elapsed_ms=int((time.monotonic() - router_started) * 1000),
                             finished=True,
                         )
@@ -302,12 +309,16 @@ class Monitor:
                         f"assunto={self._preview(item.subject or '(sem assunto)', 80)} input={body_chars} chars",
                         "GPT",
                     )
+                    email_payload = self.ai.audit_payload(item)
                     api_run_id = self.store.add_api_run(
                         kind="email-reply", status="aguardando-resposta",
                         model=self.settings.openai_model,
                         reasoning_effort=self.settings.openai_reasoning_effort,
                         input_path="", output_path="",
                         request_summary=f"Responder e-mail de {item.sender_email}: {self._preview(item.subject or '(sem assunto)', 120)}",
+                        request_payload=email_payload,
+                        request_bytes=len(email_payload.encode("utf-8")),
+                        input_file_bytes=0, input_file_count=0, listed_item_count=0,
                     )
                     api_started = time.monotonic()
                     try:
@@ -322,6 +333,7 @@ class Monitor:
                         self.store.update_api_run(
                             api_run_id, status="concluido", response_id=self.ai.last_response_id,
                             response_summary=generated_body[:1000],
+                            response_bytes=len(generated_body.encode("utf-8")),
                             elapsed_ms=int((time.monotonic() - api_started) * 1000), finished=True,
                         )
                     self.store.set_inbound_status(account.email, item.message_id, "understood")

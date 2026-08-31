@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 
 from function_map import FunctionMap, FunctionRequest
 
@@ -54,19 +55,32 @@ class FunctionRouter:
         except TypeError:
             return []
 
-    def route(self, sender: str, subject: str, body: str) -> RouteResult:
-        tools = self.function_map.openai_tools_for_sender(sender)
-        if not tools:
-            return RouteResult(request=None, response_id="", selected_name="")
-
+    @staticmethod
+    def build_prompt(sender: str, subject: str, body: str) -> str:
         content = str(body or "").strip() or "(mensagem sem corpo textual)"
-        prompt = (
+        return (
             f"Remetente: {sender}\n"
             f"Assunto: {subject or '(sem assunto)'}\n"
             "Mensagem:\n---\n"
             f"{content}\n"
             "---"
         )
+
+    def audit_payload(self, sender: str, subject: str, body: str) -> str:
+        tools = self.function_map.openai_tools_for_sender(sender)
+        prompt = self.build_prompt(sender, subject, body)
+        return (
+            "INSTRUCTIONS:\n" + ROUTER_INSTRUCTIONS +
+            "\n\nINPUT:\n" + prompt +
+            "\n\nTOOLS AUTORIZADAS ENVIADAS:\n" + json.dumps(tools, ensure_ascii=False, indent=2)
+        )
+
+    def route(self, sender: str, subject: str, body: str) -> RouteResult:
+        tools = self.function_map.openai_tools_for_sender(sender)
+        if not tools:
+            return RouteResult(request=None, response_id="", selected_name="")
+
+        prompt = self.build_prompt(sender, subject, body)
         response = self.client.responses.create(
             model=self.model,
             instructions=ROUTER_INSTRUCTIONS,
