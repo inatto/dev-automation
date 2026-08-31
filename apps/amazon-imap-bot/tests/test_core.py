@@ -696,3 +696,50 @@ def test_project_zip_query_completes_without_return_zip():
         assert row["status"] == "concluido"
         assert row["output_path"] == ""
         assert "processos" in row["response_summary"]
+
+
+def test_mobile_api_overview_and_actions_do_not_expose_secrets():
+    from types import SimpleNamespace
+    from mobile_api import MobileApiService
+
+    class FakeStore:
+        def list_messages(self, direction, limit=500):
+            return [{"status": "analyzing"}] if direction == "in" else []
+        def recent_events(self, limit=500): return []
+        def list_api_runs(self, limit=200): return []
+
+    class FakeLock:
+        def locked(self): return False
+
+    settings = SimpleNamespace(
+        imap_host="imap.example.com", imap_port=993, imap_folder="INBOX", poll_seconds=30,
+        aws_profile="default", aws_region="us-east-1", openai_model="gpt-test",
+        openai_base_url="https://api.openai.com/v1", openai_reasoning_effort="medium",
+        openai_timeout_seconds=300, openai_api_key="SECRET",
+        openai_output_dir=Path("/tmp/out"), openai_test_zip=Path("/tmp/test.zip"),
+        functions_config=Path("/tmp/functions.json"), project_zip_search_root=Path("/tmp/code"),
+        auto_reply_enabled=True, sound_enabled=True,
+    )
+    state = SimpleNamespace(connected=True, last_check="-", last_error="", received=2, replied=1)
+    monitor = SimpleNamespace(
+        states={"bot@example.com": state}, stop_event=SimpleNamespace(is_set=lambda: False),
+        run_lock=FakeLock(), on_event=lambda text: None,
+    )
+    service = MobileApiService(settings, FakeStore(), monitor, api_runner=object())
+    payload = service.overview()
+    assert payload["queues"]["processing_messages"] == 1
+    assert payload["config"]["openai_key_configured"] is True
+    assert "openai_api_key" not in payload["config"]
+    assert "SECRET" not in str(payload)
+
+
+def test_mobile_api_limit_validation():
+    from mobile_api import MobileApiService, ApiError
+    assert MobileApiService._limit({"limit": ["10"]}, 5, 20) == 10
+    assert MobileApiService._limit({"limit": ["999"]}, 5, 20) == 20
+    try:
+        MobileApiService._limit({"limit": ["x"]}, 5, 20)
+    except ApiError as exc:
+        assert exc.status == 400
+    else:
+        raise AssertionError("limit inválido deveria falhar")

@@ -140,3 +140,35 @@ Para remetentes autorizados em `.config/amazon-imap-bot/functions.json`, pedidos
 2. valida localmente a escolha, envia apenas esse ZIP em uma nova chamada com o pedido original completo, baixa o ZIP final para `OPENAI_OUTPUT_DIR` (padrão `~/Downloads`).
 
 Não existe mapeamento fixo de nomes de projetos. A seleção retornada pelo GPT só é aceita se corresponder exatamente a um arquivo descoberto sob a raiz configurada.
+
+
+## API mobile e aplicativo Flutter
+
+A interface Flutter fica em `apps/amazon-imap-bot-mobile` e reproduz as áreas e operações relevantes da TUI por uma API própria: resumo/status e filas em processamento, entradas e respostas com detalhes, console persistente, contas, histórico/detalhes de chamadas da API, mapa de funções, atualização IMAP imediata, remoção confirmada de e-mail e teste ZIP.
+
+Configure em `.config/amazon-imap-bot/settings.env`:
+
+```env
+# Obrigatório. Gere um segredo longo e aleatório.
+MOBILE_API_TOKEN=troque-por-um-segredo-forte
+# Seguro por padrão: apenas loopback. Para reverse proxy/rede interna, altere conscientemente.
+MOBILE_API_HOST=127.0.0.1
+MOBILE_API_PORT=8765
+```
+
+Inicie o backend:
+
+```bash
+amazon-imap-bot --api
+```
+
+Todas as rotas funcionais em `/api/v1` exigem `Authorization: Bearer <token>`. A API não retorna senhas IMAP, chave OpenAI nem credenciais AWS. Para acesso fora do host, use TLS em um reverse proxy e restrinja a origem por firewall/VPN.
+
+Principais rotas:
+
+- `GET /api/v1/overview`, `/accounts`, `/events`, `/functions`, `/actions`
+- `GET /api/v1/messages?direction=in|out` e `/messages/{id}`
+- `GET /api/v1/api-runs` e `/api-runs/{id}`
+- `POST /api/v1/actions/refresh`
+- `POST /api/v1/actions/api-zip-test`
+- `DELETE /api/v1/messages/{id}`

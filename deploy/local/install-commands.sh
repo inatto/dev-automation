@@ -16,6 +16,7 @@ ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 VOICE_COMMANDS_SOURCE="$PROJECT_ROOT/apps/voice-commands/run.sh"
 GPT_CONSOLE_SOURCE="$PROJECT_ROOT/apps/gpt-console/run.sh"
 AMAZON_IMAP_BOT_SOURCE="$PROJECT_ROOT/apps/amazon-imap-bot/run.sh"
+AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE="$PROJECT_ROOT/scripts/amazon-imap-bot-auto-status.sh"
 SCRIPT_DEV_AUTOMATION_SOURCE="$PROJECT_ROOT/apps/script-dev-automation/run.sh"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
 CHROMES_ALL_SOURCE="$PROJECT_ROOT/scripts/chromes-all.sh"
@@ -113,6 +114,7 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$VOICE_COMMANDS_SOURCE" ]] || fail "aplicação não encontrada: $VOICE_COMMANDS_SOURCE"
 [[ -f "$GPT_CONSOLE_SOURCE" ]] || fail "aplicação não encontrada: $GPT_CONSOLE_SOURCE"
 [[ -f "$AMAZON_IMAP_BOT_SOURCE" ]] || fail "aplicação não encontrada: $AMAZON_IMAP_BOT_SOURCE"
+[[ -f "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" ]] || fail "integração AUTO status não encontrada: $AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE"
 [[ -f "$SCRIPT_DEV_AUTOMATION_SOURCE" ]] || fail "aplicação não encontrada: $SCRIPT_DEV_AUTOMATION_SOURCE"
 [[ -f "$CHROMES_SOURCE" ]] || fail "script não encontrado: $CHROMES_SOURCE"
 [[ -f "$CHROMES_ALL_SOURCE" ]] || fail "script não encontrado: $CHROMES_ALL_SOURCE"
@@ -141,7 +143,7 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -168,6 +170,16 @@ exec python3 "$DEV_GITSETUP_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$DEV_GITSETUP_TARGET"
 log "criado: dev-gitsetup -> $DEV_GITSETUP_SOURCE"
+
+AMAZON_IMAP_BOT_AUTO_STATUS_TARGET="$TARGET_DIR/amazon-imap-bot-auto-status"
+rm -f "$AMAZON_IMAP_BOT_AUTO_STATUS_TARGET"
+cat > "$AMAZON_IMAP_BOT_AUTO_STATUS_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec bash "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "\$@"
+EOF_WRAPPER
+chmod +x "$AMAZON_IMAP_BOT_AUTO_STATUS_TARGET"
+log "criado: amazon-imap-bot-auto-status -> $AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE"
 
 for command_name in chromes chromes-all chromes-close files files-all files-close terminals terminals-close chatgpts phpstorms pycharms pycharms-close phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb voice-commands gpt-console amazon-imap-bot script-dev-automation; do
   case "$command_name" in

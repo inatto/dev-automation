@@ -38,6 +38,9 @@ class Settings:
     database_path: Path
     sound_file: Path
     imap_trash_folder: str = ""
+    mobile_api_host: str = "127.0.0.1"
+    mobile_api_port: int = 8765
+    mobile_api_token: str = ""
 
 
 def _env_file(path: Path) -> dict[str, str]:
@@ -128,4 +131,7 @@ def load_settings() -> Settings:
             "SOUND_FILE",
             project_root / "assets" / "sounds" / "soft-notification.wav",
         )).expanduser(),
+        mobile_api_host=env.get("MOBILE_API_HOST", "127.0.0.1").strip() or "127.0.0.1",
+        mobile_api_port=int(env.get("MOBILE_API_PORT", "8765")),
+        mobile_api_token=env.get("MOBILE_API_TOKEN", "").strip(),
     )

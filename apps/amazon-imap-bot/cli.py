@@ -8,6 +8,7 @@ from config import load_settings
 from monitor import Monitor
 from store import Store
 from tui import run as run_tui
+from mobile_api import serve_mobile_api
 
 
 def doctor(settings) -> int:
@@ -46,11 +47,14 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="amazon-imap-bot")
     parser.add_argument("--doctor", action="store_true")
     parser.add_argument("--once", action="store_true", help="faz uma verificação e encerra")
+    parser.add_argument("--api", action="store_true", help="inicia a API segura para o aplicativo Flutter")
     args = parser.parse_args(argv)
     try:
         settings = load_settings()
         if args.doctor:
             return doctor(settings)
+        if args.api:
+            return serve_mobile_api(settings)
         if not any(a.enabled for a in settings.accounts):
             print("Nenhuma conta ativa em .config/amazon-imap-bot/settings.env", file=sys.stderr)
             return 2
