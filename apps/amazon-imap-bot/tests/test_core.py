@@ -490,29 +490,15 @@ def test_functions_view_reads_real_json_as_human_interface():
         assert '"functions"' not in text
 
 
-def test_oracle_seed_registers_relational_catalog_without_json_columns():
-    root = Path(__file__).resolve().parents[1] / "sql" / "oracle"
-    seed = (root / "002_seed_function_catalog.sql").read_text(encoding="utf-8")
-    create = (root / "001_create_function_catalog.sql").read_text(encoding="utf-8")
-    migration = (root / "004_normalize_function_catalog.sql").read_text(encoding="utf-8")
-
-    assert "project_zip_edit" in seed
-    assert "function_catalog_admin" in seed
-    assert "danielmaiax@gmail.com" in seed
-    assert "IMAP_BOT_FUNCTION_PARAMETERS" in seed
-    assert "IMAP_BOT_FUNCTION_PARAM_OPTIONS" in seed
-    assert "IMAP_BOT_FUNCTION_REASONING" in seed
-    assert "parameters_json" not in seed.lower()
-    assert "allowed_reasoning_levels_json" not in seed.lower()
-    assert "parameters_json" not in create.lower()
-    assert "allowed_reasoning_levels_json" not in create.lower()
-    assert "DROP COLUMN PARAMETERS_JSON" in migration
-    assert "DROP COLUMN ALLOWED_REASONING_LEVELS_JSON" in migration
+def test_project_package_contains_no_sql_scripts():
+    root = Path(__file__).resolve().parents[1]
+    assert list(root.rglob("*.sql")) == []
 
 
 def test_oracle_catalog_builds_function_schema_from_relational_rows():
     from types import SimpleNamespace
     from function_catalog import OracleFunctionCatalog
+    from function_map import FunctionMap
 
     class FakeCursor:
         def __init__(self):
@@ -543,6 +529,7 @@ def test_oracle_catalog_builds_function_schema_from_relational_rows():
                 return [
                     ("function_catalog_admin", "operation", "string", "Y", "Operação.", "STATIC"),
                     ("function_catalog_admin", "reasoning_level", "integer", "N", "Nível.", "FUNCTION_REASONING_LEVELS"),
+                    ("function_catalog_admin", "request_text", "string", "N", "Contexto.", "NONE"),
                     ("project_zip_edit", "reasoning_level", "integer", "Y", "Nível.", "FUNCTION_REASONING_LEVELS"),
                     ("project_zip_edit", "request_text", "string", "Y", "Pedido.", "NONE"),
                     ("project_zip_edit", "operation", "string", "Y", "Operação.", "STATIC"),
@@ -590,6 +577,28 @@ def test_oracle_catalog_builds_function_schema_from_relational_rows():
     assert params["properties"]["operation"]["enum"] == ["modify", "query"]
     assert params["required"] == ["reasoning_level", "request_text", "operation"]
     assert params["additionalProperties"] is False
+
+    # REQUIRED=N continua opcional para a aplicação, mas strict mode da OpenAI
+    # exige todas as propriedades em required; opcionais são nullable só no payload da API.
+    mapping = FunctionMap(TestCatalog(SimpleNamespace(schema="WKSP_SINDICATTO")))
+    admin_tool = next(
+        tool for tool in mapping.openai_tools_for_sender("danielmaiax@gmail.com")
+        if tool["name"] == "function_catalog_admin"
+    )
+    admin_params = admin_tool["parameters"]
+    assert admin_params["required"] == ["operation", "reasoning_level", "request_text"]
+    assert admin_params["properties"]["reasoning_level"]["type"] == ["integer", "null"]
+    assert admin_params["properties"]["reasoning_level"]["enum"] == [0, 1, None]
+    assert admin_params["properties"]["request_text"]["type"] == ["string", "null"]
+    assert admin_params["additionalProperties"] is False
+
+    request = mapping.request_from_tool_call(
+        "danielmaiax@gmail.com",
+        "function_catalog_admin",
+        {"operation": "list", "reasoning_level": None, "request_text": None},
+    )
+    assert request.reasoning_level == 1
+    assert request.arguments["operation"] == "list"
 
 
 def test_function_map_accepts_project_zip_edit_and_level():

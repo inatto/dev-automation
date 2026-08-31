@@ -89,7 +89,7 @@ Preencha a senha somente nesse arquivo local. O bot usa o driver Python `oracled
 
 Na inicialização, o terminal mostra cada etapa com tempo acumulado, inclusive resolução do DSN, host/porta/service do Oracle (sem senha), política de retry/timeout, abertura da conexão e leitura de cada parte do catálogo. Os valores `DB_CONNECT_*` sobrescrevem os retries do descriptor apenas no processo do bot, para que falhas de rede/ACL apareçam rapidamente em vez de deixarem a tela aparentemente travada.
 
-Antes de iniciar o bot, aplique manualmente, na ordem, os patches de `apps/amazon-imap-bot/sql/oracle/`. O aplicativo somente consulta as tabelas e nunca executa DDL ou DML de catálogo automaticamente.
+O pacote não distribui scripts `.sql`. O catálogo Oracle já existente é tratado como infraestrutura externa: o runtime somente consulta as tabelas e nunca executa DDL ou DML de catálogo automaticamente.
 
 A `.config/**` já é protegida por git-crypt neste projeto.
 
@@ -124,7 +124,9 @@ O catálogo é composto pelas tabelas:
 
 O banco não armazena schema, parâmetros nem níveis permitidos em JSON. Cada dado fica em coluna própria e, quando há múltiplos valores, em tabela filha relacional. O schema exigido pela API da OpenAI é montado somente em memória a partir dessas linhas; ele não é persistido no Oracle.
 
-Os patches SQL idempotentes registram as funções atuais `api_zip_test`, `project_zip_edit` e `function_catalog_admin`, seus parâmetros, opções, níveis e autorizações.
+Não há patch/seed SQL dentro do aplicativo. Estrutura e dados do catálogo são administrados diretamente no Oracle; para diagnóstico pontual, use somente consultas SQL executadas manualmente fora do pacote.
+
+A coluna relacional `REQUIRED` mantém a semântica de obrigatório/opcional da aplicação. Ao chamar a OpenAI em `strict` mode, o bot monta outra representação apenas em memória: todas as propriedades entram em `required`, como a API exige, e as que são opcionais no Oracle são convertidas para tipos nullable. Nada disso é persistido como JSON no banco.
 
 Fluxo:
 
@@ -144,7 +146,7 @@ A nova função administra o catálogo em memória sem fazer DDL/DML:
 - `operation=list`: lista versão, funções ativas e remetentes autorizados.
 - `operation=sync`: descarta o snapshot atual e recarrega definições e autorizações do Oracle.
 
-A mesma sincronização está disponível para clientes da API em `POST /api/v1/actions/functions-sync`. Alterações persistentes continuam sendo feitas exclusivamente pelos patches/comandos SQL aplicados manualmente.
+A mesma sincronização está disponível para clientes da API em `POST /api/v1/actions/functions-sync`. Alterações persistentes são feitas diretamente na administração do Oracle; o Amazon IMAP Bot continua somente-leitura para o catálogo.
 
 
 ## Função `project_zip_edit`

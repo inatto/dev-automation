@@ -83,7 +83,7 @@ def _init_colors() -> Palette:
     curses.init_pair(7, curses.COLOR_BLUE, background)
     curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_BLUE)
-    curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_GREEN)
+    curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
     p.HEADER = curses.color_pair(1) | curses.A_BOLD
     p.TOP_BAR = curses.color_pair(10) | curses.A_BOLD
     p.BORDER = curses.color_pair(2)

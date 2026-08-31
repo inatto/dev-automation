@@ -163,6 +163,56 @@ class FunctionMap:
             "additionalProperties": False,
         }
 
+    @staticmethod
+    def _strict_api_parameters(parameters: dict) -> dict:
+        """Converte o schema relacional para o formato strict exigido pela OpenAI.
+
+        A coluna REQUIRED do Oracle mantém a semântica da aplicação. No strict mode,
+        porém, a API exige que toda propriedade apareça em `required`; parâmetros
+        semanticamente opcionais são representados como nullable somente em memória.
+        """
+        schema = copy.deepcopy(parameters)
+        if schema.get("type") != "object":
+            raise RuntimeError("schema de parâmetros deve ser um object")
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            raise RuntimeError("schema de parâmetros não possui properties válidas")
+
+        semantic_required_raw = schema.get("required")
+        semantic_required = set(semantic_required_raw if isinstance(semantic_required_raw, list) else [])
+        unknown_required = semantic_required.difference(properties)
+        if unknown_required:
+            raise RuntimeError(
+                "schema possui parâmetros obrigatórios inexistentes em properties: "
+                + ", ".join(sorted(map(str, unknown_required)))
+            )
+
+        strict_required: list[str] = []
+        for param_name, raw_prop in properties.items():
+            if not isinstance(raw_prop, dict):
+                raise RuntimeError(f"parâmetro {param_name} possui definição inválida")
+            prop = raw_prop
+            strict_required.append(param_name)
+            if param_name in semantic_required:
+                continue
+
+            data_type = prop.get("type")
+            if isinstance(data_type, str):
+                prop["type"] = [data_type, "null"] if data_type != "null" else ["null"]
+            elif isinstance(data_type, list):
+                if "null" not in data_type:
+                    prop["type"] = [*data_type, "null"]
+            else:
+                raise RuntimeError(f"parâmetro opcional {param_name} não possui type válido")
+
+            enum = prop.get("enum")
+            if isinstance(enum, list) and None not in enum:
+                prop["enum"] = [*enum, None]
+
+        schema["required"] = strict_required
+        schema["additionalProperties"] = False
+        return schema
+
     def openai_tools_for_sender(self, sender: str) -> list[dict]:
         """Expõe ao modelo somente funções que este remetente pode executar."""
         tools: list[dict] = []
@@ -175,11 +225,12 @@ class FunctionMap:
                 if source == "oracle":
                     raise RuntimeError(f"função {name} não possui parâmetros relacionais válidos no Oracle")
                 parameters = self._default_parameters(name)
+            api_parameters = self._strict_api_parameters(parameters)
             tools.append({
                 "type": "function",
                 "name": name,
                 "description": str(entry.get("description") or f"Executa a função {name}."),
-                "parameters": parameters,
+                "parameters": api_parameters,
                 "strict": True,
             })
         return tools
@@ -219,7 +270,9 @@ class FunctionMap:
             raise RuntimeError(f"função não implementada: {name}")
 
         entry = self.function_entry(name)
-        raw_level = args.get("reasoning_level", entry.get("default_reasoning_level", 1))
+        raw_level = args.get("reasoning_level")
+        if raw_level is None or (isinstance(raw_level, str) and not raw_level.strip()):
+            raw_level = entry.get("default_reasoning_level", 1)
         try:
             level = int(raw_level)
         except (TypeError, ValueError) as exc:
