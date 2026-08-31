@@ -7,12 +7,15 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck source=lib/project-config.sh
 source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+# shellcheck source=project-names.sh
+source "$PROJECT_ROOT/scripts/project-names.sh"
 PLACEMENT_LIB="$PROJECT_ROOT/scripts/gnome-window-placement.sh"
 PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
-OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-0.5}"
+OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-2}"
+TAB_INTERVAL_SECONDS="${TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
 
 log(){ printf '[terminals] %s\n' "$*"; }
@@ -54,15 +57,74 @@ terminal_backend() {
   return 1
 }
 
+project_display_name() {
+  local project_path="$1" base word out=""
+  base="$(basename -- "$project_path")"
+  base="${base//_/ }"
+  base="${base//-/ }"
+  for word in $base; do
+    case "${word,,}" in
+      ai|api|aws|crm|erp|imap|lrdp|ses|ssh|ui|url) word="${word^^}" ;;
+      *) word="${word^}" ;;
+    esac
+    out+="${out:+ }$word"
+  done
+  printf '%s\n' "$out"
+}
+
+terminal_exec_string() {
+  local command_name="$1" command_line
+  printf -v command_line 'export PATH="$HOME/.local/bin:$PATH"; exec %q' "$command_name"
+  printf 'bash -lc %q\n' "$command_line"
+}
+
 launch_terminal_window() {
-  local backend="$1" terminal="$2" working_dir="$3"
+  local backend="$1" terminal="$2" working_dir="$3" title="${4:-}" command_name="${5:-}"
+  local exec_string=""
+  [[ -z "$command_name" ]] || exec_string="$(terminal_exec_string "$command_name")"
+
   case "$backend" in
-    ptyxis) nohup "$terminal" --new-window --working-directory="$working_dir" >/dev/null 2>&1 & ;;
-    gnome-terminal) nohup "$terminal" --window --working-directory="$working_dir" >/dev/null 2>&1 & ;;
-    kgx) (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &) ;;
-    xdg-terminal-exec) nohup "$terminal" --dir="$working_dir" >/dev/null 2>&1 & ;;
-    x-terminal-emulator) (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &) ;;
+    ptyxis)
+      if [[ -n "$command_name" ]]; then
+        nohup "$terminal" --new-window --working-directory="$working_dir" --title="$title" --execute "$exec_string" >/dev/null 2>&1 &
+      else
+        nohup "$terminal" --new-window --working-directory="$working_dir" ${title:+--title="$title"} >/dev/null 2>&1 &
+      fi
+      ;;
+    gnome-terminal)
+      if [[ -n "$command_name" ]]; then
+        nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+      else
+        nohup "$terminal" --window --working-directory="$working_dir" ${title:+--title="$title"} >/dev/null 2>&1 &
+      fi
+      ;;
+    kgx)
+      [[ -z "$command_name" ]] || return 2
+      (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &)
+      ;;
+    xdg-terminal-exec)
+      [[ -z "$command_name" ]] || return 2
+      nohup "$terminal" --dir="$working_dir" >/dev/null 2>&1 &
+      ;;
+    x-terminal-emulator)
+      [[ -z "$command_name" ]] || return 2
+      (cd -- "$working_dir" && nohup "$terminal" >/dev/null 2>&1 &)
+      ;;
     *) return 1 ;;
+  esac
+}
+
+launch_terminal_tab() {
+  local backend="$1" terminal="$2" working_dir="$3" title="$4" command_name="$5" exec_string
+  exec_string="$(terminal_exec_string "$command_name")"
+  case "$backend" in
+    ptyxis)
+      nohup "$terminal" --tab --working-directory="$working_dir" --title="$title" --execute "$exec_string" >/dev/null 2>&1 &
+      ;;
+    gnome-terminal)
+      nohup "$terminal" --tab --working-directory="$working_dir" --title="$title" -- bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+      ;;
+    *) return 2 ;;
   esac
 }
 
@@ -145,7 +207,7 @@ show_diagnose() {
   printf '=== TERMINALS / GNOME ===\n'
   printf 'Sessão: %s / %s\n' "${XDG_CURRENT_DESKTOP:-?}" "${XDG_SESSION_TYPE:-?}"
   printf 'Destinos: %s (projetos + lrdp1/lrdp2; workspaces 2..%s; LAZER excluído)\n' "$count" "$((count + 1))"
-  printf 'Intervalo: %s segundo(s) entre aberturas\n' "$OPEN_INTERVAL_SECONDS"
+  printf 'Intervalo: %s segundo(s) entre abas/aberturas\n' "$TAB_INTERVAL_SECONDS"
   printf 'Terminal: '; terminal_backend || printf 'nenhum terminal compatível encontrado\n'
   printf 'Monitores:\n'
   command -v xrandr >/dev/null 2>&1 && xrandr --listmonitors 2>/dev/null || true
@@ -175,8 +237,9 @@ case "${1:-}" in
     ;;
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
-    printf 'Fluxo único: ativa cada workspace, abre o terminal na pasta correspondente e aguarda o intervalo configurado antes do próximo.\n'
-    printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos.\n'
+    printf 'Fluxo único: ativa cada workspace e abre uma janela por projeto. Projetos com deploy local/remoto recebem abas AUTO no mesmo terminal.\n'
+    printf 'Aba local: <Projeto> Auto. Aba remota: Remote <Projeto> Auto. O intervalo padrão entre abas/aberturas é 2 segundos.\n'
+    printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos terminais simples.\n'
     exit 0
     ;;
   '') ;;
@@ -184,7 +247,9 @@ case "${1:-}" in
 esac
 
 [[ "$OPEN_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
-  fail "intervalo inválido: $OPEN_INTERVAL_SECONDS"
+  fail "intervalo de abertura inválido: $OPEN_INTERVAL_SECONDS"
+[[ "$TAB_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+  fail "intervalo entre abas inválido: $TAB_INTERVAL_SECONDS"
 [[ "$CAPTURE_TIMEOUT_TENTHS" =~ ^[0-9]+$ ]] || \
   fail "timeout inválido: $CAPTURE_TIMEOUT_TENTHS"
 
@@ -194,9 +259,9 @@ IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
 ensure_workspaces_on_all_monitors
 reset_previous_managed_batch
 
-log 'FLUXO ÚNICO: cada terminal será aberto diretamente no seu workspace e na pasta do projeto.'
+log 'FLUXO ÚNICO: uma janela por projeto/workspace; abas AUTO local e remota no mesmo terminal quando disponíveis.'
 log "Terminal: $terminal_kind -> $terminal"
-log "Intervalo entre aberturas: $OPEN_INTERVAL_SECONDS segundo(s)."
+log "Intervalo entre abas/aberturas: $TAB_INTERVAL_SECONDS segundo(s)."
 
 for ((project_index=0; project_index<count; project_index++)); do
   workspace_number=$((project_index + 2))
@@ -233,8 +298,36 @@ for ((project_index=0; project_index<count; project_index++)); do
      "$ready_monitor" =~ ^[0-9]+$ && "$ready_all_monitors" == 1 ]] || \
     fail "o GNOME recusou o destino direto de '$project_name' (desktop esperado=$workspace_number, confirmado=${ready_workspace:-nenhum}; slot esperado=$slot, confirmado=${ready_slot:-nenhum}; monitor=${ready_monitor:-nenhum}; workspaces-em-todos-monitores=${ready_all_monitors:-não}; válido=${ready_valid:-não})."
 
-  launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" || \
-    fail "falha ao abrir terminal via $terminal_kind para '$project_name'"
+  first_command=""
+  second_command=""
+  first_title=""
+  second_title=""
+
+  if [[ "$project_name" != lrdp1 && "$project_name" != lrdp2 && -d "$CODE_ROOT/$project_name" ]]; then
+    command_base="$(project_global_command_base "$project_name" "$PROJECTS_FILE")"
+    display_name="$(project_display_name "$project_name")"
+    if [[ -f "$working_dir/deploy/local/setup.sh" ]]; then
+      first_command="$command_base-auto"
+      first_title="$display_name Auto"
+    fi
+    if [[ -f "$working_dir/deploy/remote/setup.sh" ]]; then
+      if [[ -n "$first_command" ]]; then
+        second_command="remote-$command_base-auto"
+        second_title="Remote $display_name Auto"
+      else
+        first_command="remote-$command_base-auto"
+        first_title="Remote $display_name Auto"
+      fi
+    fi
+  fi
+
+  launch_rc=0
+  launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" "$first_title" "$first_command" || launch_rc=$?
+  case "$launch_rc" in
+    0) ;;
+    2) fail "o terminal $terminal_kind não suporta executar abas AUTO; instale/use Ptyxis ou GNOME Terminal." ;;
+    *) fail "falha ao abrir terminal via $terminal_kind para '$project_name'" ;;
+  esac
 
   if ! gnome_placement_wait_complete terminals "$CAPTURE_TIMEOUT_TENTHS"; then
     fail "o GNOME não confirmou o terminal de '$project_name' no desktop $workspace_number e no monitor da direita; parei para não abrir os seguintes no lugar errado."
@@ -245,9 +338,20 @@ for ((project_index=0; project_index<count; project_index++)); do
   [[ "$result_workspace" == "$workspace_number" && "$result_monitor" == "$ready_monitor" ]] || \
     fail "o terminal de '$project_name' terminou no destino errado (desktop=${result_workspace:-nenhum}, monitor=${result_monitor:-nenhum}; esperado desktop=$workspace_number, monitor=$ready_monitor)."
 
+  if [[ -n "$first_command" ]]; then
+    log "ABA: $first_title -> $first_command"
+  fi
+
+  if [[ -n "$second_command" ]]; then
+    sleep "$TAB_INTERVAL_SECONDS"
+    launch_terminal_tab "$terminal_kind" "$terminal" "$working_dir" "$second_title" "$second_command" || \
+      fail "falha ao abrir a aba '$second_title' via $terminal_kind"
+    log "ABA: $second_title -> $second_command"
+  fi
+
   if (( project_index + 1 < count )); then
-    sleep "$OPEN_INTERVAL_SECONDS"
+    sleep "$TAB_INTERVAL_SECONDS"
   fi
 done
 
-log "CONCLUÍDO: $count terminal(is) aberto(s) diretamente nos desktops 2..$((count + 1)), sem segunda fase."
+log "CONCLUÍDO: $count janela(s) aberta(s) diretamente nos desktops 2..$((count + 1)); projetos com deploy receberam suas abas AUTO."

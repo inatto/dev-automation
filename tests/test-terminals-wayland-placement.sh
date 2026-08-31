@@ -5,8 +5,11 @@ TMP="$(mktemp -d /tmp/terminals-wayland-test-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 mkdir -p "$TMP/bin" "$TMP/home" "$TMP/state/desktops" \
   "$TMP/code/bots/dev-automation" \
-  "$TMP/code/orgs/orbital/orbital-app" \
+  "$TMP/code/orgs/orbital/orbital-app/deploy/local" \
+  "$TMP/code/orgs/orbital/orbital-app/deploy/remote" \
   "$TMP/code/orgs/orbital/orbital-ui"
+: > "$TMP/code/orgs/orbital/orbital-app/deploy/local/setup.sh"
+: > "$TMP/code/orgs/orbital/orbital-app/deploy/remote/setup.sh"
 cat > "$TMP/projects" <<'PROJECTS'
 bots/dev-automation
 orgs/orbital/orbital-app
@@ -76,11 +79,11 @@ READY
         printf '%s\tplaced=0\texpected=1\tcomplete=0\n' "$token" > "$TMP/state/desktops/terminals.result"
 
         for _ in $(seq 1 200); do
-          current="$(wc -l < "$TMP/terminal.log")"
+          current="$(grep -c -- '--new-window' "$TMP/terminal.log" || true)"
           (( current >= handled )) && break
           sleep 0.02
         done
-        [[ "$(wc -l < "$TMP/terminal.log")" -eq "$handled" ]]
+        [[ "$(grep -c -- '--new-window' "$TMP/terminal.log" || true)" -eq "$handled" ]]
         printf '%s\tplaced=1\texpected=1\tcomplete=1\tworkspace=%s\tmonitor=2\n' "$token" "$workspace" > "$TMP/state/desktops/terminals.result"
         (( handled == count )) && exit 0
         ;;
@@ -106,20 +109,27 @@ common_env=(
 out="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
 wait "$watcher"
 
-[[ "$(wc -l < "$TMP/terminal.log")" -eq 5 ]]
+[[ "$(wc -l < "$TMP/terminal.log")" -eq 6 ]]
+[[ "$(grep -c -- '--new-window' "$TMP/terminal.log")" -eq 5 ]]
+[[ "$(grep -c -- '--tab' "$TMP/terminal.log")" -eq 1 ]]
 [[ "$(cat "$TMP/actions.log")" == $'direct\t2\t1\ndirect\t3\t2\ndirect\t4\t3\ndirect\t5\t4\ndirect\t6\t5' ]]
-sed -n '1p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/bots/dev-automation"
-sed -n '2p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-app"
-sed -n '3p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-ui"
-sed -n '4p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
-sed -n '5p' "$TMP/terminal.log" | grep -Fq -- "--working-directory=$TMP/home"
+mapfile -t windows < <(grep -- '--new-window' "$TMP/terminal.log")
+printf '%s\n' "${windows[0]}" | grep -Fq -- "--working-directory=$TMP/code/bots/dev-automation"
+printf '%s\n' "${windows[1]}" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-app"
+printf '%s\n' "${windows[2]}" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-ui"
+printf '%s\n' "${windows[3]}" | grep -Fq -- "--working-directory=$TMP/home"
+printf '%s\n' "${windows[4]}" | grep -Fq -- "--working-directory=$TMP/home"
+grep -- '--new-window' "$TMP/terminal.log" | grep -F -- "--title=Orbital App Auto" | grep -Fq -- 'orbital-app-auto'
+grep -- '--tab' "$TMP/terminal.log" | grep -F -- "--title=Remote Orbital App Auto" | grep -Fq -- 'remote-orbital-app-auto'
 
 grep -Fq 'FLUXO ÚNICO' <<<"$out"
-grep -Fq 'Intervalo entre aberturas: 0 segundo(s).' <<<"$out"
-grep -Fq 'sem segunda fase' <<<"$out"
+grep -Fq 'Intervalo entre abas/aberturas: 0 segundo(s).' <<<"$out"
+grep -Fq 'ABA: Orbital App Auto -> orbital-app-auto' <<<"$out"
+grep -Fq 'ABA: Remote Orbital App Auto -> remote-orbital-app-auto' <<<"$out"
 ! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals.sh"
 ! grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-0.5' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-2' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals.sh"
 grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals.sh"
 grep -Fq 'workspaces-only-on-primary false' "$ROOT/scripts/terminals.sh"
 grep -Fq "action === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
@@ -151,4 +161,4 @@ env "${common_env[@]}" "$ROOT/scripts/terminals.sh" --reset >/dev/null
 wait "$reset_watcher"
 grep -Fxq reset "$TMP/reset.log"
 
-echo 'OK: terminals ativa cada desktop e abre ali o terminal da pasta correta, um por vez, sem segunda fase.'
+echo 'OK: terminals mantém uma janela por desktop e abre as abas AUTO local/remota no mesmo terminal.'
