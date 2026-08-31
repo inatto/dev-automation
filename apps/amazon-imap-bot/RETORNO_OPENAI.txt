@@ -1,3 +1,0 @@
-Confirmação: arquivo de retorno criado.
-Data/hora do ambiente: 2026-08-31T03:50:57+00:00
-O ZIP foi processado com sucesso.

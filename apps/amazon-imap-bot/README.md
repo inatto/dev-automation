@@ -115,15 +115,15 @@ Mande o arquivo teste usando o nível 1 e peça como retorno qual é a capital d
 
 Fluxo desse comando:
 
-1. O Python reconhece `api_zip_test` pelas frases configuradas em `functions.json`.
-2. Confere o endereço exato do remetente e se ele possui permissão para a função.
-3. Valida o nível `0..5`; nível fora desse intervalo não chama a API.
-4. Converte `1` para `low` e usa esse nível apenas nessa chamada, sem alterar o nível global.
-5. Usa o mesmo ZIP de teste da aba `F6 API`.
-6. Envia o ZIP à API e pede que a solicitação indicada após `peça como retorno` seja respondida.
-7. O retorno inclui `RETORNO_OPENAI.txt` dentro de um novo ZIP.
-8. Baixa o ZIP para `OPENAI_OUTPUT_DIR`, por padrão `~/Downloads`.
-9. A chamada aparece normalmente na pilha da aba `F6 API`, inclusive enquanto estiver aguardando.
+1. O Python lê `functions.json` e monta a lista de funções autorizadas especificamente para o endereço `From` recebido.
+2. Somente essas funções autorizadas são enviadas ao GPT como *function tools* da Responses API. O GPT interpreta o pedido semanticamente; não existe mais dependência de frase exata, alias ou palavra-chave para escolher a função.
+3. Se nenhuma função disponível combinar com o pedido, o GPT não chama ferramenta e o e-mail segue pelo fluxo normal de suporte.
+4. Se o GPT selecionar uma função, retorna uma chamada estruturada com nome e argumentos. O Python valida novamente remetente, nome da função e parâmetros antes de executar qualquer coisa.
+5. Para `api_zip_test`, valida o nível `0..5`, converte `1` para `low` e usa esse nível apenas na execução do ZIP, sem alterar o nível global.
+6. A decisão semântica aparece na aba `F6 API` como uma chamada `ROUTER`, com resultado `função=...` ou `nenhuma função selecionada`.
+7. Quando `api_zip_test` é escolhida, uma segunda linha `ZIP` aparece na mesma pilha e acompanha `PREPARANDO`, `ENVIANDO`, `AGUARDANDO`, `BAIXANDO`, `CONCLUÍDO` ou `ERRO`.
+8. O teste usa o mesmo ZIP da tecla `T`, envia a pergunta/instrução extraída pelo GPT e gera `RETORNO_OPENAI.txt` dentro do novo ZIP.
+9. O ZIP retornado é baixado para `OPENAI_OUTPUT_DIR`, por padrão `~/Downloads`.
 10. Ao concluir, o bot responde ao e-mail informando a função, nível utilizado, caminho do arquivo e o resumo textual retornado pela API.
 
 Durante esse fluxo o e-mail passa por `EXECUTANDO`, `CONCLUÍDO`, `ENVIANDO` e finalmente `RESPONDIDO`. Falhas da função aparecem como `ERRO FUNÇÃO`.

@@ -14,6 +14,7 @@ from ai import ReplyGenerator
 from api_runner import ApiTestRunner
 from config import Account, Settings
 from function_map import FunctionMap, FunctionRequest
+from function_router import FunctionRouter
 from mailbox import MailboxClient
 from message import parse, should_reply
 from ses import SesSender
@@ -46,6 +47,10 @@ class Monitor:
         self.ses = SesSender(settings.aws_profile, settings.aws_region)
         self.mailbox = MailboxClient(settings)
         self.function_map = FunctionMap(settings.functions_config)
+        self.function_router = FunctionRouter(
+            settings.openai_api_key, settings.openai_model, settings.openai_base_url,
+            settings.openai_timeout_seconds, self.function_map,
+        )
         self.api_runner = ApiTestRunner(
             settings, store,
             lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
@@ -184,26 +189,62 @@ class Monitor:
                     self._event(f"IGNORADO {item.sender_email} | {reason}", "EMAIL", "WARN")
                     continue
 
-                try:
-                    function_request = self.function_map.resolve(item.sender_email, item.subject, item.body)
-                except ValueError as command_exc:
-                    self.store.set_inbound_status(account.email, item.message_id, "function-error")
-                    self._event(
-                        f"COMANDO INVÁLIDO remetente={item.sender_email}: {command_exc}",
-                        "FUNCTION",
-                        "WARN",
+                function_request = None
+                authorized_functions = self.function_map.authorized_function_names(item.sender_email)
+                if authorized_functions:
+                    router_run_id = self.store.add_api_run(
+                        kind="function-router",
+                        status="aguardando-resposta",
+                        model=self.settings.openai_model,
+                        reasoning_effort=self.function_router.reasoning_effort,
+                        input_path="",
+                        output_path="",
+                        request_summary=(
+                            f"Roteamento de {item.sender_email} | funções={','.join(authorized_functions)} | "
+                            f"{self._preview(item.subject or '(sem assunto)', 160)}"
+                        ),
                     )
-                    invalid_body = f"O comando de função foi reconhecido, mas é inválido: {command_exc}."
+                    router_started = time.monotonic()
+                    self.store.set_inbound_status(account.email, item.message_id, "analyzing")
+                    self._event(
+                        f"ROUTER REQUEST remetente={item.sender_email} funções={','.join(authorized_functions)}",
+                        "GPT",
+                    )
                     try:
-                        local_id, ses_id = self.ses.send_reply(account, item, invalid_body)
-                        self.store.add_outbound(
-                            account=account.email, message_id=local_id, thread_key=item.thread_key,
-                            sender=account.email, recipient=item.sender_email, subject=item.subject,
-                            body=invalid_body, reply_to=item.message_id, provider_message_id=ses_id, status="sent",
+                        route = self.function_router.route(item.sender_email, item.subject, item.body)
+                        function_request = route.request
+                        if function_request is None:
+                            route_summary = "nenhuma função selecionada"
+                        else:
+                            route_summary = (
+                                f"função={function_request.name} "
+                                f"nível={function_request.reasoning_level}/{function_request.reasoning_effort} "
+                                f"pedido={self._preview(function_request.request_text, 500)}"
+                            )
+                        self.store.update_api_run(
+                            router_run_id,
+                            status="concluido",
+                            response_id=route.response_id,
+                            response_summary=route_summary,
+                            elapsed_ms=int((time.monotonic() - router_started) * 1000),
+                            finished=True,
                         )
-                    except Exception as reply_exc:
-                        self._event(f"Falha ao responder comando inválido para {item.sender_email}: {reply_exc}", "SES", "ERROR")
-                    continue
+                        self._event(f"ROUTER RESPONSE {route_summary}", "GPT")
+                    except Exception as router_exc:
+                        self.store.update_api_run(
+                            router_run_id,
+                            status="erro",
+                            error=str(router_exc),
+                            elapsed_ms=int((time.monotonic() - router_started) * 1000),
+                            finished=True,
+                        )
+                        self._event(
+                            f"ROUTER ERRO remetente={item.sender_email}: {router_exc}",
+                            "GPT",
+                            "ERROR",
+                        )
+                        # Falha no roteador nunca autoriza execução. O e-mail segue para o fluxo normal de suporte.
+                        function_request = None
 
                 if function_request is not None:
                     try:
@@ -229,16 +270,6 @@ class Monitor:
                         except Exception as reply_exc:
                             self._event(f"Falha ao avisar erro da função para {item.sender_email}: {reply_exc}", "SES", "ERROR")
                     continue
-
-                denied_function = self.function_map.is_command_but_unauthorized(
-                    item.sender_email, item.subject, item.body
-                )
-                if denied_function:
-                    self._event(
-                        f"NEGADO função={denied_function} remetente={item.sender_email} não autorizado",
-                        "AUTH",
-                        "WARN",
-                    )
 
                 if not self.settings.auto_reply_enabled:
                     self.store.set_inbound_status(account.email, item.message_id, "awaiting-confirmation")

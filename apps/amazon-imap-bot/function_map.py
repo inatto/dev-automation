@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,10 +22,11 @@ class FunctionRequest:
     reasoning_level: int
     reasoning_effort: str
     request_text: str
+    arguments: dict
 
 
 class FunctionMap:
-    """Carrega autorizações locais e reconhece comandos de funções em e-mails."""
+    """Autorizações locais e definições das funções que podem ser expostas ao GPT."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -44,12 +43,6 @@ class FunctionMap:
             raise RuntimeError(f"configuração de funções inválida em {self.path}")
         return payload
 
-    @staticmethod
-    def _normalize(text: str) -> str:
-        value = unicodedata.normalize("NFKD", str(text or ""))
-        value = "".join(ch for ch in value if not unicodedata.combining(ch))
-        return " ".join(value.lower().split())
-
     def sender_functions(self, sender: str) -> set[str]:
         senders = self.payload.get("senders") or {}
         if not isinstance(senders, dict):
@@ -62,38 +55,76 @@ class FunctionMap:
             return set()
         return {str(name).strip() for name in functions if str(name).strip()}
 
+    def function_entry(self, name: str) -> dict:
+        functions = self.payload.get("functions") or {}
+        entry = functions.get(name) if isinstance(functions, dict) else None
+        return dict(entry) if isinstance(entry, dict) else {}
+
     def function_enabled(self, name: str) -> bool:
-        functions = self.payload.get("functions") or {}
-        entry = functions.get(name) if isinstance(functions, dict) else None
-        return isinstance(entry, dict) and bool(entry.get("enabled", True))
+        entry = self.function_entry(name)
+        return bool(entry) and bool(entry.get("enabled", True))
 
-    def _aliases(self, name: str) -> list[str]:
-        functions = self.payload.get("functions") or {}
-        entry = functions.get(name) if isinstance(functions, dict) else None
-        if not isinstance(entry, dict):
-            return []
-        aliases = entry.get("aliases") or []
-        if not isinstance(aliases, list):
-            return []
-        return [self._normalize(str(alias)) for alias in aliases if str(alias).strip()]
+    def authorized_function_names(self, sender: str) -> list[str]:
+        return sorted(
+            name for name in self.sender_functions(sender)
+            if self.function_enabled(name)
+        )
 
-    def _default_level(self, name: str) -> int:
-        functions = self.payload.get("functions") or {}
-        entry = functions.get(name) if isinstance(functions, dict) else None
-        value = entry.get("default_reasoning_level", 2) if isinstance(entry, dict) else 2
-        try:
-            level = int(value)
-        except (TypeError, ValueError):
-            level = 2
-        return level if level in REASONING_LEVELS else 2
+    @staticmethod
+    def _default_parameters(name: str) -> dict:
+        if name == "api_zip_test":
+            return {
+                "type": "object",
+                "properties": {
+                    "reasoning_level": {
+                        "type": "integer",
+                        "enum": [0, 1, 2, 3, 4, 5],
+                        "description": (
+                            "Nível solicitado pelo usuário: 0=none, 1=low, 2=medium, "
+                            "3=high, 4=xhigh, 5=max."
+                        ),
+                    },
+                    "request_text": {
+                        "type": "string",
+                        "description": (
+                            "Pergunta ou instrução que deve ser respondida dentro do teste ZIP. "
+                            "Se não houver uma pergunta separada, use uma confirmação objetiva de processamento do ZIP."
+                        ),
+                    },
+                },
+                "required": ["reasoning_level", "request_text"],
+                "additionalProperties": False,
+            }
+        return {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        }
+
+    def openai_tools_for_sender(self, sender: str) -> list[dict]:
+        """Expõe ao modelo somente funções que este remetente pode executar."""
+        tools: list[dict] = []
+        for name in self.authorized_function_names(sender):
+            entry = self.function_entry(name)
+            parameters = entry.get("parameters")
+            if not isinstance(parameters, dict):
+                parameters = self._default_parameters(name)
+            tools.append({
+                "type": "function",
+                "name": name,
+                "description": str(entry.get("description") or f"Executa a função {name}."),
+                "parameters": parameters,
+                "strict": True,
+            })
+        return tools
 
     def _allowed_levels(self, name: str) -> set[int]:
-        functions = self.payload.get("functions") or {}
-        entry = functions.get(name) if isinstance(functions, dict) else None
-        raw = entry.get("allowed_reasoning_levels", list(REASONING_LEVELS)) if isinstance(entry, dict) else list(REASONING_LEVELS)
+        entry = self.function_entry(name)
+        raw = entry.get("allowed_reasoning_levels", list(REASONING_LEVELS))
         if not isinstance(raw, list):
             return set(REASONING_LEVELS)
-        allowed = set()
+        allowed: set[int] = set()
         for value in raw:
             try:
                 level = int(value)
@@ -103,69 +134,44 @@ class FunctionMap:
                 allowed.add(level)
         return allowed or set(REASONING_LEVELS)
 
-    @staticmethod
-    def _reasoning_level(text: str, default: int) -> int:
-        normalized = FunctionMap._normalize(text)
-        match = re.search(r"\b(?:nivel|level)\s*[:=#-]?\s*(\d+)\b", normalized)
-        if match:
-            level = int(match.group(1))
-            if level not in REASONING_LEVELS:
-                raise ValueError("nível da API deve estar entre 0 e 5")
-            return level
-        return default
+    def request_from_tool_call(self, sender: str, name: str, arguments: str | dict) -> FunctionRequest:
+        """Valida novamente no Python a decisão/argumentos retornados pelo GPT."""
+        sender_key = str(sender or "").strip().lower()
+        if name not in self.authorized_function_names(sender_key):
+            raise PermissionError(f"função {name} não autorizada para {sender_key}")
 
-    @staticmethod
-    def _request_text(text: str) -> str:
-        """Extrai a instrução depois de 'peça como retorno' ou 'retorno'."""
-        raw = str(text or "").strip()
-        patterns = (
-            r"(?is)\bpe[cç]a\s+como\s+retorno\s*[:\-]?\s*(.+)$",
-            r"(?is)\bcomo\s+retorno\s*[:\-]?\s*(.+)$",
-            r"(?is)\bretorno\s*[:\-]\s*(.+)$",
-        )
-        for pattern in patterns:
-            match = re.search(pattern, raw)
-            if match:
-                result = match.group(1).strip()
-                if result:
-                    return result[:8000]
-        return "Confirme que o arquivo ZIP de teste foi processado com sucesso."
+        if isinstance(arguments, str):
+            try:
+                args = json.loads(arguments or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"argumentos JSON inválidos para {name}") from exc
+        elif isinstance(arguments, dict):
+            args = dict(arguments)
+        else:
+            raise ValueError(f"argumentos inválidos para {name}")
 
-    def detect_name(self, subject: str, body: str) -> str | None:
-        text = self._normalize(f"{subject}\n{body}")
-        functions = self.payload.get("functions") or {}
-        if not isinstance(functions, dict):
-            return None
-        for name in functions:
-            if not self.function_enabled(str(name)):
-                continue
-            aliases = self._aliases(str(name))
-            if any(alias and alias in text for alias in aliases):
-                return str(name)
-        return None
+        if name != "api_zip_test":
+            raise RuntimeError(f"função não implementada: {name}")
 
-    def resolve(self, sender: str, subject: str, body: str) -> FunctionRequest | None:
-        name = self.detect_name(subject, body)
-        if not name:
-            return None
-        if name not in self.sender_functions(sender):
-            return None
-        text = f"{subject}\n{body}".strip()
-        level = self._reasoning_level(text, self._default_level(name))
+        try:
+            level = int(args.get("reasoning_level"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("nível da API deve ser um número entre 0 e 5") from exc
+        if level not in REASONING_LEVELS:
+            raise ValueError("nível da API deve estar entre 0 e 5")
         if level not in self._allowed_levels(name):
             raise ValueError(f"nível {level} não permitido para a função {name}")
+
+        request_text = str(args.get("request_text") or "").strip()
+        if not request_text:
+            request_text = "Confirme que o arquivo ZIP de teste foi processado com sucesso."
+        request_text = request_text[:8000]
+
         return FunctionRequest(
             name=name,
-            sender=str(sender or "").strip().lower(),
+            sender=sender_key,
             reasoning_level=level,
             reasoning_effort=REASONING_LEVELS[level],
-            request_text=self._request_text(text),
+            request_text=request_text,
+            arguments=args,
         )
-
-    def is_command_but_unauthorized(self, sender: str, subject: str, body: str) -> str | None:
-        name = self.detect_name(subject, body)
-        if not name:
-            return None
-        if name in self.sender_functions(sender):
-            return None
-        return name

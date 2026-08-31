@@ -215,89 +215,144 @@ def test_api_runner_extracts_container_zip_citation():
     }]
 
 
-def test_function_map_authorizes_sender_and_maps_reasoning_level():
+def _write_function_config(path: Path):
     import json
+    path.write_text(json.dumps({
+        "version": 1,
+        "senders": {
+            "danielmaiax@gmail.com": {
+                "enabled": True,
+                "functions": ["api_zip_test"],
+            }
+        },
+        "functions": {
+            "api_zip_test": {
+                "enabled": True,
+                "description": "Executa semanticamente o teste ZIP da API.",
+                "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "reasoning_level": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+                        "request_text": {"type": "string"},
+                    },
+                    "required": ["reasoning_level", "request_text"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+    }), encoding="utf-8")
+
+
+def test_function_map_exposes_only_sender_authorized_tools():
     from function_map import FunctionMap
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "functions.json"
-        path.write_text(json.dumps({
-            "version": 1,
-            "senders": {
-                "danielmaiax@gmail.com": {
-                    "enabled": True,
-                    "functions": ["api_zip_test"],
-                }
-            },
-            "functions": {
-                "api_zip_test": {
-                    "enabled": True,
-                    "aliases": ["mande o arquivo teste"],
-                    "default_reasoning_level": 2,
-                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
-                }
-            },
-        }), encoding="utf-8")
+        _write_function_config(path)
         mapping = FunctionMap(path)
-        request = mapping.resolve(
-            "DanielMaiaX@gmail.com",
-            "Teste API",
-            "Mande o arquivo teste usando o nível 1 e peça como retorno qual é a capital da África do Sul",
+        tools = mapping.openai_tools_for_sender("DanielMaiaX@gmail.com")
+        assert len(tools) == 1
+        assert tools[0]["name"] == "api_zip_test"
+        assert tools[0]["strict"] is True
+        assert tools[0]["parameters"]["additionalProperties"] is False
+        assert mapping.openai_tools_for_sender("outra-pessoa@example.com") == []
+
+
+def test_function_router_uses_gpt_tool_call_not_phrase_matching():
+    from types import SimpleNamespace
+    from function_map import FunctionMap
+    from function_router import FunctionRouter
+
+    class FakeResponses:
+        def __init__(self):
+            self.kwargs = None
+
+        def create(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                id="resp_router_1",
+                output=[SimpleNamespace(
+                    type="function_call",
+                    name="api_zip_test",
+                    arguments='{"reasoning_level":1,"request_text":"qual é a capital da África do Sul"}',
+                )],
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.responses = FakeResponses()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        _write_function_config(path)
+        mapping = FunctionMap(path)
+        client = FakeClient()
+        router = FunctionRouter("", "gpt-5.6", "https://api.openai.com/v1", 30, mapping, client=client)
+        result = router.route(
+            "danielmaiax@gmail.com",
+            "Uma solicitação qualquer",
+            "Faça aquele processamento do arquivo de teste no primeiro nível e descubra a capital da África do Sul.",
         )
-        assert request is not None
-        assert request.name == "api_zip_test"
-        assert request.reasoning_level == 1
-        assert request.reasoning_effort == "low"
-        assert request.request_text == "qual é a capital da África do Sul"
+        assert result.request is not None
+        assert result.request.name == "api_zip_test"
+        assert result.request.reasoning_level == 1
+        assert result.request.reasoning_effort == "low"
+        assert result.request.request_text == "qual é a capital da África do Sul"
+        assert result.response_id == "resp_router_1"
+        assert client.responses.kwargs["tool_choice"] == "auto"
+        assert client.responses.kwargs["parallel_tool_calls"] is False
+        assert client.responses.kwargs["tools"][0]["name"] == "api_zip_test"
 
 
-def test_function_map_rejects_unauthorized_sender():
-    import json
+def test_function_router_does_not_call_api_when_sender_has_no_functions():
     from function_map import FunctionMap
+    from function_router import FunctionRouter
+
+    class NeverResponses:
+        def create(self, **kwargs):
+            raise AssertionError("API não deveria ser chamada para remetente sem funções")
+
+    class FakeClient:
+        responses = NeverResponses()
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "functions.json"
-        path.write_text(json.dumps({
-            "senders": {"danielmaiax@gmail.com": {"functions": ["api_zip_test"]}},
-            "functions": {
-                "api_zip_test": {
-                    "aliases": ["mande o arquivo teste"],
-                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
-                }
-            },
-        }), encoding="utf-8")
+        _write_function_config(path)
         mapping = FunctionMap(path)
-        assert mapping.resolve(
-            "outra-pessoa@example.com", "", "mande o arquivo teste usando nível 1"
-        ) is None
-        assert mapping.is_command_but_unauthorized(
-            "outra-pessoa@example.com", "", "mande o arquivo teste usando nível 1"
-        ) == "api_zip_test"
+        router = FunctionRouter("", "gpt-5.6", "https://api.openai.com/v1", 30, mapping, client=FakeClient())
+        result = router.route("outra-pessoa@example.com", "teste", "faça o ZIP")
+        assert result.request is None
+        assert result.response_id == ""
 
 
-def test_function_map_all_reasoning_levels_and_invalid_level():
-    import json
+def test_function_map_validates_all_reasoning_levels_and_rejects_invalid():
     import pytest
     from function_map import FunctionMap, REASONING_LEVELS
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "functions.json"
-        path.write_text(json.dumps({
-            "senders": {"a@example.com": {"functions": ["api_zip_test"]}},
-            "functions": {
-                "api_zip_test": {
-                    "aliases": ["mande o arquivo teste"],
-                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
-                }
-            },
-        }), encoding="utf-8")
+        _write_function_config(path)
         mapping = FunctionMap(path)
         for level, effort in REASONING_LEVELS.items():
-            request = mapping.resolve("a@example.com", "", f"mande o arquivo teste nível {level}")
-            assert request is not None
+            request = mapping.request_from_tool_call(
+                "danielmaiax@gmail.com",
+                "api_zip_test",
+                {"reasoning_level": level, "request_text": "teste"},
+            )
             assert request.reasoning_effort == effort
         with pytest.raises(ValueError, match="entre 0 e 5"):
-            mapping.resolve("a@example.com", "", "mande o arquivo teste nível 9")
+            mapping.request_from_tool_call(
+                "danielmaiax@gmail.com",
+                "api_zip_test",
+                {"reasoning_level": 9, "request_text": "teste"},
+            )
+        with pytest.raises(PermissionError):
+            mapping.request_from_tool_call(
+                "outra-pessoa@example.com",
+                "api_zip_test",
+                {"reasoning_level": 1, "request_text": "teste"},
+            )
 
 
 def test_api_runner_validates_reasoning_effort():

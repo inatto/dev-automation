@@ -554,8 +554,9 @@ def run(settings: Settings) -> int:
                     status = row.get("status") or "-"
                     elapsed = row.get("elapsed_ms")
                     elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
-                    result = row.get("output_path") or row.get("input_path") or "-"
-                    kind = "ZIP" if row.get("kind") == "zip-test" else "EMAIL"
+                    result = row.get("output_path") or row.get("response_summary") or row.get("input_path") or "-"
+                    kind_map = {"zip-test": "ZIP", "function-router": "ROUTER", "email-reply": "EMAIL"}
+                    kind = kind_map.get(str(row.get("kind") or ""), str(row.get("kind") or "API").upper()[:7])
                     line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
                     if absolute != sel:
                         attr = _status_attr("error" if status == "erro" else ("completed" if status == "concluido" else "analyzing"), p)
