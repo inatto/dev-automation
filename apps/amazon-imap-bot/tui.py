@@ -49,6 +49,7 @@ def _status_label(status: str) -> str:
 class Palette:
     NORMAL = 0
     HEADER = 0
+    TOP_BAR = 0
     BORDER = 0
     SELECTED = 0
     OK = 0
@@ -79,7 +80,9 @@ def _init_colors() -> Palette:
     curses.init_pair(7, curses.COLOR_BLUE, background)
     curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_BLUE)
+    curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
     p.HEADER = curses.color_pair(1) | curses.A_BOLD
+    p.TOP_BAR = curses.color_pair(10) | curses.A_BOLD
     p.BORDER = curses.color_pair(2)
     p.SELECTED = curses.color_pair(3) | curses.A_BOLD
     p.OK = curses.color_pair(4) | curses.A_BOLD
@@ -639,7 +642,7 @@ def run(settings: Settings) -> int:
             stdscr.erase()
             h, w = stdscr.getmaxyx()
             if h < 16 or w < 78:
-                _safe_add(stdscr, 0, 0, "Amazon IMAP Bot", w - 1, p.HEADER)
+                _safe_add(stdscr, 0, 0, "Amazon IMAP Bot", w - 1, p.TOP_BAR)
                 _safe_add(stdscr, 2, 0, "Terminal pequeno demais. Mínimo recomendado: 78x16.", w - 1, p.ERROR)
                 _safe_add(stdscr, h - 1, 0, "Q sair", w - 1, p.DIM)
                 stdscr.refresh()
@@ -656,10 +659,10 @@ def run(settings: Settings) -> int:
             replied = sum(state.replied for state in monitor.states.values())
 
             try:
-                stdscr.attron(p.HEADER)
+                stdscr.attron(p.TOP_BAR)
                 stdscr.addnstr(0, 0, " " * (w - 1), w - 1)
                 stdscr.addnstr(0, 1, "AMAZON IMAP BOT :: CENTRAL DE MONITORAMENTO", w - 3)
-                stdscr.attroff(p.HEADER)
+                stdscr.attroff(p.TOP_BAR)
             except curses.error:
                 pass
             _safe_add(
