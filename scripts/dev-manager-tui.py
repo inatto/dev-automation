@@ -851,6 +851,7 @@ class Dashboard:
         logwin = self.windows.get("log")
 
         if header:
+            self.version = read_build_version()
             self.prep_box(header, f"DEV AUTOMATION :: {self.version} :: CLIPPER / NCURSES")
             _, width = header.getmaxyx()
             inner = width - 4

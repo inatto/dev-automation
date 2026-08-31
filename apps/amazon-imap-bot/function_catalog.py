@@ -65,14 +65,21 @@ class OracleFunctionCatalog:
         return str(reader() if callable(reader) else value)
 
     @staticmethod
-    def _json(value, label: str, expected):
-        try:
-            payload = json.loads(OracleFunctionCatalog._text(value))
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"{label} contém JSON inválido no Oracle") from exc
-        if not isinstance(payload, expected):
-            raise RuntimeError(f"{label} possui estrutura inválida no Oracle")
-        return payload
+    def _cast_option_value(value, data_type: str):
+        raw = str(value if value is not None else "")
+        kind = str(data_type or "").strip().lower()
+        if kind == "integer":
+            return int(raw)
+        if kind == "number":
+            return float(raw)
+        if kind == "boolean":
+            normalized = raw.strip().lower()
+            if normalized in {"1", "true", "y", "yes"}:
+                return True
+            if normalized in {"0", "false", "n", "no"}:
+                return False
+            raise RuntimeError(f"opção booleana inválida no catálogo Oracle: {raw}")
+        return raw
 
     @staticmethod
     def _value(value) -> str:
@@ -227,21 +234,107 @@ class OracleFunctionCatalog:
 
             self.log("Oracle: lendo funções...")
             cursor.execute(
-                f"SELECT function_name, enabled, description, default_reasoning_level, "
-                f"allowed_reasoning_levels_json, parameters_json "
+                f"SELECT function_name, enabled, description, default_reasoning_level "
                 f"FROM {self.schema}.IMAP_BOT_FUNCTIONS ORDER BY function_name"
             )
             functions: dict[str, dict] = {}
-            for name, enabled, description, default_level, allowed_json, parameters_json in cursor.fetchall():
-                functions[str(name)] = {
+            for name, enabled, description, default_level in cursor.fetchall():
+                function_name = str(name)
+                functions[function_name] = {
                     "enabled": str(enabled).upper() == "Y",
                     "description": str(description or ""),
                     "default_reasoning_level": int(default_level),
-                    "allowed_reasoning_levels": self._json(
-                        allowed_json, f"allowed_reasoning_levels de {name}", list
-                    ),
-                    "parameters": self._json(parameters_json, f"parameters de {name}", dict),
+                    "allowed_reasoning_levels": [],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
                 }
+
+            self.log("Oracle: lendo níveis permitidos por função...")
+            cursor.execute(
+                f"SELECT function_name, level_id FROM {self.schema}.IMAP_BOT_FUNCTION_REASONING "
+                "WHERE enabled = 'Y' ORDER BY function_name, level_id"
+            )
+            for function_name, level_id in cursor.fetchall():
+                name = str(function_name)
+                if name not in functions:
+                    raise RuntimeError(f"nível configurado para função inexistente no Oracle: {name}")
+                functions[name]["allowed_reasoning_levels"].append(int(level_id))
+
+            parameter_meta: dict[tuple[str, str], tuple[dict, str, str]] = {}
+            self.log("Oracle: lendo parâmetros relacionais das funções...")
+            cursor.execute(
+                f"SELECT function_name, parameter_name, data_type, required, description, option_source "
+                f"FROM {self.schema}.IMAP_BOT_FUNCTION_PARAMETERS "
+                "WHERE enabled = 'Y' ORDER BY function_name, sort_order, parameter_name"
+            )
+            parameter_count = 0
+            for function_name, parameter_name, data_type, required, description, option_source in cursor.fetchall():
+                name = str(function_name)
+                param_name = str(parameter_name)
+                if name not in functions:
+                    raise RuntimeError(f"parâmetro configurado para função inexistente no Oracle: {name}.{param_name}")
+
+                kind = str(data_type or "").strip().lower()
+                source = str(option_source or "NONE").strip().upper()
+                prop = {"type": kind}
+                if description:
+                    prop["description"] = str(description)
+
+                if source == "FUNCTION_REASONING_LEVELS":
+                    prop["enum"] = list(functions[name]["allowed_reasoning_levels"])
+                elif source not in {"NONE", "STATIC"}:
+                    raise RuntimeError(
+                        f"option_source inválido para {name}.{param_name}: {source}"
+                    )
+
+                schema = functions[name]["parameters"]
+                schema["properties"][param_name] = prop
+                if str(required).upper() == "Y":
+                    schema["required"].append(param_name)
+                parameter_meta[(name, param_name)] = (prop, kind, source)
+                parameter_count += 1
+
+            self.log("Oracle: lendo opções relacionais dos parâmetros...")
+            cursor.execute(
+                f"SELECT function_name, parameter_name, option_value "
+                f"FROM {self.schema}.IMAP_BOT_FUNCTION_PARAM_OPTIONS "
+                "WHERE enabled = 'Y' ORDER BY function_name, parameter_name, sort_order, option_value"
+            )
+            option_count = 0
+            for function_name, parameter_name, option_value in cursor.fetchall():
+                key = (str(function_name), str(parameter_name))
+                meta = parameter_meta.get(key)
+                if meta is None:
+                    raise RuntimeError(
+                        f"opção configurada para parâmetro inexistente no Oracle: {key[0]}.{key[1]}"
+                    )
+                prop, kind, source = meta
+                if source != "STATIC":
+                    raise RuntimeError(
+                        f"opção estática configurada para parâmetro sem option_source=STATIC: {key[0]}.{key[1]}"
+                    )
+                prop.setdefault("enum", []).append(self._cast_option_value(option_value, kind))
+                option_count += 1
+
+            for name, entry in functions.items():
+                allowed = entry["allowed_reasoning_levels"]
+                default_level = entry["default_reasoning_level"]
+                if not allowed:
+                    raise RuntimeError(f"função {name} não possui níveis de raciocínio permitidos no Oracle")
+                if default_level not in allowed:
+                    raise RuntimeError(
+                        f"nível padrão {default_level} da função {name} não está entre os níveis permitidos"
+                    )
+                for param_name, prop in entry["parameters"]["properties"].items():
+                    meta = parameter_meta[(name, param_name)]
+                    if meta[2] == "STATIC" and not prop.get("enum"):
+                        raise RuntimeError(
+                            f"parâmetro {name}.{param_name} usa opções estáticas mas não possui opções ativas"
+                        )
 
             self.log("Oracle: lendo remetentes autorizados...")
             cursor.execute(
@@ -264,7 +357,8 @@ class OracleFunctionCatalog:
 
             self.log(
                 f"Oracle: catálogo carregado em {time.monotonic() - started:.2f}s "
-                f"(versão={version}, níveis={len(levels)}, funções={len(functions)}, remetentes={len(senders)})."
+                f"(versão={version}, níveis={len(levels)}, funções={len(functions)}, "
+                f"parâmetros={parameter_count}, opções={option_count}, remetentes={len(senders)})."
             )
             return {
                 "version": version,
@@ -278,3 +372,4 @@ class OracleFunctionCatalog:
                 cursor.close()
             finally:
                 connection.close()
+

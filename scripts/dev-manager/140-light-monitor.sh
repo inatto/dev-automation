@@ -102,13 +102,14 @@ build_light_watch_plan() {
 light_scan_states() {
   [ -n "$LIGHT_WATCH_PLAN" ] && [ -f "$LIGHT_WATCH_PLAN" ] || build_light_watch_plan
 
-  python3 - "$LIGHT_WATCH_PLAN" "$IGNORE_ZIP_FILE" <<'PY_LIGHT_SCAN'
+  python3 - "$LIGHT_WATCH_PLAN" "$IGNORE_ZIP_FILE" "$PROJECT_ROOT" <<'PY_LIGHT_SCAN'
 import fnmatch
 import hashlib
 import os
 import sys
 
-plan_file, ignore_file = sys.argv[1:3]
+plan_file, ignore_file, project_root = sys.argv[1:4]
+version_file = os.path.abspath(os.path.join(project_root, 'VERSION'))
 projects = []
 excluded = {}
 
@@ -207,6 +208,8 @@ for project, root in projects:
         for name in files:
             full = os.path.join(current, name)
             rel = os.path.relpath(full, root).replace(os.sep, '/')
+            if os.path.abspath(full) == version_file:
+                continue
             if ignored_by_rules(rel, name, file_rules):
                 continue
             try:

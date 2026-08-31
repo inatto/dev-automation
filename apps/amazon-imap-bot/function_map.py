@@ -170,6 +170,10 @@ class FunctionMap:
             entry = self.function_entry(name)
             parameters = entry.get("parameters")
             if not isinstance(parameters, dict):
+                with self._lock:
+                    source = str(self.payload.get("source") or "").strip().lower()
+                if source == "oracle":
+                    raise RuntimeError(f"função {name} não possui parâmetros relacionais válidos no Oracle")
                 parameters = self._default_parameters(name)
             tools.append({
                 "type": "function",

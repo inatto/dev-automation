@@ -105,6 +105,13 @@ backup_dirty_targets() {
 
   for project in "${dirty_projects[@]}"; do
     wait_if_paused
+    if [ "$(project_path "$project")" = "$PROJECT_ROOT" ]; then
+      if ! bump_dev_automation_build_version; then
+        LOG_CONTEXT=error log "ERRO: não foi possível atualizar a versão do Dev Automation; backup cancelado."
+        failed=1
+        break
+      fi
+    fi
     if ! backup_project "$project"; then
       failed=1
     fi

@@ -116,10 +116,15 @@ O catálogo é composto pelas tabelas:
 - `IMAP_BOT_FUNCTION_CATALOG`
 - `IMAP_BOT_REASONING_LEVELS`
 - `IMAP_BOT_FUNCTIONS`
+- `IMAP_BOT_FUNCTION_REASONING`
+- `IMAP_BOT_FUNCTION_PARAMETERS`
+- `IMAP_BOT_FUNCTION_PARAM_OPTIONS`
 - `IMAP_BOT_FUNCTION_SENDERS`
 - `IMAP_BOT_SENDER_FUNCTIONS`
 
-Os patches SQL idempotentes migram as funções atuais `api_zip_test` e `project_zip_edit`, suas estruturas de parâmetros, níveis e a autorização de `danielmaiax@gmail.com`. Também registram `function_catalog_admin`.
+O banco não armazena schema, parâmetros nem níveis permitidos em JSON. Cada dado fica em coluna própria e, quando há múltiplos valores, em tabela filha relacional. O schema exigido pela API da OpenAI é montado somente em memória a partir dessas linhas; ele não é persistido no Oracle.
+
+Os patches SQL idempotentes registram as funções atuais `api_zip_test`, `project_zip_edit` e `function_catalog_admin`, seus parâmetros, opções, níveis e autorizações.
 
 Fluxo:
 
@@ -128,9 +133,9 @@ Fluxo:
 3. `GET /api/v1/functions` recarrega e retorna o catálogo do Oracle.
 4. O GPT recebe somente as funções autorizadas para o endereço `From`.
 5. O Python revalida remetente, função, nível e parâmetros antes de executar.
-6. Não existe fallback automático para JSON em runtime.
+6. O Oracle é a fonte autoritativa do catálogo em runtime; parâmetros ausentes ou inconsistentes no banco geram erro explícito.
 
-A classe ainda aceita uma fonte JSON somente quando ela é fornecida explicitamente por código, para rollback/importação controlada; esse modo legado não é usado pela inicialização normal do bot.
+A classe ainda aceita uma fonte JSON somente quando ela é fornecida explicitamente por código, para rollback/importação controlada; esse modo legado não é usado pela inicialização normal do bot e não grava JSON no Oracle.
 
 ### Função `function_catalog_admin`
 

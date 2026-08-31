@@ -1,53 +1,7 @@
--- Amazon IMAP Bot - catálogo relacional de funções no Oracle
--- Execução MANUAL. O aplicativo não executa DDL/DML automaticamente.
--- Estrutura para instalação nova. Nenhuma definição é persistida como JSON.
-
-BEGIN
-  EXECUTE IMMEDIATE q'[
-    CREATE TABLE WKSP_SINDICATTO.IMAP_BOT_FUNCTION_CATALOG (
-      catalog_key       VARCHAR2(30) PRIMARY KEY,
-      catalog_version   NUMBER(10) NOT NULL,
-      updated_at        TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL
-    )
-  ]';
-EXCEPTION
-  WHEN OTHERS THEN
-    IF SQLCODE != -955 THEN RAISE; END IF;
-END;
-/
-
-BEGIN
-  EXECUTE IMMEDIATE q'[
-    CREATE TABLE WKSP_SINDICATTO.IMAP_BOT_REASONING_LEVELS (
-      level_id      NUMBER(1) PRIMARY KEY,
-      effort_name   VARCHAR2(20) NOT NULL UNIQUE,
-      enabled       CHAR(1) DEFAULT 'Y' NOT NULL,
-      CONSTRAINT CK_IMAP_BOT_REASON_ENABLED CHECK (enabled IN ('Y','N'))
-    )
-  ]';
-EXCEPTION
-  WHEN OTHERS THEN
-    IF SQLCODE != -955 THEN RAISE; END IF;
-END;
-/
-
-BEGIN
-  EXECUTE IMMEDIATE q'[
-    CREATE TABLE WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS (
-      function_name             VARCHAR2(100) PRIMARY KEY,
-      enabled                   CHAR(1) DEFAULT 'Y' NOT NULL,
-      description               VARCHAR2(2000) NOT NULL,
-      default_reasoning_level   NUMBER(1) NOT NULL,
-      updated_at                TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT CK_IMAP_BOT_FUNC_ENABLED CHECK (enabled IN ('Y','N')),
-      CONSTRAINT CK_IMAP_BOT_FUNC_LEVEL CHECK (default_reasoning_level BETWEEN 0 AND 5)
-    )
-  ]';
-EXCEPTION
-  WHEN OTHERS THEN
-    IF SQLCODE != -955 THEN RAISE; END IF;
-END;
-/
+-- Amazon IMAP Bot - migração do catálogo antigo para estrutura relacional
+-- Execução MANUAL. Idempotente. Oracle.
+-- Execute este patch antes de 005_seed_function_catalog_relational.sql.
+-- O patch remove as duas colunas JSON legadas de IMAP_BOT_FUNCTIONS.
 
 BEGIN
   EXECUTE IMMEDIATE q'[
@@ -118,38 +72,34 @@ EXCEPTION
 END;
 /
 
+DECLARE
+  v_count NUMBER;
 BEGIN
-  EXECUTE IMMEDIATE q'[
-    CREATE TABLE WKSP_SINDICATTO.IMAP_BOT_FUNCTION_SENDERS (
-      sender_email    VARCHAR2(320) PRIMARY KEY,
-      enabled         CHAR(1) DEFAULT 'Y' NOT NULL,
-      updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT CK_IMAP_BOT_SENDER_ENABLED CHECK (enabled IN ('Y','N'))
-    )
-  ]';
-EXCEPTION
-  WHEN OTHERS THEN
-    IF SQLCODE != -955 THEN RAISE; END IF;
+  SELECT COUNT(*)
+    INTO v_count
+    FROM ALL_TAB_COLUMNS
+   WHERE OWNER = 'WKSP_SINDICATTO'
+     AND TABLE_NAME = 'IMAP_BOT_FUNCTIONS'
+     AND COLUMN_NAME = 'ALLOWED_REASONING_LEVELS_JSON';
+
+  IF v_count > 0 THEN
+    EXECUTE IMMEDIATE 'ALTER TABLE WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS DROP COLUMN ALLOWED_REASONING_LEVELS_JSON CASCADE CONSTRAINTS';
+  END IF;
 END;
 /
 
+DECLARE
+  v_count NUMBER;
 BEGIN
-  EXECUTE IMMEDIATE q'[
-    CREATE TABLE WKSP_SINDICATTO.IMAP_BOT_SENDER_FUNCTIONS (
-      sender_email    VARCHAR2(320) NOT NULL,
-      function_name   VARCHAR2(100) NOT NULL,
-      enabled         CHAR(1) DEFAULT 'Y' NOT NULL,
-      updated_at      TIMESTAMP DEFAULT SYSTIMESTAMP NOT NULL,
-      CONSTRAINT PK_IMAP_BOT_SENDER_FUNCTION PRIMARY KEY (sender_email, function_name),
-      CONSTRAINT FK_IMAP_BOT_SF_SENDER FOREIGN KEY (sender_email)
-        REFERENCES WKSP_SINDICATTO.IMAP_BOT_FUNCTION_SENDERS(sender_email),
-      CONSTRAINT FK_IMAP_BOT_SF_FUNCTION FOREIGN KEY (function_name)
-        REFERENCES WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS(function_name),
-      CONSTRAINT CK_IMAP_BOT_SF_ENABLED CHECK (enabled IN ('Y','N'))
-    )
-  ]';
-EXCEPTION
-  WHEN OTHERS THEN
-    IF SQLCODE != -955 THEN RAISE; END IF;
+  SELECT COUNT(*)
+    INTO v_count
+    FROM ALL_TAB_COLUMNS
+   WHERE OWNER = 'WKSP_SINDICATTO'
+     AND TABLE_NAME = 'IMAP_BOT_FUNCTIONS'
+     AND COLUMN_NAME = 'PARAMETERS_JSON';
+
+  IF v_count > 0 THEN
+    EXECUTE IMMEDIATE 'ALTER TABLE WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS DROP COLUMN PARAMETERS_JSON CASCADE CONSTRAINTS';
+  END IF;
 END;
 /

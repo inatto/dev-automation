@@ -419,13 +419,106 @@ def test_functions_view_reads_real_json_as_human_interface():
         assert '"functions"' not in text
 
 
-def test_oracle_seed_registers_project_and_catalog_admin_for_daniel():
-    patch = Path(__file__).resolve().parents[1] / "sql" / "oracle" / "002_seed_function_catalog.sql"
-    sql = patch.read_text(encoding="utf-8")
-    assert "project_zip_edit" in sql
-    assert "function_catalog_admin" in sql
-    assert "danielmaiax@gmail.com" in sql
-    assert "MERGE INTO WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS" in sql
+def test_oracle_seed_registers_relational_catalog_without_json_columns():
+    root = Path(__file__).resolve().parents[1] / "sql" / "oracle"
+    seed = (root / "002_seed_function_catalog.sql").read_text(encoding="utf-8")
+    create = (root / "001_create_function_catalog.sql").read_text(encoding="utf-8")
+    migration = (root / "004_normalize_function_catalog.sql").read_text(encoding="utf-8")
+
+    assert "project_zip_edit" in seed
+    assert "function_catalog_admin" in seed
+    assert "danielmaiax@gmail.com" in seed
+    assert "IMAP_BOT_FUNCTION_PARAMETERS" in seed
+    assert "IMAP_BOT_FUNCTION_PARAM_OPTIONS" in seed
+    assert "IMAP_BOT_FUNCTION_REASONING" in seed
+    assert "parameters_json" not in seed.lower()
+    assert "allowed_reasoning_levels_json" not in seed.lower()
+    assert "parameters_json" not in create.lower()
+    assert "allowed_reasoning_levels_json" not in create.lower()
+    assert "DROP COLUMN PARAMETERS_JSON" in migration
+    assert "DROP COLUMN ALLOWED_REASONING_LEVELS_JSON" in migration
+
+
+def test_oracle_catalog_builds_function_schema_from_relational_rows():
+    from types import SimpleNamespace
+    from function_catalog import OracleFunctionCatalog
+
+    class FakeCursor:
+        def __init__(self):
+            self.sql = ""
+
+        def execute(self, sql):
+            self.sql = sql
+
+        def fetchone(self):
+            assert "IMAP_BOT_FUNCTION_CATALOG" in self.sql
+            return (3,)
+
+        def fetchall(self):
+            sql = self.sql
+            if "IMAP_BOT_REASONING_LEVELS" in sql:
+                return [(0, "none"), (1, "low"), (2, "medium"), (3, "high"), (4, "xhigh"), (5, "max")]
+            if "FROM WKSP_SINDICATTO.IMAP_BOT_FUNCTIONS" in sql:
+                return [
+                    ("project_zip_edit", "Y", "Edita projeto.", 2),
+                    ("function_catalog_admin", "Y", "Administra catálogo.", 1),
+                ]
+            if "IMAP_BOT_FUNCTION_REASONING" in sql:
+                return [
+                    ("function_catalog_admin", 0), ("function_catalog_admin", 1),
+                    ("project_zip_edit", 0), ("project_zip_edit", 1), ("project_zip_edit", 2),
+                ]
+            if "IMAP_BOT_FUNCTION_PARAMETERS" in sql:
+                return [
+                    ("function_catalog_admin", "operation", "string", "Y", "Operação.", "STATIC"),
+                    ("function_catalog_admin", "reasoning_level", "integer", "N", "Nível.", "FUNCTION_REASONING_LEVELS"),
+                    ("project_zip_edit", "reasoning_level", "integer", "Y", "Nível.", "FUNCTION_REASONING_LEVELS"),
+                    ("project_zip_edit", "request_text", "string", "Y", "Pedido.", "NONE"),
+                    ("project_zip_edit", "operation", "string", "Y", "Operação.", "STATIC"),
+                ]
+            if "IMAP_BOT_FUNCTION_PARAM_OPTIONS" in sql:
+                return [
+                    ("function_catalog_admin", "operation", "list"),
+                    ("function_catalog_admin", "operation", "sync"),
+                    ("project_zip_edit", "operation", "modify"),
+                    ("project_zip_edit", "operation", "query"),
+                ]
+            if "IMAP_BOT_FUNCTION_SENDERS" in sql:
+                return [("danielmaiax@gmail.com", "Y")]
+            if "IMAP_BOT_SENDER_FUNCTIONS" in sql:
+                return [
+                    ("danielmaiax@gmail.com", "function_catalog_admin"),
+                    ("danielmaiax@gmail.com", "project_zip_edit"),
+                ]
+            raise AssertionError(sql)
+
+        def close(self):
+            pass
+
+    class FakeConnection:
+        def __init__(self):
+            self._cursor = FakeCursor()
+
+        def cursor(self):
+            return self._cursor
+
+        def close(self):
+            pass
+
+    class TestCatalog(OracleFunctionCatalog):
+        def _connect(self):
+            return FakeConnection()
+
+    catalog = TestCatalog(SimpleNamespace(schema="WKSP_SINDICATTO"))
+    payload = catalog.load()
+    project = payload["functions"]["project_zip_edit"]
+    params = project["parameters"]
+
+    assert project["allowed_reasoning_levels"] == [0, 1, 2]
+    assert params["properties"]["reasoning_level"]["enum"] == [0, 1, 2]
+    assert params["properties"]["operation"]["enum"] == ["modify", "query"]
+    assert params["required"] == ["reasoning_level", "request_text", "operation"]
+    assert params["additionalProperties"] is False
 
 
 def test_function_map_accepts_project_zip_edit_and_level():

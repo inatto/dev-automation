@@ -1,6 +1,32 @@
 #!/usr/bin/env bash
 # Contexto: backup de projeto, limpeza e backup completo
 
+
+# Atualiza a versão do próprio Dev Automation somente quando ele entra em uma
+# rodada de backup por alteração real. VERSION é arquivo gerado: os monitores
+# ignoram a gravação feita aqui para não criar um ciclo infinito de backups.
+bump_dev_automation_build_version() {
+  local version_file="$PROJECT_ROOT/VERSION"
+  local current="" revision=0 next_revision new_version temp_file
+
+  current="$(cat "$version_file" 2>/dev/null || true)"
+  if [[ "$current" =~ -v([0-9]+)$ ]]; then
+    revision="${BASH_REMATCH[1]}"
+  fi
+  next_revision=$((10#$revision + 1))
+  new_version="$(date '+%Y.%m.%d-%H.%M')-v${next_revision}"
+
+  temp_file="$(mktemp "$PROJECT_ROOT/.VERSION-XXXXXX")" || return 1
+  printf '%s\n' "$new_version" > "$temp_file" || { rm -f -- "$temp_file"; return 1; }
+  if [ -e "$version_file" ]; then
+    chmod --reference="$version_file" "$temp_file" 2>/dev/null || true
+    chown --reference="$version_file" "$temp_file" 2>/dev/null || true
+  fi
+  mv -f -- "$temp_file" "$version_file" || return 1
+  SCRIPT_VERSION="$new_version"
+  log "Versão do Dev Automation atualizada: $new_version"
+}
+
 backup_project() {
   local project="$1"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
