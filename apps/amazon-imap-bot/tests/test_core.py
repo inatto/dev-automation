@@ -159,6 +159,77 @@ def test_soft_delete_hides_message_but_preserves_dedup():
         assert full["delete_mode"] == "move:Deleted Items"
 
 
+def test_store_tracks_pending_delete_statuses():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "db.sqlite3")
+        store.add_inbound(
+            account="suporte@example.com", message_id="<queued-delete>", thread_key="<queued-delete>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Remover", body="Oi",
+            status="replied", imap_uid="88", imap_folder="INBOX",
+        )
+        row = store.list_messages("in")[0]
+        store.set_message_status(row["id"], "delete-queued")
+        assert store.count_pending_deletes() == 1
+        assert store.list_pending_deletes()[0]["status"] == "delete-queued"
+        store.set_message_status(row["id"], "deleting")
+        assert store.count_pending_deletes() == 1
+        store.mark_deleted(row["id"], "move:Deleted Items")
+        assert store.count_pending_deletes() == 0
+
+
+def test_monitor_delete_queue_runs_in_background_fifo():
+    import queue as queue_module
+    import threading
+    import time
+    from types import SimpleNamespace
+    from monitor import Monitor
+
+    class FakeMailbox:
+        def __init__(self):
+            self.calls = []
+
+        def move_to_trash(self, account, uid, folder):
+            self.calls.append(uid)
+            time.sleep(0.05)
+            return "move:Deleted Items"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "db.sqlite3")
+        for uid in ("91", "92"):
+            store.add_inbound(
+                account="suporte@example.com", message_id=f"<delete-{uid}>", thread_key=f"<delete-{uid}>",
+                sender="cliente@example.com", recipient="suporte@example.com", subject=f"Remover {uid}", body="Oi",
+                status="replied", imap_uid=uid, imap_folder="INBOX",
+            )
+
+        monitor = Monitor.__new__(Monitor)
+        monitor.store = store
+        monitor.settings = SimpleNamespace(imap_folder="INBOX")
+        account = SimpleNamespace(email="suporte@example.com", enabled=True)
+        monitor.accounts_by_email = {account.email: account}
+        monitor.stop_event = threading.Event()
+        monitor.run_lock = threading.Lock()
+        monitor.mailbox = FakeMailbox()
+        monitor.on_event = lambda _text: None
+        monitor.delete_queue = queue_module.Queue()
+        monitor.delete_thread = threading.Thread(target=monitor._delete_worker_loop, daemon=True)
+        monitor.delete_thread.start()
+
+        rows = list(reversed(store.list_messages("in")))
+        monitor.queue_delete_inbound(rows[0])
+        monitor.queue_delete_inbound(rows[1])
+        assert store.count_pending_deletes() >= 1
+
+        deadline = time.time() + 2
+        while store.list_messages("in") and time.time() < deadline:
+            time.sleep(0.02)
+
+        monitor.stop_event.set()
+        monitor.delete_thread.join(timeout=1)
+        assert store.list_messages("in") == []
+        assert monitor.mailbox.calls == ["91", "92"]
+
+
 def test_mailbox_detects_special_use_trash_folder():
     from types import SimpleNamespace
     from mailbox import MailboxClient

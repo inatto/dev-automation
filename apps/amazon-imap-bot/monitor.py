@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import imaplib
 import json
+import queue
 import socket
 import ssl
 import threading
@@ -90,6 +91,21 @@ class Monitor:
         self.on_startup("Monitor: executores de API/ZIP OK.")
         self.accounts_by_email = {a.email.lower(): a for a in settings.accounts}
         self.own = set(self.accounts_by_email)
+        self.delete_queue: queue.Queue[int] = queue.Queue()
+        pending_deletes = self.store.list_pending_deletes()
+        for pending in pending_deletes:
+            self.store.set_message_status(int(pending["id"]), "delete-queued")
+            self.delete_queue.put(int(pending["id"]))
+        self.delete_thread = threading.Thread(
+            target=self._delete_worker_loop,
+            name="amazon-imap-delete-worker",
+            daemon=True,
+        )
+        self.delete_thread.start()
+        if pending_deletes:
+            self.on_startup(
+                f"Monitor: retomando {len(pending_deletes)} remoção(ões) pendente(s) na fila assíncrona."
+            )
         self.on_startup(f"Monitor: pronto; {len(self.states)} conta(s) ativa(s).")
 
     def stop(self) -> None:
@@ -461,11 +477,18 @@ class Monitor:
                     pass
 
 
-    def delete_inbound(self, row: dict) -> str:
+    @staticmethod
+    def _delete_status(row: dict) -> str:
+        return str(row.get("status") or "").strip().lower()
+
+    def _validate_delete_row(self, row: dict, *, allow_queued: bool = False):
         if row.get("direction") != "in":
             raise RuntimeError("somente mensagens de entrada podem ser removidas")
-        if (row.get("status") or "").lower() in {"analyzing", "understood", "sending", "executing"}:
+        status = self._delete_status(row)
+        if status in {"analyzing", "understood", "sending", "executing"}:
             raise RuntimeError("a mensagem está em processamento; aguarde terminar antes de remover")
+        if not allow_queued and status in {"delete-queued", "deleting"}:
+            raise RuntimeError("a mensagem já está na fila de remoção")
         uid = str(row.get("imap_uid") or "").strip()
         folder = str(row.get("imap_folder") or self.settings.imap_folder).strip()
         if not uid.isdigit():
@@ -474,7 +497,36 @@ class Monitor:
         account = self.accounts_by_email.get(account_email)
         if account is None or not account.enabled:
             raise RuntimeError(f"conta IMAP não disponível para remoção: {account_email}")
-        if not self.run_lock.acquire(timeout=15):
+        return account, uid, folder
+
+    def queue_delete_inbound(self, row: dict) -> int:
+        fresh = self.store.get_message(int(row.get("id") or 0))
+        if fresh is None or fresh.get("deleted_at"):
+            raise RuntimeError("mensagem não encontrada ou já removida")
+        account, uid, _folder = self._validate_delete_row(fresh)
+        self.store.set_message_status(int(fresh["id"]), "delete-queued")
+        self.delete_queue.put(int(fresh["id"]))
+        pending = self.store.count_pending_deletes()
+        self._event(
+            f"REMOÇÃO ENFILEIRADA {account.email} UID={uid} pendentes={pending}",
+            "EMAIL",
+            "WARN",
+        )
+        return pending
+
+    def _acquire_run_lock_for_delete(self, *, wait: bool) -> bool:
+        if not wait:
+            return self.run_lock.acquire(timeout=15)
+        while not self.stop_event.is_set():
+            if self.run_lock.acquire(timeout=0.5):
+                return True
+        return False
+
+    def _delete_inbound_now(self, row: dict, *, wait_for_monitor: bool = False, allow_queued: bool = False) -> str:
+        account, uid, folder = self._validate_delete_row(row, allow_queued=allow_queued)
+        if not self._acquire_run_lock_for_delete(wait=wait_for_monitor):
+            if self.stop_event.is_set():
+                raise RuntimeError("remoção interrompida durante o encerramento")
             raise RuntimeError("há uma verificação em andamento; tente remover novamente em alguns segundos")
         try:
             mode = self.mailbox.move_to_trash(account, uid, folder)
@@ -488,6 +540,40 @@ class Monitor:
             return mode
         finally:
             self.run_lock.release()
+
+    def _delete_worker_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                message_row_id = self.delete_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                row = self.store.get_message(int(message_row_id))
+                if row is None or row.get("deleted_at"):
+                    continue
+                self.store.set_message_status(int(message_row_id), "deleting")
+                row = self.store.get_message(int(message_row_id)) or row
+                self._event(
+                    f"REMOVENDO {row.get('account_email') or '-'} UID={row.get('imap_uid') or '-'} "
+                    f"fila_restante={self.delete_queue.qsize()}",
+                    "EMAIL",
+                    "WARN",
+                )
+                self._delete_inbound_now(row, wait_for_monitor=True, allow_queued=True)
+            except Exception as exc:
+                try:
+                    current = self.store.get_message(int(message_row_id))
+                    if current is not None and not current.get("deleted_at"):
+                        self.store.set_message_status(int(message_row_id), "delete-error", str(exc))
+                except Exception:
+                    pass
+                self._event(f"ERRO AO REMOVER message_row_id={message_row_id}: {exc}", "EMAIL", "ERROR")
+            finally:
+                self.delete_queue.task_done()
+
+    def delete_inbound(self, row: dict) -> str:
+        # Mantido síncrono para chamadas legadas/API. A TUI usa queue_delete_inbound().
+        return self._delete_inbound_now(row)
 
     def run_once(self) -> None:
         if not self.run_lock.acquire(blocking=False):

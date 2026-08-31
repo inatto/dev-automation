@@ -133,10 +133,40 @@ class Store:
             )
             self._db.commit()
 
+    def set_message_status(self, message_row_id: int, status: str, error: str = "") -> None:
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE messages SET status=?, error=? WHERE id=? AND direction='in' AND deleted_at IS NULL",
+                (status, error, message_row_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("mensagem não encontrada ou já removida")
+            self._db.commit()
+
+    def count_pending_deletes(self) -> int:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS total FROM messages "
+                "WHERE direction='in' AND deleted_at IS NULL AND status IN ('delete-queued','deleting')"
+            ).fetchone()
+        return int(row["total"] if row else 0)
+
+    def list_pending_deletes(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT id,direction,account_email,message_id,thread_key,sender,recipient,subject,body,
+                          reply_to_message_id,provider_message_id,status,error,created_at,mail_date,
+                          imap_uid,imap_folder,deleted_at,delete_mode
+                   FROM messages
+                   WHERE direction='in' AND deleted_at IS NULL AND status IN ('delete-queued','deleting')
+                   ORDER BY id ASC"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def mark_deleted(self, message_row_id: int, delete_mode: str) -> None:
         with self._lock:
             cur = self._db.execute(
-                "UPDATE messages SET deleted_at=?, delete_mode=? WHERE id=? AND direction='in' AND deleted_at IS NULL",
+                "UPDATE messages SET deleted_at=?, delete_mode=?, error='' WHERE id=? AND direction='in' AND deleted_at IS NULL",
                 (self._now(), delete_mode, message_row_id),
             )
             if cur.rowcount != 1:

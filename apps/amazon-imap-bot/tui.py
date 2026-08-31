@@ -33,10 +33,13 @@ STATUS_LABELS = {
     "replied": "RESPONDIDO",
     "reply-error": "ERRO RESPOSTA",
     "function-error": "ERRO FUNÇÃO",
+    "delete-queued": "REMOVENDO (FILA)",
+    "deleting": "REMOVENDO",
+    "delete-error": "ERRO REMOÇÃO",
     "sent": "ENVIADO",
     "error": "ERRO",
 }
-PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing"}
+PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing", "delete-queued", "deleting"}
 
 
 def _status_label(status: str) -> str:
@@ -682,6 +685,7 @@ def run(settings: Settings, startup_log=None) -> int:
             _safe_add(
                 stdscr, 2, 1,
                 f"Caixas online {online}/{len(monitor.states)}  Erros {errors}  Recebidos {received}  Respondidos {replied}  "
+                f"Remoções {store.count_pending_deletes()}  "
                 f"Auto-resposta {'ON' if settings.auto_reply_enabled else 'OFF'}  Poll {settings.poll_seconds}s",
                 w - 2,
                 p.OK if errors == 0 else p.WARN,
@@ -930,7 +934,20 @@ def run(settings: Settings, startup_log=None) -> int:
                     if full:
                         status = (full.get("status") or "").lower()
                         stdscr.nodelay(False)
-                        if status in PROCESSING_STATUSES:
+                        if status in {"delete-queued", "deleting"}:
+                            _popup_notice(
+                                stdscr,
+                                "REMOÇÃO JÁ AGENDADA",
+                                [
+                                    "ESTE E-MAIL JÁ ESTÁ NA FILA DE REMOÇÃO.",
+                                    f"Estado atual: {_status_label(status)}",
+                                    "A fila continua sendo processada em segundo plano.",
+                                ],
+                                p,
+                                p.WARN,
+                            )
+                            confirmed = False
+                        elif status in PROCESSING_STATUSES:
                             _popup_notice(
                                 stdscr,
                                 "REMOÇÃO BLOQUEADA",
@@ -948,15 +965,15 @@ def run(settings: Settings, startup_log=None) -> int:
                         stdscr.nodelay(True)
                         if confirmed:
                             try:
-                                _safe_add(stdscr, h - 1, 1, "Removendo do IMAP e registrando a remoção...", w - 2, p.WARN)
-                                stdscr.refresh()
-                                mode = monitor.delete_inbound(full)
-                                notice = f"E-mail removido com sucesso. IMAP: {mode}."
-                                notice_attr = p.OK
-                                notice_until = time.time() + 5
-                                selected[TAB_INBOX] = max(0, selected[TAB_INBOX] - 1)
+                                pending = monitor.queue_delete_inbound(full)
+                                notice = f"Remoção adicionada à fila. Pendentes: {pending}."
+                                notice_attr = p.WARN
+                                notice_until = time.time() + 4
+                                if len(rows) > 1:
+                                    current = selected[TAB_INBOX]
+                                    selected[TAB_INBOX] = current + 1 if current < len(rows) - 1 else max(0, current - 1)
                             except Exception as exc:
-                                notice = f"ERRO AO REMOVER: {exc}"
+                                notice = f"ERRO AO AGENDAR REMOÇÃO: {exc}"
                                 notice_attr = p.ERROR
                                 notice_until = time.time() + 8
             elif ch in (ord("t"), ord("T")) and active_tab == TAB_API:
