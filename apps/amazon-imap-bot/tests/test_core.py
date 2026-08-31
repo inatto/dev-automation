@@ -624,3 +624,75 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
         assert edit_row["output_file_count"] == 1
         assert edit_row["output_file_bytes"] == Path(edit_row["output_path"]).stat().st_size
         assert edit_row["request_bytes"] == len(edit_row["request_payload"].encode("utf-8"))
+
+
+def test_project_zip_function_accepts_query_operation():
+    import json
+    from function_map import FunctionMap
+
+    config_path = Path(__file__).resolve().parents[3] / ".config" / "amazon-imap-bot" / "functions.json"
+    mapping = FunctionMap(config_path)
+    request = mapping.request_from_tool_call(
+        "danielmaiax@gmail.com",
+        "project_zip_edit",
+        json.dumps({
+            "reasoning_level": 2,
+            "request_text": "Resuma as funções do módulo Orbital Legal.",
+            "operation": "query",
+        }),
+    )
+    assert request.name == "project_zip_edit"
+    assert request.arguments["operation"] == "query"
+    tool = next(t for t in mapping.openai_tools_for_sender("danielmaiax@gmail.com") if t["name"] == "project_zip_edit")
+    assert "explicar" in tool["description"].lower()
+    assert "operation" in tool["parameters"]["required"]
+
+
+def test_project_zip_query_completes_without_return_zip():
+    from types import SimpleNamespace
+    import zipfile
+    from project_zip_runner import ProjectZipRunner
+
+    class FakeFiles:
+        def create(self, **kwargs):
+            return SimpleNamespace(id="file_project_1")
+
+    class FakeResponses:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                id="resp_query_1",
+                output_text="O módulo possui telas de processos, partes e andamentos.",
+                output=[],
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.files = FakeFiles()
+            self.responses = FakeResponses()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        source = tmp_path / "orbital-legal.zip"
+        with zipfile.ZipFile(source, "w") as zf:
+            zf.writestr("README.md", "Módulo jurídico")
+        settings = SimpleNamespace(
+            project_zip_search_root=tmp_path,
+            openai_model="gpt-5.6",
+            openai_api_key="test",
+            openai_base_url="https://api.openai.com/v1",
+            openai_timeout_seconds=300,
+            openai_output_dir=tmp_path / "downloads",
+        )
+        store = Store(tmp_path / "db.sqlite3")
+        runner = ProjectZipRunner(settings, store, client=FakeClient())
+        run_id = runner.process_project_zip(
+            source,
+            "Resuma as funções do módulo.",
+            "medium",
+            "query",
+            "email:danielmaiax@gmail.com",
+        )
+        row = store.get_api_run(run_id)
+        assert row["status"] == "concluido"
+        assert row["output_path"] == ""
+        assert "processos" in row["response_summary"]

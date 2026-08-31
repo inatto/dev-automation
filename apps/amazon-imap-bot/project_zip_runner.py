@@ -15,7 +15,7 @@ from store import Store
 
 
 class ProjectZipRunner:
-    """Seleciona semanticamente um ZIP de ~/Code e executa uma alteração em uma segunda chamada independente."""
+    """Seleciona semanticamente um ZIP de ~/Code e executa uma demanda sobre o projeto em uma segunda chamada independente."""
 
     def __init__(self, settings: Settings, store: Store, on_event=lambda _: None, client=None):
         self.settings = settings
@@ -288,8 +288,12 @@ class ProjectZipRunner:
                     out.writestr(preserved, data)
         temp.replace(target)
 
-    def edit_project_zip(self, selected: Path, request_text: str, reasoning_effort: str, source: str) -> int:
+    def process_project_zip(self, selected: Path, request_text: str, reasoning_effort: str, operation: str, source: str) -> int:
         effort = self.normalize_reasoning_effort(reasoning_effort)
+        operation = str(operation or "modify").strip().lower()
+        if operation not in {"query", "modify"}:
+            raise ValueError(f"operação de projeto inválida: {operation}")
+        requires_zip_output = operation == "modify"
         selected = selected.expanduser().resolve()
         root = self.settings.project_zip_search_root.expanduser().resolve()
         try:
@@ -301,23 +305,33 @@ class ProjectZipRunner:
 
         input_zip_bytes = selected.stat().st_size
         input_zip_files = self._zip_file_count(selected)
+        task_rule = (
+            "A demanda é de MODIFICAÇÃO. Inspecione o projeto antes de alterar e implemente somente o pedido original, "
+            "sem melhorias paralelas nem mudanças não solicitadas. Ao final é OBRIGATÓRIO devolver um único ZIP completo alterado."
+            if requires_zip_output
+            else
+            "A demanda é de CONSULTA/ANÁLISE. Use o ZIP inteiro como contexto para responder com precisão. NÃO altere o projeto "
+            "e NÃO gere ZIP de retorno, a menos que o próprio pedido peça explicitamente a criação de um arquivo."
+        )
         prompt = (
             "Trabalhe exclusivamente no arquivo ZIP anexado usando Code Interpreter. "
             "Esta é uma chamada independente: todo o contexto necessário está nesta mensagem. "
-            "Inspecione o projeto antes de alterar e implemente somente o pedido original abaixo, sem melhorias paralelas, "
-            "sem mudanças cosméticas não solicitadas e sem alterar arquivos sem necessidade. Preserve a hierarquia do ZIP. "
+            f"{task_rule} "
+            "Preserve a hierarquia do ZIP quando houver modificação. "
             "\n\nREGRA DE EFICIÊNCIA OBRIGATÓRIA PARA O ZIP:\n"
             "- Há exatamente UM ZIP de entrada anexado.\n"
             "- NÃO extraia/descompacte o projeto inteiro para uma árvore de arquivos no container.\n"
             "- NÃO copie, clone ou duplique a árvore do projeto.\n"
             "- Use Python zipfile para listar TODAS as entradas do ZIP e ler diretamente do arquivo compactado apenas os conteúdos necessários.\n"
             "- Pesquise nomes/caminhos e, quando necessário, leia arquivos candidatos diretamente via zipfile sem extração global.\n"
-            "- Para produzir o resultado, crie diretamente UM NOVO ZIP: copie cada entrada do ZIP original para o ZIP de saída e substitua "
+            "- Se a demanda for de modificação, produza diretamente UM NOVO ZIP: copie cada entrada do ZIP original para o ZIP de saída e substitua "
             "somente as entradas realmente alteradas. Não crie uma segunda árvore completa em disco.\n"
-            "- O ZIP de saída deve conter o projeto COMPLETO, inclusive tudo que não foi alterado.\n"
+            "- Se a demanda for de consulta/análise, apenas leia o necessário diretamente do ZIP e responda em texto; não reconstrua o ZIP.\n"
+            "- Quando houver ZIP de saída, ele deve conter o projeto COMPLETO, inclusive tudo que não foi alterado.\n"
             "- Preserve nomes, hierarquia e metadados na medida do possível.\n"
-            "Ao terminar, valide o que for possível sem deploy. Na resposta final, explique brevemente o que mudou e cite/anexe "
-            "explicitamente o ÚNICO ZIP final para download.\n\n"
+            "Ao terminar, valide o que for possível sem deploy. Se for modificação, explique brevemente o que mudou e cite/anexe "
+            "explicitamente o ÚNICO ZIP final para download. Se for consulta, responda de forma objetiva e fundamentada no conteúdo do projeto.\n\n"
+            f"OPERAÇÃO: {operation.upper()}\n"
             f"ZIP SELECIONADO LOCALMENTE: {selected.name}\n"
             f"ZIP DE ENTRADA: {input_zip_bytes} bytes; {input_zip_files} arquivos internos (diretórios não contam).\n"
             "PEDIDO ORIGINAL DO E-MAIL:\n---\n"
@@ -326,7 +340,7 @@ class ProjectZipRunner:
         )
         prompt_bytes = len(prompt.encode("utf-8"))
         run_id = self.store.add_api_run(
-            kind="project-zip-edit",
+            kind="project-zip-query" if not requires_zip_output else "project-zip-edit",
             status="preparando",
             model=self.settings.openai_model,
             reasoning_effort=effort,
@@ -342,7 +356,7 @@ class ProjectZipRunner:
         started = time.monotonic()
         downloaded_temp: Path | None = None
         self._event(
-            f"PROJECT ZIP EDIT #{run_id}: preparando {selected.name} effort={effort} | "
+            f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: preparando {selected.name} effort={effort} | "
             f"1 ZIP, {input_zip_bytes} bytes, {input_zip_files} arquivos internos"
         )
         try:
@@ -350,7 +364,7 @@ class ProjectZipRunner:
             self.store.update_api_run(run_id, status="enviando")
             with selected.open("rb") as fh:
                 uploaded = client.files.create(file=fh, purpose="user_data")
-            self._event(f"PROJECT ZIP EDIT #{run_id}: upload concluído file_id={uploaded.id}")
+            self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: upload concluído file_id={uploaded.id}")
             self.store.update_api_run(run_id, status="aguardando-resposta")
 
             response = client.responses.create(
@@ -372,12 +386,20 @@ class ProjectZipRunner:
                 response_summary=text[:1800],
                 response_bytes=len(text.encode("utf-8")),
             )
-            self._event(f"PROJECT ZIP EDIT #{run_id}: resposta recebida response_id={response_id or '-'}")
+            self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: resposta recebida response_id={response_id or '-'}")
 
             files = self._container_files(response)
             zip_files = [item for item in files if item["filename"].lower().endswith(".zip")]
+            if not requires_zip_output:
+                elapsed_ms = int((time.monotonic() - started) * 1000)
+                self.store.update_api_run(
+                    run_id, status="concluido", output_path="", output_file_bytes=0, output_file_count=0,
+                    elapsed_ms=elapsed_ms, finished=True,
+                )
+                self._event(f"PROJECT ZIP QUERY #{run_id}: CONCLUÍDO em {elapsed_ms/1000:.2f}s | resposta textual")
+                return run_id
             if not zip_files:
-                raise RuntimeError("a API respondeu, mas não retornou um arquivo ZIP de container")
+                raise RuntimeError("a API respondeu a uma solicitação de modificação, mas não retornou um arquivo ZIP de container")
             chosen = zip_files[-1]
             output_dir = self.settings.openai_output_dir.expanduser()
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -421,17 +443,23 @@ class ProjectZipRunner:
                     pass
             elapsed_ms = int((time.monotonic() - started) * 1000)
             self.store.update_api_run(run_id, status="erro", error=str(exc), elapsed_ms=elapsed_ms, finished=True)
-            self._event(f"PROJECT ZIP EDIT #{run_id}: ERRO {exc}", "ERROR")
+            self._event(f"PROJECT ZIP {'EDIT' if requires_zip_output else 'QUERY'} #{run_id}: ERRO {exc}", "ERROR")
             raise
 
-    def run_project_edit(self, *, request_text: str, reasoning_effort: str, source: str = "email") -> int:
+    def run_project_request(self, *, request_text: str, reasoning_effort: str, operation: str = "modify", source: str = "email") -> int:
         if not self._lock.acquire(blocking=False):
-            raise RuntimeError("já existe uma alteração de projeto ZIP em andamento")
+            raise RuntimeError("já existe uma demanda de projeto ZIP em andamento")
         try:
             request = str(request_text or "").strip()
             if not request:
-                raise ValueError("pedido de alteração do projeto vazio")
+                raise ValueError("pedido sobre o projeto vazio")
             selected, _selection_run_id = self.select_project_zip(request)
-            return self.edit_project_zip(selected, request, reasoning_effort, source)
+            return self.process_project_zip(selected, request, reasoning_effort, operation, source)
         finally:
             self._lock.release()
+
+    def run_project_edit(self, *, request_text: str, reasoning_effort: str, source: str = "email") -> int:
+        """Compatibilidade com chamadas antigas: equivale a operation=modify."""
+        return self.run_project_request(
+            request_text=request_text, reasoning_effort=reasoning_effort, operation="modify", source=source
+        )

@@ -74,7 +74,7 @@ class FunctionMap:
     def _default_parameters(name: str) -> dict:
         if name in {"api_zip_test", "project_zip_edit"}:
             request_description = (
-                "Pedido original de alteração do projeto. Preserve o sentido e os detalhes do remetente."
+                "Pedido original sobre o projeto. Pode ser alteração, revisão, análise, explicação, resumo, investigação ou dúvida. Preserve o sentido e os detalhes do remetente."
                 if name == "project_zip_edit"
                 else "Pergunta ou instrução que deve ser respondida dentro do teste ZIP. "
                      "Se não houver uma pergunta separada, use uma confirmação objetiva de processamento do ZIP."

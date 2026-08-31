@@ -100,9 +100,11 @@ class Monitor:
                 source=f"email:{request.sender}",
             )
         elif request.name == "project_zip_edit":
-            run_id = self.project_zip_runner.run_project_edit(
+            operation = str(request.arguments.get("operation") or "modify").strip().lower()
+            run_id = self.project_zip_runner.run_project_request(
                 request_text=original_request or request.request_text,
                 reasoning_effort=request.reasoning_effort,
+                operation=operation,
                 source=f"email:{request.sender}",
             )
         else:
