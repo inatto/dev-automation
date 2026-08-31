@@ -32,6 +32,7 @@ class Settings:
     openai_output_dir: Path
     openai_test_zip: Path
     functions_config: Path
+    project_zip_search_root: Path
     auto_reply_enabled: bool
     sound_enabled: bool
     database_path: Path
@@ -119,6 +120,7 @@ def load_settings() -> Settings:
         openai_output_dir=Path(env.get("OPENAI_OUTPUT_DIR", Path.home() / "Downloads")).expanduser(),
         openai_test_zip=Path(env.get("OPENAI_TEST_ZIP", config_root / "api-test-input.zip")).expanduser(),
         functions_config=Path(env.get("FUNCTIONS_CONFIG", config_root / "functions.json")).expanduser(),
+        project_zip_search_root=Path(env.get("PROJECT_ZIP_SEARCH_ROOT", Path.home() / "Code")).expanduser(),
         auto_reply_enabled=_bool(env.get("AUTO_REPLY_ENABLED", "true"), True),
         sound_enabled=_bool(env.get("SOUND_ENABLED", "true"), True),
         database_path=Path(env.get("DATABASE_PATH", config_root / "mailbot.sqlite3")).expanduser(),

@@ -72,7 +72,13 @@ class FunctionMap:
 
     @staticmethod
     def _default_parameters(name: str) -> dict:
-        if name == "api_zip_test":
+        if name in {"api_zip_test", "project_zip_edit"}:
+            request_description = (
+                "Pedido original de alteração do projeto. Preserve o sentido e os detalhes do remetente."
+                if name == "project_zip_edit"
+                else "Pergunta ou instrução que deve ser respondida dentro do teste ZIP. "
+                     "Se não houver uma pergunta separada, use uma confirmação objetiva de processamento do ZIP."
+            )
             return {
                 "type": "object",
                 "properties": {
@@ -86,10 +92,7 @@ class FunctionMap:
                     },
                     "request_text": {
                         "type": "string",
-                        "description": (
-                            "Pergunta ou instrução que deve ser respondida dentro do teste ZIP. "
-                            "Se não houver uma pergunta separada, use uma confirmação objetiva de processamento do ZIP."
-                        ),
+                        "description": request_description,
                     },
                 },
                 "required": ["reasoning_level", "request_text"],
@@ -150,7 +153,7 @@ class FunctionMap:
         else:
             raise ValueError(f"argumentos inválidos para {name}")
 
-        if name != "api_zip_test":
+        if name not in {"api_zip_test", "project_zip_edit"}:
             raise RuntimeError(f"função não implementada: {name}")
 
         try:
@@ -164,7 +167,11 @@ class FunctionMap:
 
         request_text = str(args.get("request_text") or "").strip()
         if not request_text:
-            request_text = "Confirme que o arquivo ZIP de teste foi processado com sucesso."
+            request_text = (
+                "Confirme que o arquivo ZIP de teste foi processado com sucesso."
+                if name == "api_zip_test"
+                else "Execute a alteração de projeto solicitada no e-mail."
+            )
         request_text = request_text[:8000]
 
         return FunctionRequest(

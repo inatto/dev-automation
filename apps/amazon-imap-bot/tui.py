@@ -635,7 +635,7 @@ def run(settings: Settings) -> int:
                 rows = store.list_api_runs(200)
                 cfg1 = f"Modelo={settings.openai_model}  Raciocínio={settings.openai_reasoning_effort}  Timeout={settings.openai_timeout_seconds}s  Chave={'CONFIGURADA' if settings.openai_api_key else 'AUSENTE'}"
                 cfg2 = f"Base URL={settings.openai_base_url}"
-                cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Funções={settings.functions_config}"
+                cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Projetos ZIP={settings.project_zip_search_root}  Funções={settings.functions_config}"
                 _safe_add(box, 1, 2, cfg1, w - 4, p.BORDER | curses.A_BOLD)
                 _safe_add(box, 2, 2, cfg2, w - 4, p.DIM)
                 _safe_add(box, 3, 2, cfg3, w - 4, p.DIM)
@@ -701,7 +701,13 @@ def run(settings: Settings) -> int:
                         elapsed = row.get("elapsed_ms")
                         elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
                         result = row.get("output_path") or row.get("response_summary") or row.get("input_path") or "-"
-                        kind_map = {"zip-test": "ZIP", "function-router": "ROUTER", "email-reply": "EMAIL"}
+                        kind_map = {
+                            "zip-test": "ZIP",
+                            "function-router": "ROUTER",
+                            "email-reply": "EMAIL",
+                            "project-zip-select": "ESCOLHE",
+                            "project-zip-edit": "PROJETO",
+                        }
                         kind = kind_map.get(str(row.get("kind") or ""), str(row.get("kind") or "API").upper()[:7])
                         line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
                         if absolute != sel or menu_focus:

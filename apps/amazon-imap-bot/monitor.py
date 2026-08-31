@@ -16,6 +16,7 @@ from config import Account, Settings
 from function_map import FunctionMap, FunctionRequest
 from function_router import FunctionRouter
 from mailbox import MailboxClient
+from project_zip_runner import ProjectZipRunner
 from message import parse, should_reply
 from ses import SesSender
 from sound import notify
@@ -55,6 +56,10 @@ class Monitor:
             settings, store,
             lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
         )
+        self.project_zip_runner = ProjectZipRunner(
+            settings, store,
+            lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
+        )
         self.accounts_by_email = {a.email.lower(): a for a in settings.accounts}
         self.own = set(self.accounts_by_email)
 
@@ -82,14 +87,26 @@ class Monitor:
             f"nível={request.reasoning_level}/{request.reasoning_effort}",
             "FUNCTION",
         )
-        if request.name != "api_zip_test":
+        original_request = "\n\n".join(
+            part for part in [
+                f"Assunto: {item.subject}" if item.subject else "",
+                item.body or "",
+            ] if part
+        ).strip()
+        if request.name == "api_zip_test":
+            run_id = self.api_runner.run_zip_test(
+                reasoning_effort=request.reasoning_effort,
+                request_text=request.request_text,
+                source=f"email:{request.sender}",
+            )
+        elif request.name == "project_zip_edit":
+            run_id = self.project_zip_runner.run_project_edit(
+                request_text=original_request or request.request_text,
+                reasoning_effort=request.reasoning_effort,
+                source=f"email:{request.sender}",
+            )
+        else:
             raise RuntimeError(f"função não implementada: {request.name}")
-
-        run_id = self.api_runner.run_zip_test(
-            reasoning_effort=request.reasoning_effort,
-            request_text=request.request_text,
-            source=f"email:{request.sender}",
-        )
         api_run = self.store.get_api_run(run_id) or {}
         output_path = str(api_run.get("output_path") or "")
         result = str(api_run.get("response_summary") or "").strip()

@@ -130,3 +130,13 @@ Fluxo desse comando:
 Durante esse fluxo o e-mail passa por `EXECUTANDO`, `CONCLUÍDO`, `ENVIANDO` e finalmente `RESPONDIDO`. Falhas da função aparecem como `ERRO FUNÇÃO`.
 
 A autorização atual é baseada no endereço `From` recebido. Para funções futuras que tenham permissão para alterar projetos, banco ou sistema operacional, deve-se acrescentar uma autenticação mais forte além do endereço de remetente.
+
+
+## Função `project_zip_edit`
+
+Para remetentes autorizados em `.config/amazon-imap-bot/functions.json`, pedidos de alteração de projeto podem ser roteados para `project_zip_edit`. O fluxo usa duas chamadas independentes:
+
+1. varre `PROJECT_ZIP_SEARCH_ROOT` (padrão `~/Code`) recursivamente por `*.zip` e envia somente a lista + pedido original ao GPT para escolher o ZIP;
+2. valida localmente a escolha, envia apenas esse ZIP em uma nova chamada com o pedido original completo, baixa o ZIP final para `OPENAI_OUTPUT_DIR` (padrão `~/Downloads`).
+
+Não existe mapeamento fixo de nomes de projetos. A seleção retornada pelo GPT só é aceita se corresponder exatamente a um arquivo descoberto sob a raiz configurada.

@@ -417,3 +417,184 @@ def test_functions_view_reads_real_json_as_human_interface():
         assert "REMETENTE: danielmaiax@gmail.com" in text
         assert "[PERMITIDA]" in text
         assert '"functions"' not in text
+
+
+def test_project_zip_function_is_configured_for_daniel():
+    import json
+    from pathlib import Path
+
+    config_path = Path(__file__).resolve().parents[3] / ".config" / "amazon-imap-bot" / "functions.json"
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    assert "project_zip_edit" in payload["functions"]
+    assert "project_zip_edit" in payload["senders"]["danielmaiax@gmail.com"]["functions"]
+    entry = payload["functions"]["project_zip_edit"]
+    assert entry["default_reasoning_level"] == 2
+    assert entry["allowed_reasoning_levels"] == [0, 1, 2, 3, 4, 5]
+
+
+def test_function_map_accepts_project_zip_edit_and_level():
+    import json
+    from function_map import FunctionMap
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        path.write_text(json.dumps({
+            "senders": {
+                "danielmaiax@gmail.com": {
+                    "enabled": True,
+                    "functions": ["project_zip_edit"],
+                }
+            },
+            "functions": {
+                "project_zip_edit": {
+                    "enabled": True,
+                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "reasoning_level": {"type": "integer", "enum": [0, 1, 2, 3, 4, 5]},
+                            "request_text": {"type": "string"},
+                        },
+                        "required": ["reasoning_level", "request_text"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+        }), encoding="utf-8")
+        mapping = FunctionMap(path)
+        req = mapping.request_from_tool_call(
+            "danielmaiax@gmail.com",
+            "project_zip_edit",
+            {"reasoning_level": 3, "request_text": "Altere o título do Orbital App."},
+        )
+        assert req.name == "project_zip_edit"
+        assert req.reasoning_level == 3
+        assert req.reasoning_effort == "high"
+        assert "Orbital App" in req.request_text
+
+
+def test_project_zip_runner_two_independent_calls_select_edit_and_download():
+    import json
+    import zipfile
+    from types import SimpleNamespace
+    from project_zip_runner import ProjectZipRunner
+
+    class FakeFiles:
+        def __init__(self):
+            self.uploaded_name = None
+
+        def create(self, *, file, purpose):
+            self.uploaded_name = Path(file.name).name
+            assert purpose == "user_data"
+            return SimpleNamespace(id="file_project_zip")
+
+    class FakeResponses:
+        def __init__(self):
+            self.calls = []
+
+        def create(self, **kwargs):
+            self.calls.append(kwargs)
+            if kwargs["tools"][0]["type"] == "function":
+                return SimpleNamespace(
+                    id="resp_select",
+                    output=[SimpleNamespace(
+                        type="function_call",
+                        name="select_project_zip",
+                        arguments=json.dumps({
+                            "selected_zip": "orgs/orbital/orbital-app.zip",
+                            "reason": "O pedido menciona explicitamente Orbital App.",
+                        }),
+                    )],
+                )
+            return SimpleNamespace(
+                id="resp_edit",
+                output_text="Título alterado conforme solicitado.",
+                output=[SimpleNamespace(
+                    type="message",
+                    content=[SimpleNamespace(
+                        type="output_text",
+                        annotations=[SimpleNamespace(
+                            type="container_file_citation",
+                            container_id="cntr_project",
+                            file_id="cfile_project",
+                            filename="orbital-app-return.zip",
+                        )],
+                    )],
+                )],
+            )
+
+    class FakeClient:
+        def __init__(self):
+            self.files = FakeFiles()
+            self.responses = FakeResponses()
+
+    class TestRunner(ProjectZipRunner):
+        def _download_container_file(self, container_id, file_id, target):
+            assert container_id == "cntr_project"
+            assert file_id == "cfile_project"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                info = zipfile.ZipInfo("apps/orbital-app/index.html", (2026, 8, 31, 1, 2, 2))
+                info.external_attr = 0o600 << 16
+                zf.writestr(info, "<title>Orbital App - mágica aconteceu</title>")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "Code"
+        output = Path(tmp) / "Downloads"
+        project_zip = root / "orgs" / "orbital" / "orbital-app.zip"
+        project_zip.parent.mkdir(parents=True)
+        with zipfile.ZipFile(project_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            info = zipfile.ZipInfo("apps/orbital-app/index.html", (2025, 1, 2, 3, 4, 4))
+            info.external_attr = 0o755 << 16
+            zf.writestr(info, "<title>Orbital App</title>")
+
+        settings = SimpleNamespace(
+            project_zip_search_root=root,
+            openai_model="gpt-5.6",
+            openai_api_key="test",
+            openai_base_url="https://api.openai.com/v1",
+            openai_timeout_seconds=30,
+            openai_output_dir=output,
+        )
+        store = Store(Path(tmp) / "db.sqlite3")
+        client = FakeClient()
+        runner = TestRunner(settings, store, client=client)
+        request = "Assunto: teste\n\nAltere apenas o título da página inicial do Orbital App para - mágica aconteceu."
+        final_run_id = runner.run_project_edit(
+            request_text=request,
+            reasoning_effort="high",
+            source="email:danielmaiax@gmail.com",
+        )
+
+        assert len(client.responses.calls) == 2
+        select_call, edit_call = client.responses.calls
+        assert "previous_response_id" not in select_call
+        assert "previous_response_id" not in edit_call
+        assert select_call["reasoning"]["effort"] == "low"
+        assert edit_call["reasoning"]["effort"] == "high"
+        assert "orgs/orbital/orbital-app.zip" in select_call["input"]
+        assert request in select_call["input"]
+        assert request in edit_call["input"]
+        assert edit_call["tools"][0]["type"] == "code_interpreter"
+        assert edit_call["tools"][0]["container"]["file_ids"] == ["file_project_zip"]
+        assert client.files.uploaded_name == "orbital-app.zip"
+
+        final_row = store.get_api_run(final_run_id)
+        assert final_row["kind"] == "project-zip-edit"
+        assert final_row["status"] == "concluido"
+        final_zip = Path(final_row["output_path"])
+        assert final_zip.parent == output
+        assert zipfile.is_zipfile(final_zip)
+        with zipfile.ZipFile(final_zip) as zf:
+            assert zf.read("apps/orbital-app/index.html").decode() == "<title>Orbital App - mágica aconteceu</title>"
+            info = zf.getinfo("apps/orbital-app/index.html")
+            assert info.date_time == (2025, 1, 2, 3, 4, 4)
+            assert (info.external_attr >> 16) & 0o777 == 0o755
+
+        runs = store.list_api_runs(10)
+        kinds = [row["kind"] for row in runs]
+        assert "project-zip-select" in kinds
+        assert "project-zip-edit" in kinds
+        select_row = next(row for row in runs if row["kind"] == "project-zip-select")
+        assert select_row["status"] == "concluido"
+        assert select_row["output_path"] == str(project_zip.resolve())
