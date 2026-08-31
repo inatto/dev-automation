@@ -27,10 +27,16 @@ class Settings:
     openai_api_key: str
     openai_model: str
     openai_base_url: str
+    openai_reasoning_effort: str
+    openai_timeout_seconds: int
+    openai_output_dir: Path
+    openai_test_zip: Path
+    functions_config: Path
     auto_reply_enabled: bool
     sound_enabled: bool
     database_path: Path
     sound_file: Path
+    imap_trash_folder: str = ""
 
 
 def _env_file(path: Path) -> dict[str, str]:
@@ -101,12 +107,18 @@ def load_settings() -> Settings:
         imap_host=env.get("IMAP_HOST", "imap.mail.us-east-1.awsapps.com"),
         imap_port=int(env.get("IMAP_PORT", "993")),
         imap_folder=env.get("IMAP_FOLDER", "INBOX"),
+        imap_trash_folder=env.get("IMAP_TRASH_FOLDER", "").strip(),
         poll_seconds=max(10, int(env.get("POLL_SECONDS", "30"))),
         aws_profile=env.get("AWS_PROFILE", "default"),
         aws_region=env.get("AWS_REGION", "us-east-1"),
         openai_api_key=api_key,
         openai_model=env.get("OPENAI_MODEL", "gpt-5.6"),
         openai_base_url=env.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+        openai_reasoning_effort=env.get("OPENAI_REASONING_EFFORT", "medium").strip().lower() or "medium",
+        openai_timeout_seconds=max(30, int(env.get("OPENAI_TIMEOUT_SECONDS", "300"))),
+        openai_output_dir=Path(env.get("OPENAI_OUTPUT_DIR", Path.home() / "Downloads")).expanduser(),
+        openai_test_zip=Path(env.get("OPENAI_TEST_ZIP", config_root / "api-test-input.zip")).expanduser(),
+        functions_config=Path(env.get("FUNCTIONS_CONFIG", config_root / "functions.json")).expanduser(),
         auto_reply_enabled=_bool(env.get("AUTO_REPLY_ENABLED", "true"), True),
         sound_enabled=_bool(env.get("SOUND_ENABLED", "true"), True),
         database_path=Path(env.get("DATABASE_PATH", config_root / "mailbot.sqlite3")).expanduser(),

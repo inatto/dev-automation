@@ -7,6 +7,7 @@ import threading
 import time
 
 from config import Settings
+from api_runner import ApiTestRunner
 from monitor import Monitor
 from store import Store
 
@@ -15,7 +16,32 @@ TAB_INBOX = 0
 TAB_REPLIES = 1
 TAB_CONSOLE = 2
 TAB_ACCOUNTS = 3
-TAB_NAMES = ("F1 ENTRADA", "F2 RESPOSTAS", "F3 CONSOLE", "F4 CONTAS")
+TAB_API = 4
+TAB_NAMES = ("F1 ENTRADA", "F2 RESPOSTAS", "F3 CONSOLE", "F4 CONTAS", "F6 API")
+
+STATUS_LABELS = {
+    "received": "RECEBIDO",
+    "analyzing": "ANALISANDO",
+    "understood": "ENTENDIDO",
+    "awaiting-confirmation": "AGUARDANDO CONF.",
+    "confirmed": "CONFIRMADO",
+    "sending": "ENVIANDO",
+    "executing": "EXECUTANDO",
+    "completed": "CONCLUÍDO",
+    "replied": "RESPONDIDO",
+    "reply-error": "ERRO RESPOSTA",
+    "function-error": "ERRO FUNÇÃO",
+    "sent": "ENVIADO",
+    "error": "ERRO",
+}
+PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing"}
+
+
+def _status_label(status: str) -> str:
+    value = (status or "").strip().lower()
+    if value.startswith("ignored:") or value == "ignored":
+        return "IGNORADO"
+    return STATUS_LABELS.get(value, (status or "-").upper())
 
 
 class Palette:
@@ -78,10 +104,12 @@ def _status_attr(status: str, p: Palette) -> int:
     value = (status or "").lower()
     if "error" in value or "erro" in value:
         return p.ERROR
-    if "ignored" in value or "warn" in value or "ignorado" in value:
+    if value in {"awaiting-confirmation", "received"} or "ignored" in value or "warn" in value or "ignorado" in value:
         return p.WARN
-    if value in {"sent", "replied", "online"} or "ok" in value:
+    if value in {"sent", "replied", "completed", "confirmed", "online"} or "ok" in value:
         return p.OK
+    if value in PROCESSING_STATUSES:
+        return p.BORDER | curses.A_BOLD
     return 0
 
 
@@ -116,7 +144,7 @@ def _message_lines(row: dict, width: int) -> list[str]:
         f"De: {row.get('sender') or '-'}",
         f"Para: {row.get('recipient') or '-'}",
         f"Assunto: {row.get('subject') or '(sem assunto)'}",
-        f"Status: {row.get('status') or '-'}",
+        f"Status: {_status_label(row.get('status') or '-')}",
         f"Message-ID: {row.get('message_id') or '-'}",
     ]
     if row.get("imap_uid"):
@@ -182,10 +210,192 @@ def _popup_message(stdscr, row: dict, p: Palette) -> None:
     stdscr.refresh()
 
 
+def _popup_notice(stdscr, title: str, lines: list[str], p: Palette, attr: int = 0) -> None:
+    h, w = stdscr.getmaxyx()
+    content_width = max([len(title)] + [len(line) for line in lines] + [30])
+    pw = min(max(52, content_width + 8), max(30, w - 4))
+    ph = min(max(8, len(lines) + 5), max(8, h - 2))
+    top = max(0, (h - ph) // 2)
+    left = max(0, (w - pw) // 2)
+    win = curses.newwin(ph, pw, top, left)
+    win.keypad(True)
+    try:
+        win.attron(p.BORDER)
+        win.border()
+        win.attroff(p.BORDER)
+    except curses.error:
+        pass
+    _safe_add(win, 0, 2, f" {title} ", pw - 4, attr or p.HEADER)
+    for idx, line in enumerate(lines[: ph - 4]):
+        _safe_add(win, 2 + idx, 3, line, pw - 6, attr if idx == 0 else 0)
+    _safe_add(win, ph - 2, 3, "Enter/Esc fechar", pw - 6, p.DIM)
+    win.refresh()
+    while True:
+        ch = win.getch()
+        if ch in (27, 10, 13, curses.KEY_ENTER, ord("q"), ord("Q")):
+            break
+    stdscr.touchwin()
+    stdscr.refresh()
+
+
+def _delete_confirmation_text(row: dict) -> tuple[str, list[str], str]:
+    status = (row.get("status") or "").lower()
+    subject = str(row.get("subject") or "(sem assunto)")
+    sender = str(row.get("sender") or "-")
+    if status == "replied":
+        return (
+            "REMOVER E-MAIL RESPONDIDO",
+            [
+                "E-MAIL RESPONDIDO.",
+                "A resposta já foi enviada ao remetente.",
+                f"De: {sender}",
+                f"Assunto: {subject}",
+                "A mensagem será movida para a lixeira do IMAP.",
+                "Confirma a remoção?",
+            ],
+            "ok",
+        )
+    if status == "reply-error":
+        headline = "ATENÇÃO: A RESPOSTA FALHOU."
+        detail = "Este e-mail NÃO foi respondido com sucesso."
+        level = "error"
+    elif status.startswith("ignored:") or status == "ignored":
+        headline = "ATENÇÃO: E-MAIL IGNORADO."
+        detail = "Este e-mail não recebeu resposta automática."
+        level = "warn"
+    elif status == "awaiting-confirmation":
+        headline = "ATENÇÃO: AGUARDANDO CONFIRMAÇÃO."
+        detail = "Este e-mail ainda NÃO foi respondido."
+        level = "warn"
+    else:
+        headline = "ATENÇÃO: E-MAIL NÃO RESPONDIDO."
+        detail = "Remover agora elimina a mensagem da caixa de entrada sem resposta."
+        level = "error"
+    return (
+        "CONFIRMAR REMOÇÃO",
+        [
+            headline,
+            detail,
+            f"De: {sender}",
+            f"Assunto: {subject}",
+            f"Estado atual: {_status_label(status)}",
+            "A mensagem será movida para a lixeira do IMAP.",
+            "Confirma mesmo assim?",
+        ],
+        level,
+    )
+
+
+def _popup_confirm_delete(stdscr, row: dict, p: Palette) -> bool:
+    title, lines, level = _delete_confirmation_text(row)
+    attr = p.OK if level == "ok" else (p.ERROR if level == "error" else p.WARN)
+    h, w = stdscr.getmaxyx()
+    content_width = max([len(title)] + [len(line) for line in lines] + [42])
+    pw = min(max(62, content_width + 8), max(34, w - 4))
+    ph = min(max(12, len(lines) + 6), max(10, h - 2))
+    top = max(0, (h - ph) // 2)
+    left = max(0, (w - pw) // 2)
+    win = curses.newwin(ph, pw, top, left)
+    win.keypad(True)
+    try:
+        win.attron(attr)
+        win.border()
+        win.attroff(attr)
+    except curses.error:
+        pass
+    _safe_add(win, 0, 2, f" {title} ", pw - 4, attr | curses.A_BOLD)
+    for idx, line in enumerate(lines[: ph - 5]):
+        line_attr = attr if idx == 0 else 0
+        _safe_add(win, 2 + idx, 3, line, pw - 6, line_attr)
+    _safe_add(win, ph - 2, 3, "S ou Enter = REMOVER   N ou Esc = CANCELAR", pw - 6, p.DIM)
+    win.refresh()
+    while True:
+        ch = win.getch()
+        if ch in (ord("s"), ord("S"), ord("y"), ord("Y"), 10, 13, curses.KEY_ENTER):
+            return True
+        if ch in (ord("n"), ord("N"), 27, ord("q"), ord("Q")):
+            return False
+
+
+
+def _api_status_label(status: str) -> str:
+    labels = {
+        "preparando": "PREPARANDO",
+        "enviando": "ENVIANDO ZIP",
+        "aguardando-resposta": "AGUARDANDO",
+        "baixando": "BAIXANDO",
+        "concluido": "CONCLUÍDO",
+        "erro": "ERRO",
+    }
+    return labels.get((status or "").lower(), (status or "-").upper())
+
+
+def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
+    h, w = stdscr.getmaxyx()
+    ph = max(12, min(h - 2, 24))
+    pw = max(60, min(w - 4, 110))
+    top = max(0, (h - ph) // 2)
+    left = max(0, (w - pw) // 2)
+    win = curses.newwin(ph, pw, top, left)
+    win.keypad(True)
+    try:
+        win.attron(p.BORDER)
+        win.border()
+        win.attroff(p.BORDER)
+    except curses.error:
+        pass
+    elapsed = row.get("elapsed_ms")
+    elapsed_text = f"{int(elapsed)/1000:.2f}s" if elapsed is not None else "em andamento"
+    lines = [
+        f"ID: #{row.get('id')}",
+        f"Estado: {_api_status_label(row.get('status') or '')}",
+        f"Modelo: {row.get('model') or '-'}",
+        f"Raciocínio: {row.get('reasoning_effort') or '-'}",
+        f"Início: {row.get('started_at') or '-'}",
+        f"Fim: {row.get('finished_at') or '-'}",
+        f"Tempo: {elapsed_text}",
+        f"Response ID: {row.get('response_id') or '-'}",
+        f"ZIP entrada: {row.get('input_path') or '-'}",
+        f"ZIP retorno: {row.get('output_path') or '-'}",
+        "",
+        f"Pedido: {row.get('request_summary') or '-'}",
+        f"Resposta: {row.get('response_summary') or '-'}",
+    ]
+    if row.get("error"):
+        lines.extend(["", f"ERRO: {row.get('error')}"])
+    wrapped=[]
+    for line in lines:
+        wrapped.extend(textwrap.wrap(str(line), max(20, pw - 8), replace_whitespace=False) or [""])
+    _safe_add(win, 0, 2, " CHAMADA API ", pw - 4, p.HEADER)
+    offset=0
+    page=max(1, ph-4)
+    while True:
+        for y in range(1, ph-2):
+            _safe_add(win, y, 2, " " * max(0, pw-4), pw-4)
+        for i, line in enumerate(wrapped[offset:offset+page]):
+            attr = p.ERROR if line.startswith("ERRO:") else 0
+            _safe_add(win, 1+i, 3, line, pw-6, attr)
+        _safe_add(win, ph-2, 3, "↑↓/PgUp/PgDn rolar   Enter/Esc fechar", pw-6, p.DIM)
+        win.refresh()
+        ch=win.getch()
+        if ch in (27,10,13,curses.KEY_ENTER,ord('q'),ord('Q')):
+            break
+        if ch == curses.KEY_UP:
+            offset=max(0,offset-1)
+        elif ch == curses.KEY_DOWN:
+            offset=min(max(0,len(wrapped)-page),offset+1)
+        elif ch == curses.KEY_PPAGE:
+            offset=max(0,offset-page)
+        elif ch == curses.KEY_NPAGE:
+            offset=min(max(0,len(wrapped)-page),offset+page)
+    stdscr.touchwin()
+    stdscr.refresh()
+
 def run(settings: Settings) -> int:
     store = Store(settings.database_path)
     events: queue.Queue[str] = queue.Queue()
     monitor = Monitor(settings, store, events.put)
+    api_runner = ApiTestRunner(settings, store, events.put)
     thread = threading.Thread(target=monitor.run_forever, daemon=True)
     thread.start()
 
@@ -198,9 +408,13 @@ def run(settings: Settings) -> int:
         stdscr.keypad(True)
         p = _init_colors()
         active_tab = TAB_INBOX
-        selected = {TAB_INBOX: 0, TAB_REPLIES: 0, TAB_CONSOLE: 0, TAB_ACCOUNTS: 0}
-        offsets = {TAB_INBOX: 0, TAB_REPLIES: 0, TAB_CONSOLE: 0, TAB_ACCOUNTS: 0}
+        selected = {idx: 0 for idx in range(len(TAB_NAMES))}
+        offsets = {idx: 0 for idx in range(len(TAB_NAMES))}
         checking = False
+        api_testing = False
+        notice = ""
+        notice_attr = 0
+        notice_until = 0.0
 
         while not monitor.stop_event.is_set():
             while True:
@@ -270,7 +484,7 @@ def run(settings: Settings) -> int:
             elif active_tab == TAB_CONSOLE:
                 rows = store.recent_events(500)
                 _safe_add(box, 1, 2, "DATA        TIPO     NÍVEL   EVENTO", w - 4, p.DIM)
-            else:
+            elif active_tab == TAB_ACCOUNTS:
                 rows = [
                     {
                         "email": email,
@@ -283,8 +497,17 @@ def run(settings: Settings) -> int:
                     for email, state in monitor.states.items()
                 ]
                 _safe_add(box, 1, 2, "STATUS     CONTA                                      REC   RESP   ÚLTIMA VERIFICAÇÃO", w - 4, p.DIM)
+            else:
+                rows = store.list_api_runs(200)
+                cfg1 = f"Modelo={settings.openai_model}  Raciocínio={settings.openai_reasoning_effort}  Timeout={settings.openai_timeout_seconds}s  Chave={'CONFIGURADA' if settings.openai_api_key else 'AUSENTE'}"
+                cfg2 = f"Base URL={settings.openai_base_url}"
+                cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Funções={settings.functions_config}"
+                _safe_add(box, 1, 2, cfg1, w - 4, p.BORDER | curses.A_BOLD)
+                _safe_add(box, 2, 2, cfg2, w - 4, p.DIM)
+                _safe_add(box, 3, 2, cfg3, w - 4, p.DIM)
+                _safe_add(box, 4, 2, "ID    TIPO    INÍCIO      ESTADO         MODELO             NÍVEL   TEMPO     RESULTADO", w - 4, p.DIM)
 
-            page = max(1, usable - 1)
+            page = max(1, usable - (4 if active_tab == TAB_API else 1))
             if rows:
                 selected[active_tab] = min(selected[active_tab], len(rows) - 1)
             else:
@@ -300,14 +523,15 @@ def run(settings: Settings) -> int:
 
             for pos, row in enumerate(rows[off:off + page]):
                 absolute = off + pos
-                y = 2 + pos
+                y = (5 if active_tab == TAB_API else 2) + pos
                 attr = p.SELECTED if absolute == sel else 0
                 if active_tab in (TAB_INBOX, TAB_REPLIES):
                     date = _format_date(row.get("mail_date") or row.get("created_at") or "-")
                     peer = row.get("sender") if active_tab == TAB_INBOX else row.get("recipient")
                     subject = row.get("subject") or "(sem assunto)"
                     status = row.get("status") or "-"
-                    line = f"{date:<11} {str(peer or '-')[:34]:<34} {str(subject)[:40]:<40} {status[:18]}"
+                    status_label = _status_label(status)
+                    line = f"{date:<11} {str(peer or '-')[:34]:<34} {str(subject)[:40]:<40} {status_label[:18]}"
                     if absolute != sel:
                         attr = _status_attr(status, p)
                     _safe_add(box, y, 2, line, w - 4, attr)
@@ -320,24 +544,39 @@ def run(settings: Settings) -> int:
                     if absolute != sel:
                         attr = _status_attr(level, p)
                     _safe_add(box, y, 2, line, w - 4, attr)
-                else:
+                elif active_tab == TAB_ACCOUNTS:
                     status = "ONLINE" if row["connected"] else ("ERRO" if row["last_error"] else "INICIANDO")
                     line = f"{status:<10} {row['email'][:42]:<42} {row['received']:<5} {row['replied']:<6} {row['last_check']}"
                     if absolute != sel:
                         attr = _status_attr(status, p)
+                    _safe_add(box, y, 2, line, w - 4, attr)
+                else:
+                    status = row.get("status") or "-"
+                    elapsed = row.get("elapsed_ms")
+                    elapsed_text = f"{int(elapsed)/1000:.1f}s" if elapsed is not None else "..."
+                    result = row.get("output_path") or row.get("input_path") or "-"
+                    kind = "ZIP" if row.get("kind") == "zip-test" else "EMAIL"
+                    line = f"#{int(row.get('id') or 0):<4} {kind:<7} {_format_date(row.get('started_at') or '-'):<11} {_api_status_label(status):<14} {str(row.get('model') or '-')[:17]:<17} {str(row.get('reasoning_effort') or '-')[:6]:<6} {elapsed_text:<9} {result}"
+                    if absolute != sel:
+                        attr = _status_attr("error" if status == "erro" else ("completed" if status == "concluido" else "analyzing"), p)
                     _safe_add(box, y, 2, line, w - 4, attr)
 
             if not rows:
                 empty = "Nenhum registro ainda."
                 _safe_add(box, 3, 3, empty, w - 6, p.DIM)
 
-            footer = "F1 Entrada  F2 Respostas  F3 Console  F4 Contas  ↑↓ navegar  Enter abrir  R verificar agora  Q sair"
+            footer = "F1 Entrada  F2 Respostas  F3 Console  F4 Contas  F5 Atualizar  F6 API  T teste ZIP  Enter abrir  Q sair"
             _safe_add(stdscr, h - 2, 1, footer, w - 2, p.DIM)
-            _safe_add(
-                stdscr, h - 1, 1,
-                "Segredos não são exibidos no console. O histórico operacional fica salvo no SQLite.",
-                w - 2, p.DIM,
-            )
+            if notice and time.time() < notice_until:
+                _safe_add(stdscr, h - 1, 1, notice, w - 2, notice_attr)
+            else:
+                notice = ""
+                _safe_add(
+                    stdscr, h - 1, 1,
+                    ("T na aba API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
+                     "D remove da ENTRADA com confirmação e move o e-mail para a lixeira do servidor."),
+                    w - 2, p.DIM,
+                )
             stdscr.refresh()
 
             try:
@@ -355,6 +594,8 @@ def run(settings: Settings) -> int:
                 active_tab = TAB_CONSOLE
             elif ch == curses.KEY_F4:
                 active_tab = TAB_ACCOUNTS
+            elif ch == curses.KEY_F6:
+                active_tab = TAB_API
             elif ch in (9, curses.KEY_RIGHT):
                 active_tab = (active_tab + 1) % len(TAB_NAMES)
             elif ch == curses.KEY_LEFT:
@@ -374,8 +615,80 @@ def run(settings: Settings) -> int:
                     stdscr.nodelay(False)
                     _popup_message(stdscr, full, p)
                     stdscr.nodelay(True)
-            elif ch in (ord("r"), ord("R")) and not checking:
+            elif ch in (10, 13, curses.KEY_ENTER) and rows and active_tab == TAB_API:
+                full = store.get_api_run(int(rows[selected[active_tab]]["id"]))
+                if full:
+                    stdscr.nodelay(False)
+                    _popup_api_run(stdscr, full, p)
+                    stdscr.nodelay(True)
+            elif ch in (ord("d"), ord("D")):
+                if active_tab != TAB_INBOX:
+                    notice = "D: remoção disponível somente em ENTRADA; respostas permanecem como histórico de envio."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 4
+                elif not rows:
+                    notice = "Nenhuma mensagem selecionada para remover."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 3
+                else:
+                    row = rows[selected[active_tab]]
+                    full = store.get_message(int(row["id"]))
+                    if full:
+                        status = (full.get("status") or "").lower()
+                        stdscr.nodelay(False)
+                        if status in PROCESSING_STATUSES:
+                            _popup_notice(
+                                stdscr,
+                                "REMOÇÃO BLOQUEADA",
+                                [
+                                    "E-MAIL EM PROCESSAMENTO.",
+                                    f"Estado atual: {_status_label(status)}",
+                                    "Aguarde o processamento terminar antes de remover.",
+                                ],
+                                p,
+                                p.WARN,
+                            )
+                            confirmed = False
+                        else:
+                            confirmed = _popup_confirm_delete(stdscr, full, p)
+                        stdscr.nodelay(True)
+                        if confirmed:
+                            try:
+                                _safe_add(stdscr, h - 1, 1, "Removendo do IMAP e registrando a remoção...", w - 2, p.WARN)
+                                stdscr.refresh()
+                                mode = monitor.delete_inbound(full)
+                                notice = f"E-mail removido com sucesso. IMAP: {mode}."
+                                notice_attr = p.OK
+                                notice_until = time.time() + 5
+                                selected[TAB_INBOX] = max(0, selected[TAB_INBOX] - 1)
+                            except Exception as exc:
+                                notice = f"ERRO AO REMOVER: {exc}"
+                                notice_attr = p.ERROR
+                                notice_until = time.time() + 8
+            elif ch in (ord("t"), ord("T")) and active_tab == TAB_API:
+                if api_testing:
+                    notice = "Já existe um teste ZIP da API em andamento."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 4
+                else:
+                    api_testing = True
+                    notice = f"Teste ZIP iniciado. O retorno será salvo em {settings.openai_output_dir}."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 5
+                    def do_api_test():
+                        nonlocal api_testing
+                        try:
+                            api_runner.run_zip_test()
+                        except Exception:
+                            pass
+                        finally:
+                            api_testing = False
+                    threading.Thread(target=do_api_test, daemon=True).start()
+            elif ch in (curses.KEY_F5, ord("r"), ord("R")) and not checking:
                 checking = True
+                notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
+                notice_attr = p.WARN
+                notice_until = time.time() + 3
                 def do_check():
                     nonlocal checking
                     try:

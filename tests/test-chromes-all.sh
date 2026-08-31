@@ -7,6 +7,7 @@ mkdir -p "$TMP/bin"
 
 cat > "$TMP/projects" <<'PROJECTS'
 bots/dev-automation
+bots/dev-automation/apps/amazon-imap-bot
 orgs/orbital/orbital-app
 orgs/inst-app
 infra/amazon-infra/apps/monitor-app
@@ -66,8 +67,11 @@ grep -Fqx 'workspace=5' "$TMP/chromes.log"
 [[ "$(grep -c '^maximize=UNSET$' "$TMP/chromes.log")" -eq 4 ]]
 [[ "$(grep -c '^files=UNSET$' "$TMP/chromes.log")" -eq 4 ]]
 
-# Quatro desktops => três intervalos, sempre exatamente 2 segundos.
-[[ "$(grep -c '^sleep=2$' "$TMP/sleep.log")" -eq 3 ]]
+# O subprojeto bots/dev-automation/apps/... não consome desktop.
+! grep -Fq 'amazon-imap-bot' "$TMP/chromes.log"
+
+# Quatro desktops => três intervalos, sempre exatamente 1 segundo.
+[[ "$(grep -c '^sleep=1$' "$TMP/sleep.log")" -eq 3 ]]
 [[ "$(wc -l < "$TMP/sleep.log")" -eq 3 ]]
 
-echo 'OK: chromes-all é orquestrador fino e usa intervalo fixo de 2s.'
+echo 'OK: chromes-all usa a mesma lista de desktops, ignora subprojetos e espera 1s entre projetos.' 

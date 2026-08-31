@@ -127,26 +127,84 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             : global.workspace_manager.get_active_workspace_index();
         const monitor = this._leftmostMonitor();
         const maximize = String(fields.maximize ?? '0') === '1';
-        this._chromeSession = {
-            token,
-            workspaceIndex,
-            monitor,
-            maximize,
-            expiresAt: nowSeconds() + 18,
-            browsers: 0,
-            nautilus: 0,
+
+        const arm = () => {
+            if (this._lastChromesRequestToken !== token)
+                return;
+
+            this._chromeSession = {
+                token,
+                workspaceIndex,
+                monitor,
+                maximize,
+                expiresAt: nowSeconds() + 18,
+                browsers: 0,
+                nautilus: 0,
+            };
+
+            try {
+                GLib.mkdir_with_parents(STATE_DIR, 0o700);
+                GLib.file_set_contents(
+                    CHROMES_READY_PATH,
+                    `${token}\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\tmaximize=${maximize ? 1 : 0}\n`
+                );
+                this._writeChromeResult();
+            } catch (error) {
+                console.error(`[workspace-controller] falha ao preparar chromes: ${error}`);
+            }
         };
 
-        try {
-            GLib.mkdir_with_parents(STATE_DIR, 0o700);
-            GLib.file_set_contents(
-                CHROMES_READY_PATH,
-                `${token}\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\tmaximize=${maximize ? 1 : 0}\n`
-            );
-            this._writeChromeResult();
-        } catch (error) {
-            console.error(`[workspace-controller] falha ao preparar chromes: ${error}`);
+        // chromes-all informa explicitamente o workspace do projeto. Nesse caso,
+        // primeiro ENTRA no workspace e só libera o processo Chrome depois que o
+        // GNOME confirmou a troca de forma estável. Abrir em outro workspace para
+        // mover depois é sujeito a corrida com o processo já existente do Chrome.
+        if (requestedWorkspace > 0) {
+            const activateAndArm = (attemptsLeft, stableChecks = 0) => {
+                if (this._lastChromesRequestToken !== token)
+                    return;
+
+                try {
+                    const workspace = global.workspace_manager.get_workspace_by_index(workspaceIndex);
+                    if (!workspace)
+                        return;
+
+                    workspace.activate(global.get_current_time());
+                    const activeWorkspace = global.workspace_manager.get_active_workspace_index();
+                    if (activeWorkspace !== workspaceIndex) {
+                        if (attemptsLeft <= 0)
+                            return;
+                        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+                            this._timeouts.delete(id);
+                            activateAndArm(attemptsLeft - 1, 0);
+                            return GLib.SOURCE_REMOVE;
+                        });
+                        this._timeouts.add(id);
+                        return;
+                    }
+
+                    // Duas leituras consecutivas no destino evitam liberar o Chrome
+                    // durante a animação/troca do workspace.
+                    if (stableChecks < 1) {
+                        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                            this._timeouts.delete(id);
+                            activateAndArm(attemptsLeft, stableChecks + 1);
+                            return GLib.SOURCE_REMOVE;
+                        });
+                        this._timeouts.add(id);
+                        return;
+                    }
+
+                    arm();
+                } catch (error) {
+                    console.error(`[workspace-controller] falha ao ativar workspace para chromes: ${error}`);
+                }
+            };
+
+            activateAndArm(30, 0);
+            return;
         }
+
+        arm();
     }
 
     _prepareTerminals(token, action, fields = {}) {

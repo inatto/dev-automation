@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import imaplib
+import re
 import ssl
 from config import Account, Settings
 
@@ -97,22 +98,49 @@ class MailboxClient:
             raise RuntimeError(f"mensagem UID {uid} veio sem conteúdo")
         return raw
 
+    @staticmethod
+    def _mailbox_name_from_list_line(raw) -> str:
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw or "")
+        quoted = re.findall(r'"((?:\\.|[^"\\])*)"', text)
+        if quoted:
+            return quoted[-1].replace('\\"', '"').replace('\\\\', '\\')
+        parts = text.rsplit(None, 1)
+        return parts[-1].strip('"') if parts else ""
+
+    def trash_folder(self, conn) -> str:
+        configured = (self.settings.imap_trash_folder or "").strip()
+        if configured:
+            return configured
+        try:
+            status, rows = conn.list()
+            if status == "OK":
+                for raw in rows or []:
+                    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw or "")
+                    if "\\Trash" in text:
+                        name = self._mailbox_name_from_list_line(raw)
+                        if name:
+                            return name
+        except Exception:
+            pass
+        return "Deleted Items"
+
     def move_selected_to_trash(self, conn, uid: str) -> str:
         if not uid.isdigit():
             raise RuntimeError("UID IMAP inválido para remoção")
         conn.uid("store", uid, "+FLAGS.SILENT", "(\\Seen)")
-        target = self._quoted_mailbox(self.settings.imap_trash_folder)
+        trash_folder = self.trash_folder(conn)
+        target = self._quoted_mailbox(trash_folder)
         capabilities = self._capabilities(conn)
 
         if "MOVE" in capabilities:
             status, _ = conn.uid("move", uid, target)
             if status != "OK":
-                raise RuntimeError(f"não foi possível mover UID {uid} para {self.settings.imap_trash_folder}")
-            return "move"
+                raise RuntimeError(f"não foi possível mover UID {uid} para {trash_folder}")
+            return f"move:{trash_folder}"
 
         status, _ = conn.uid("copy", uid, target)
         if status != "OK":
-            raise RuntimeError(f"não foi possível copiar UID {uid} para {self.settings.imap_trash_folder}")
+            raise RuntimeError(f"não foi possível copiar UID {uid} para {trash_folder}")
         status, _ = conn.uid("store", uid, "+FLAGS.SILENT", "(\\Deleted \\Seen)")
         if status != "OK":
             raise RuntimeError(f"não foi possível marcar UID {uid} como removido")

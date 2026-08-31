@@ -36,6 +36,8 @@ class Store:
         self._ensure_column("messages", "mail_date", "TEXT")
         self._ensure_column("messages", "imap_uid", "TEXT")
         self._ensure_column("messages", "imap_folder", "TEXT")
+        self._ensure_column("messages", "deleted_at", "TEXT")
+        self._ensure_column("messages", "delete_mode", "TEXT")
         self._db.execute("""
             CREATE TABLE IF NOT EXISTS events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,8 +47,27 @@ class Store:
               created_at TEXT NOT NULL
             )
         """)
+        self._db.execute("""
+            CREATE TABLE IF NOT EXISTS api_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              kind TEXT NOT NULL,
+              status TEXT NOT NULL,
+              model TEXT NOT NULL,
+              reasoning_effort TEXT,
+              input_path TEXT,
+              output_path TEXT,
+              response_id TEXT,
+              request_summary TEXT,
+              response_summary TEXT,
+              error TEXT,
+              elapsed_ms INTEGER,
+              started_at TEXT NOT NULL,
+              finished_at TEXT
+            )
+        """)
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_messages_direction_id ON messages(direction, id DESC)")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_events_id ON events(id DESC)")
+        self._db.execute("CREATE INDEX IF NOT EXISTS idx_api_runs_id ON api_runs(id DESC)")
         self._db.commit()
 
     def _ensure_column(self, table: str, column: str, declaration: str) -> None:
@@ -103,6 +124,16 @@ class Store:
             )
             self._db.commit()
 
+    def mark_deleted(self, message_row_id: int, delete_mode: str) -> None:
+        with self._lock:
+            cur = self._db.execute(
+                "UPDATE messages SET deleted_at=?, delete_mode=? WHERE id=? AND direction='in' AND deleted_at IS NULL",
+                (self._now(), delete_mode, message_row_id),
+            )
+            if cur.rowcount != 1:
+                raise RuntimeError("mensagem não encontrada ou já removida")
+            self._db.commit()
+
     def add_event(self, category: str, level: str, text: str) -> None:
         with self._lock:
             self._db.execute(
@@ -121,8 +152,8 @@ class Store:
             rows = self._db.execute(
                 """SELECT id,direction,account_email,message_id,thread_key,sender,recipient,subject,body,
                           reply_to_message_id,provider_message_id,status,error,created_at,mail_date,
-                          imap_uid,imap_folder
-                   FROM messages WHERE direction=? ORDER BY id DESC LIMIT ?""",
+                          imap_uid,imap_folder,deleted_at,delete_mode
+                   FROM messages WHERE direction=? AND deleted_at IS NULL ORDER BY id DESC LIMIT ?""",
                 (direction, limit),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -132,7 +163,7 @@ class Store:
             row = self._db.execute(
                 """SELECT id,direction,account_email,message_id,thread_key,sender,recipient,subject,body,
                           reply_to_message_id,provider_message_id,status,error,created_at,mail_date,
-                          imap_uid,imap_folder
+                          imap_uid,imap_folder,deleted_at,delete_mode
                    FROM messages WHERE id=?""",
                 (message_id,),
             ).fetchone()
@@ -153,3 +184,53 @@ class Store:
                    FROM messages ORDER BY id DESC LIMIT ?""", (limit,)
             ).fetchall()
         return [tuple(row) for row in rows]
+    def add_api_run(self, *, kind: str, status: str, model: str, reasoning_effort: str, input_path: str,
+                    output_path: str, request_summary: str) -> int:
+        with self._lock:
+            cur = self._db.execute(
+                """INSERT INTO api_runs(kind,status,model,reasoning_effort,input_path,output_path,request_summary,started_at)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (kind, status, model, reasoning_effort, input_path, output_path, request_summary, self._now()),
+            )
+            self._db.commit()
+            return int(cur.lastrowid)
+
+    def update_api_run(self, run_id: int, *, status: str | None = None, output_path: str | None = None,
+                       response_id: str | None = None, response_summary: str | None = None,
+                       error: str | None = None, elapsed_ms: int | None = None, finished: bool = False) -> None:
+        values = []
+        params = []
+        for column, value in (("status", status), ("output_path", output_path), ("response_id", response_id),
+                              ("response_summary", response_summary), ("error", error), ("elapsed_ms", elapsed_ms)):
+            if value is not None:
+                values.append(f"{column}=?")
+                params.append(value)
+        if finished:
+            values.append("finished_at=?")
+            params.append(self._now())
+        if not values:
+            return
+        params.append(run_id)
+        with self._lock:
+            self._db.execute(f"UPDATE api_runs SET {', '.join(values)} WHERE id=?", params)
+            self._db.commit()
+
+    def list_api_runs(self, limit: int = 200) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
+                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at
+                   FROM api_runs ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_api_run(self, run_id: int) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                """SELECT id,kind,status,model,reasoning_effort,input_path,output_path,response_id,
+                          request_summary,response_summary,error,elapsed_ms,started_at,finished_at
+                   FROM api_runs WHERE id=?""", (run_id,)
+            ).fetchone()
+        return dict(row) if row else None
+

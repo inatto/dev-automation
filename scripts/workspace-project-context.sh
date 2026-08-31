@@ -13,38 +13,45 @@ declare -ag WORKSPACE_PROJECTS=()
 declare -Ag WORKSPACE_SERVICE_URLS=()
 
 workspace_context_load_projects() {
-  local raw line
   WORKSPACE_PROJECTS=()
   [[ -f "$PROJECTS_FILE" ]] || return 1
-  while IFS= read -r raw || [[ -n "$raw" ]]; do
-    raw="${raw%$'\r'}"
-    line="${raw%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
-    line="${line#./}"
-    line="${line%/}"
-    [[ -n "$line" && "${line,,}" != *.zip ]] || continue
-    WORKSPACE_PROJECTS+=("$line")
-  done < "$PROJECTS_FILE"
+  mapfile -t WORKSPACE_PROJECTS < <(dev_desktop_projects "$PROJECTS_FILE")
 }
 
 workspace_context_load_services() {
-  local application type web_port api_port host path url current
+  local application type web_port api_port host path tenants extra url current tenant
+  local -a tenant_list=()
   WORKSPACE_SERVICE_URLS=()
   [[ -f "$SERVICES_FILE" ]] || return 1
-  while IFS=';' read -r application type web_port api_port host path || [[ -n "${application:-}" ]]; do
+  while IFS=';' read -r application type web_port api_port host path tenants extra || [[ -n "${application:-}" ]]; do
     application="${application%$'\r'}"
     [[ -n "$application" && "$application" != application ]] || continue
     [[ -n "$host" ]] || continue
     path="${path:-/}"
     [[ "$path" == /* ]] || path="/$path"
-    url="https://$host$path"
-    current="${WORKSPACE_SERVICE_URLS[$application]:-}"
-    if [[ -n "$current" ]]; then
-      WORKSPACE_SERVICE_URLS[$application]="$current"$'\n'"$url"
+
+    tenant_list=()
+    if [[ -n "${tenants:-}" ]]; then
+      IFS=',' read -r -a tenant_list <<< "$tenants"
     else
-      WORKSPACE_SERVICE_URLS[$application]="$url"
+      tenant_list=('')
     fi
+
+    for tenant in "${tenant_list[@]}"; do
+      tenant="${tenant#"${tenant%%[![:space:]]*}"}"
+      tenant="${tenant%"${tenant##*[![:space:]]}"}"
+      if [[ -n "$tenant" ]]; then
+        url="https://$tenant.$host$path"
+      else
+        url="https://$host$path"
+      fi
+      current="${WORKSPACE_SERVICE_URLS[$application]:-}"
+      if [[ -n "$current" ]]; then
+        WORKSPACE_SERVICE_URLS[$application]="$current"$'\n'"$url"
+      else
+        WORKSPACE_SERVICE_URLS[$application]="$url"
+      fi
+    done
   done < "$SERVICES_FILE"
 }
 

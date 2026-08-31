@@ -13,12 +13,14 @@ Use de 2 a 4 frases, sem assunto, assinatura, markdown ou saudação excessiva."
 
 
 class ReplyGenerator:
-    def __init__(self, api_key: str, model: str, base_url: str):
+    def __init__(self, api_key: str, model: str, base_url: str, reasoning_effort: str = "medium", timeout_seconds: int = 300):
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY ausente e fallback do GPT Console não disponível")
         from openai import OpenAI
-        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=60)
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout_seconds)
         self.model = model
+        self.reasoning_effort = reasoning_effort
+        self.last_response_id = ""
 
     def generate(self, item: Incoming) -> str:
         content = item.body.strip() or "(mensagem recebida sem corpo textual)"
@@ -31,7 +33,9 @@ class ReplyGenerator:
             model=self.model,
             instructions=SYSTEM,
             input=prompt,
+            reasoning={"effort": self.reasoning_effort},
         )
+        self.last_response_id = str(getattr(response, "id", "") or "")
         text = str(getattr(response, "output_text", "") or "").strip()
         if not text:
             raise RuntimeError("OpenAI retornou resposta vazia")

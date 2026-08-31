@@ -38,11 +38,11 @@ validate_services() {
   [[ -f "$SERVICES_FILE" ]] || fail "arquivo não encontrado: $SERVICES_FILE"
 
   local line_number=0
-  local application type web_port api_port host path extra
+  local application type web_port api_port host path tenants extra
   local -A applications=() web_ports=() api_ports=() routes=()
   local services=0
 
-  while IFS=';' read -r application type web_port api_port host path extra || [[ -n "${application:-}${type:-}${web_port:-}${api_port:-}${host:-}${path:-}${extra:-}" ]]; do
+  while IFS=';' read -r application type web_port api_port host path tenants extra || [[ -n "${application:-}${type:-}${web_port:-}${api_port:-}${host:-}${path:-}${tenants:-}${extra:-}" ]]; do
     ((line_number += 1))
 
     application="$(trim "${application:-}")"
@@ -51,10 +51,11 @@ validate_services() {
     api_port="$(trim "${api_port:-}")"
     host="$(trim "${host:-}")"
     path="$(trim "${path:-}")"
+    tenants="$(trim "${tenants:-}")"
     extra="$(trim "${extra:-}")"
 
     if ((line_number == 1)); then
-      [[ "$application;$type;$web_port;$api_port;$host;$path" == 'application;type;web_port;api_port;host;path' && -z "$extra" ]] ||
+      [[ ("$application;$type;$web_port;$api_port;$host;$path;$tenants" == 'application;type;web_port;api_port;host;path;tenants' || ("$application;$type;$web_port;$api_port;$host;$path" == 'application;type;web_port;api_port;host;path' && -z "$tenants")) && -z "$extra" ]] ||
         fail "cabeçalho inválido em $SERVICES_FILE"
       continue
     fi
@@ -62,6 +63,8 @@ validate_services() {
     [[ -n "$application" && -n "$type" && -n "$web_port" && -n "$api_port" && -n "$host" && -n "$path" ]] ||
       fail "linha $line_number tem campo obrigatório vazio"
     [[ -z "$extra" ]] || fail "linha $line_number tem campos extras"
+    [[ -z "$tenants" || "$tenants" =~ ^[A-Za-z0-9-]+([[:space:]]*,[[:space:]]*[A-Za-z0-9-]+)*$ ]] ||
+      fail "linha $line_number tem tenants inválidas: $tenants"
     [[ "$type" == 'base' || "$type" == 'module' ]] || fail "linha $line_number tem tipo inválido: $type"
     [[ "$web_port" =~ ^[0-9]+$ ]] || fail "linha $line_number tem porta Web inválida: $web_port"
     [[ "$api_port" =~ ^[0-9]+$ ]] || fail "linha $line_number tem porta API inválida: $api_port"
@@ -103,9 +106,9 @@ validate_services() {
 validate_static_locations() {
   [[ -f "$STATIC_LOCATIONS_FILE" ]] || fail "arquivo não encontrado: $STATIC_LOCATIONS_FILE"
 
-  local application type web_port api_port host path extra
+  local application type web_port api_port host path tenants extra
   local -A applications=() routes=()
-  while IFS=';' read -r application type web_port api_port host path extra; do
+  while IFS=';' read -r application type web_port api_port host path tenants extra; do
     [[ "$application" == 'application' ]] && continue
     application="$(trim "$application")"
     [[ -n "$application" ]] && applications[$application]=1
@@ -177,10 +180,10 @@ EOF_HEADERS
 
 emit_static_locations_for_host() {
   local target_host="$1"
-  local application type web_port api_port host path extra
+  local application type web_port api_port host path tenants extra
   local -A host_applications=()
 
-  while IFS=';' read -r application type web_port api_port host path extra; do
+  while IFS=';' read -r application type web_port api_port host path tenants extra; do
     [[ "$application" == 'application' ]] && continue
     application="$(trim "$application")"
     host="$(trim "$host")"
@@ -207,9 +210,9 @@ EOF_STATIC
 emit_locations_for_host() {
   local target_host="$1"
   local tenant_header="${2:-}"
-  local application type web_port api_port row_host path extra
+  local application type web_port api_port row_host path tenants extra
 
-  while IFS=';' read -r application type web_port api_port row_host path extra; do
+  while IFS=';' read -r application type web_port api_port row_host path tenants extra; do
     [[ "$application" == 'application' ]] && continue
 
     web_port="$(trim "$web_port")"

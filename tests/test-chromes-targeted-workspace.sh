@@ -21,10 +21,10 @@ orgs/orbital/orbital-app
 orgs/inst-app
 PROJECTS
 cat > "$TMP/services.csv" <<'SERVICES'
-application;type;web_port;api_port;host;path
-orbital-app;base;4001;8001;admin.localhost;/
-site-inst;base;4003;8003;anpprev.localhost;/
-site-inst;base;4003;8003;sinproprev.localhost;/
+application;type;web_port;api_port;host;path;tenants
+orbital-app;base;4001;8001;admin.localhost;/;anpprev,sinproprev,asaclub
+site-inst;base;4003;8003;anpprev.localhost;/;
+site-inst;base;4003;8003;sinproprev.localhost;/;
 SERVICES
 cat > "$TMP/bin/google-chrome-stable" <<'FAKE'
 #!/usr/bin/env bash
@@ -58,7 +58,7 @@ READY
       request="$(cat "$req")"
       printf '%s\n' "$request" > "$TMP/request.log"
       IFS=$'\t' read -r token _ <<< "$request"
-      printf '%s\tworkspace=4\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
+      printf '%s\tworkspace=3\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
       for _ in $(seq 1 160); do
         if [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]]; then
           printf '%s\tbrowsers=2\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
@@ -83,16 +83,21 @@ out="$(
   PROJECTS_FILE="$TMP/projects" \
   SERVICES_FILE="$TMP/services.csv" \
   CHROMES_TEST_LOG="$TMP/chrome.log" \
-  CHROMES_TARGET_WORKSPACE=4 \
+  CHROMES_TARGET_WORKSPACE=3 \
     "$ROOT/scripts/chromes/ubuntu.sh"
 )"
 wait "$watcher"
 
-grep -Fq $'action=default\tworkspace=4\tmaximize=1' "$TMP/request.log"
+grep -Fq $'action=default\tworkspace=3\tmaximize=1' "$TMP/request.log"
 grep -Fq -- '--profile-directory=Profile 7 --new-window https://chatgpt.com/' "$TMP/chrome.log"
-grep -Fq -- '--profile-directory=Profile 3 --new-window https://anpprev.localhost/ https://sinproprev.localhost/' "$TMP/chrome.log"
-grep -Fq 'Destino: workspace 4, monitor mais à esquerda, maximizado.' <<< "$out"
-grep -Fq 'Projeto: inst-app -> https://anpprev.localhost/ https://sinproprev.localhost/' <<< "$out"
-grep -Fq 'Chrome confirmado no workspace 4 / monitor esquerdo / maximizado.' <<< "$out"
+grep -Fq -- '--profile-directory=Profile 3 --new-window https://anpprev.admin.localhost/ https://sinproprev.admin.localhost/ https://asaclub.admin.localhost/' "$TMP/chrome.log"
+grep -Fq 'Destino: workspace 3, monitor mais à esquerda, maximizado.' <<< "$out"
+grep -Fq 'Projeto: orbital-app -> https://anpprev.admin.localhost/ https://sinproprev.admin.localhost/ https://asaclub.admin.localhost/' <<< "$out"
+grep -Fq 'Chrome confirmado no workspace 3 / monitor esquerdo / maximizado.' <<< "$out"
+
+# O controlador deve ativar o workspace alvo ANTES de liberar o Chrome.
+chrome_prepare_block="$(sed -n '/_prepareChromes(token, fields = {}) {/,/_prepareTerminals(token, action, fields = {}) {/p' "$ROOT/apps/desktops-gnome-extension/extension.js")"
+grep -Fq 'workspace.activate(global.get_current_time())' <<< "$chrome_prepare_block"
+grep -Fq 'const activeWorkspace = global.workspace_manager.get_active_workspace_index();' <<< "$chrome_prepare_block"
 ! grep -qi 'nautilus\|files' "$TMP/chrome.log"
-echo 'OK: chromes resolve o projeto pelo workspace, abre URLs corretas, maximiza e não abre Files.'
+echo 'OK: chromes expande tenants do services.csv em abas do projeto Orbital e mantém posicionamento.'

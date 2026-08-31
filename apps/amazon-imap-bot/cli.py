@@ -20,7 +20,12 @@ def doctor(settings) -> int:
         print(f"  - {account.email}: {'ativa' if account.enabled else 'desativada'} · senha {pwd}")
         if account.enabled and not account.password:
             errors += 1
-    print(f"OpenAI: {'configurada' if settings.openai_api_key else 'AUSENTE'} · {settings.openai_model}")
+    print(f"OpenAI: {'configurada' if settings.openai_api_key else 'AUSENTE'} · {settings.openai_model} · reasoning={settings.openai_reasoning_effort}")
+    print(f"OpenAI timeout: {settings.openai_timeout_seconds}s")
+    print(f"OpenAI saída: {settings.openai_output_dir}")
+    print(f"Funções: {settings.functions_config} ({'OK' if settings.functions_config.is_file() else 'AUSENTE'})")
+    if not settings.functions_config.is_file():
+        errors += 1
     if not settings.openai_api_key:
         errors += 1
     try:

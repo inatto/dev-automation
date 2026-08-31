@@ -29,7 +29,7 @@ O próprio `chromes` resolve o projeto/URL do workspace e abre:
   - Chrome 1: Daniel/danielmaiax -> https://chatgpt.com/
   - Chrome 2: Sindicatto -> URL(s) local(is), somente quando existirem
   - monitor esquerdo, maximizado
-Intervalo entre desktops: 2s.
+Intervalo entre desktops: 1s.
 HELP
     exit 0
     ;;
@@ -47,7 +47,7 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     fail 'não foi possível sincronizar os workspaces GNOME.'
 fi
 
-log "Projetos: ${#WORKSPACE_PROJECTS[@]}; intervalo: 2s; monitor: esquerdo; maximizado: sim."
+log "Projetos: ${#WORKSPACE_PROJECTS[@]}; intervalo: 1s; monitor: esquerdo; maximizado: sim."
 for ((i=0; i<${#WORKSPACE_PROJECTS[@]}; i++)); do
   entry="${WORKSPACE_PROJECTS[$i]}"
   name="$(basename -- "$entry")"

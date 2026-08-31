@@ -1,0 +1,3 @@
+Teste do Amazon IMAP Bot para a API OpenAI.
+O retorno deve conter este arquivo e um arquivo RETORNO_OPENAI.txt.
+Criado em: 2026-08-31T00:49:33

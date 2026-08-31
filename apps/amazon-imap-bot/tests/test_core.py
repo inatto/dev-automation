@@ -140,3 +140,171 @@ def test_event_log_is_persistent():
         event = store.recent_events(1)[0]
         assert event["category"] == "GPT"
         assert "REQUEST" in event["text"]
+
+
+def test_soft_delete_hides_message_but_preserves_dedup():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "db.sqlite3")
+        store.add_inbound(
+            account="suporte@example.com", message_id="<delete-me>", thread_key="<delete-me>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Remover", body="Oi",
+            status="replied", mail_date="2026-08-29 12:00:00", imap_uid="77", imap_folder="INBOX",
+        )
+        row = store.list_messages("in")[0]
+        store.mark_deleted(row["id"], "move:Deleted Items")
+        assert store.list_messages("in") == []
+        assert store.seen("suporte@example.com", "<delete-me>") is True
+        full = store.get_message(row["id"])
+        assert full["deleted_at"]
+        assert full["delete_mode"] == "move:Deleted Items"
+
+
+def test_mailbox_detects_special_use_trash_folder():
+    from types import SimpleNamespace
+    from mailbox import MailboxClient
+
+    class FakeConn:
+        def list(self):
+            return "OK", [
+                b'(\\HasNoChildren) "/" "INBOX"',
+                b'(\\HasNoChildren \\Trash) "/" "Deleted Items"',
+            ]
+
+    client = MailboxClient(SimpleNamespace(imap_trash_folder=""))
+    assert client.trash_folder(FakeConn()) == "Deleted Items"
+
+
+def test_api_run_stack_persists_status_and_timing():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "db.sqlite3")
+        run_id = store.add_api_run(
+            kind="zip-test", status="aguardando-resposta", model="gpt-5.6",
+            reasoning_effort="medium", input_path="/tmp/in.zip", output_path="",
+            request_summary="teste",
+        )
+        store.update_api_run(
+            run_id, status="concluido", output_path="/tmp/out.zip",
+            response_id="resp_123", response_summary="ok", elapsed_ms=1234, finished=True,
+        )
+        row = store.get_api_run(run_id)
+        assert row["status"] == "concluido"
+        assert row["elapsed_ms"] == 1234
+        assert row["response_id"] == "resp_123"
+        assert row["finished_at"]
+
+
+def test_api_runner_extracts_container_zip_citation():
+    from api_runner import ApiTestRunner
+
+    response = {
+        "output": [{
+            "type": "message",
+            "content": [{
+                "type": "output_text",
+                "annotations": [{
+                    "type": "container_file_citation",
+                    "container_id": "cntr_1",
+                    "file_id": "cfile_1",
+                    "filename": "return.zip",
+                }],
+            }],
+        }],
+    }
+    assert ApiTestRunner._container_files(response) == [{
+        "container_id": "cntr_1", "file_id": "cfile_1", "filename": "return.zip"
+    }]
+
+
+def test_function_map_authorizes_sender_and_maps_reasoning_level():
+    import json
+    from function_map import FunctionMap
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        path.write_text(json.dumps({
+            "version": 1,
+            "senders": {
+                "danielmaiax@gmail.com": {
+                    "enabled": True,
+                    "functions": ["api_zip_test"],
+                }
+            },
+            "functions": {
+                "api_zip_test": {
+                    "enabled": True,
+                    "aliases": ["mande o arquivo teste"],
+                    "default_reasoning_level": 2,
+                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                }
+            },
+        }), encoding="utf-8")
+        mapping = FunctionMap(path)
+        request = mapping.resolve(
+            "DanielMaiaX@gmail.com",
+            "Teste API",
+            "Mande o arquivo teste usando o nível 1 e peça como retorno qual é a capital da África do Sul",
+        )
+        assert request is not None
+        assert request.name == "api_zip_test"
+        assert request.reasoning_level == 1
+        assert request.reasoning_effort == "low"
+        assert request.request_text == "qual é a capital da África do Sul"
+
+
+def test_function_map_rejects_unauthorized_sender():
+    import json
+    from function_map import FunctionMap
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        path.write_text(json.dumps({
+            "senders": {"danielmaiax@gmail.com": {"functions": ["api_zip_test"]}},
+            "functions": {
+                "api_zip_test": {
+                    "aliases": ["mande o arquivo teste"],
+                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                }
+            },
+        }), encoding="utf-8")
+        mapping = FunctionMap(path)
+        assert mapping.resolve(
+            "outra-pessoa@example.com", "", "mande o arquivo teste usando nível 1"
+        ) is None
+        assert mapping.is_command_but_unauthorized(
+            "outra-pessoa@example.com", "", "mande o arquivo teste usando nível 1"
+        ) == "api_zip_test"
+
+
+def test_function_map_all_reasoning_levels_and_invalid_level():
+    import json
+    import pytest
+    from function_map import FunctionMap, REASONING_LEVELS
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "functions.json"
+        path.write_text(json.dumps({
+            "senders": {"a@example.com": {"functions": ["api_zip_test"]}},
+            "functions": {
+                "api_zip_test": {
+                    "aliases": ["mande o arquivo teste"],
+                    "allowed_reasoning_levels": [0, 1, 2, 3, 4, 5],
+                }
+            },
+        }), encoding="utf-8")
+        mapping = FunctionMap(path)
+        for level, effort in REASONING_LEVELS.items():
+            request = mapping.resolve("a@example.com", "", f"mande o arquivo teste nível {level}")
+            assert request is not None
+            assert request.reasoning_effort == effort
+        with pytest.raises(ValueError, match="entre 0 e 5"):
+            mapping.resolve("a@example.com", "", "mande o arquivo teste nível 9")
+
+
+def test_api_runner_validates_reasoning_effort():
+    import pytest
+    from api_runner import ApiTestRunner
+
+    assert ApiTestRunner.normalize_reasoning_effort("LOW") == "low"
+    assert ApiTestRunner.normalize_reasoning_effort("xhigh") == "xhigh"
+    with pytest.raises(ValueError):
+        ApiTestRunner.normalize_reasoning_effort("impossivel")
