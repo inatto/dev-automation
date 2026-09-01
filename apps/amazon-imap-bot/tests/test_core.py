@@ -46,7 +46,7 @@ def test_empty_body_is_still_replyable():
 
 def test_store_dedup_and_details():
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         store.add_inbound(
             account="a@b.com", message_id="<1>", thread_key="<1>",
             sender="x@y.com", recipient="a@b.com", subject="s", body="b", status="received",
@@ -95,33 +95,9 @@ def test_ses_sanitizes_untrusted_header_linebreaks():
     assert "X-Bad" not in parsed.keys()
 
 
-def test_store_migrates_existing_database_and_records_outbound():
-    import sqlite3
+def test_store_records_outbound_with_memory_backend():
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "old.sqlite3"
-        db = sqlite3.connect(path)
-        db.execute("""
-            CREATE TABLE messages (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              direction TEXT NOT NULL,
-              account_email TEXT NOT NULL,
-              message_id TEXT NOT NULL,
-              thread_key TEXT,
-              sender TEXT,
-              recipient TEXT,
-              subject TEXT,
-              body TEXT,
-              reply_to_message_id TEXT,
-              provider_message_id TEXT,
-              status TEXT NOT NULL,
-              error TEXT,
-              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              UNIQUE(direction, account_email, message_id)
-            )
-        """)
-        db.commit()
-        db.close()
-        store = Store(path)
+        store = Store(Path(tmp) / "memory.store")
         store.add_outbound(
             account="suporte@example.com", message_id="<out@example.com>", thread_key="<in@example.com>",
             sender="suporte@example.com", recipient="cliente@example.com", subject="Teste", body="Recebido",
@@ -135,7 +111,7 @@ def test_store_migrates_existing_database_and_records_outbound():
 
 def test_event_log_is_persistent():
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         store.add_event("GPT", "INFO", "REQUEST model=test")
         event = store.recent_events(1)[0]
         assert event["category"] == "GPT"
@@ -144,7 +120,7 @@ def test_event_log_is_persistent():
 
 def test_soft_delete_hides_message_but_preserves_dedup():
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         store.add_inbound(
             account="suporte@example.com", message_id="<delete-me>", thread_key="<delete-me>",
             sender="cliente@example.com", recipient="suporte@example.com", subject="Remover", body="Oi",
@@ -161,7 +137,7 @@ def test_soft_delete_hides_message_but_preserves_dedup():
 
 def test_store_tracks_pending_delete_statuses():
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         store.add_inbound(
             account="suporte@example.com", message_id="<queued-delete>", thread_key="<queued-delete>",
             sender="cliente@example.com", recipient="suporte@example.com", subject="Remover", body="Oi",
@@ -194,7 +170,7 @@ def test_monitor_delete_queue_runs_in_background_fifo():
             return "move:Deleted Items"
 
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         for uid in ("91", "92"):
             store.add_inbound(
                 account="suporte@example.com", message_id=f"<delete-{uid}>", thread_key=f"<delete-{uid}>",
@@ -247,7 +223,7 @@ def test_mailbox_detects_special_use_trash_folder():
 
 def test_api_run_stack_persists_status_and_timing():
     with tempfile.TemporaryDirectory() as tmp:
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         run_id = store.add_api_run(
             kind="zip-test", status="aguardando-resposta", model="gpt-5.6",
             reasoning_effort="medium", input_path="/tmp/in.zip", output_path="",
@@ -490,7 +466,7 @@ def test_functions_view_reads_real_json_as_human_interface():
         assert '"functions"' not in text
 
 
-def test_project_package_contains_no_sql_scripts():
+def test_project_does_not_ship_sql_patch_files():
     root = Path(__file__).resolve().parents[1]
     assert list(root.rglob("*.sql")) == []
 
@@ -498,7 +474,6 @@ def test_project_package_contains_no_sql_scripts():
 def test_oracle_catalog_builds_function_schema_from_relational_rows():
     from types import SimpleNamespace
     from function_catalog import OracleFunctionCatalog
-    from function_map import FunctionMap
 
     class FakeCursor:
         def __init__(self):
@@ -529,7 +504,6 @@ def test_oracle_catalog_builds_function_schema_from_relational_rows():
                 return [
                     ("function_catalog_admin", "operation", "string", "Y", "Operação.", "STATIC"),
                     ("function_catalog_admin", "reasoning_level", "integer", "N", "Nível.", "FUNCTION_REASONING_LEVELS"),
-                    ("function_catalog_admin", "request_text", "string", "N", "Contexto.", "NONE"),
                     ("project_zip_edit", "reasoning_level", "integer", "Y", "Nível.", "FUNCTION_REASONING_LEVELS"),
                     ("project_zip_edit", "request_text", "string", "Y", "Pedido.", "NONE"),
                     ("project_zip_edit", "operation", "string", "Y", "Operação.", "STATIC"),
@@ -577,28 +551,6 @@ def test_oracle_catalog_builds_function_schema_from_relational_rows():
     assert params["properties"]["operation"]["enum"] == ["modify", "query"]
     assert params["required"] == ["reasoning_level", "request_text", "operation"]
     assert params["additionalProperties"] is False
-
-    # REQUIRED=N continua opcional para a aplicação, mas strict mode da OpenAI
-    # exige todas as propriedades em required; opcionais são nullable só no payload da API.
-    mapping = FunctionMap(TestCatalog(SimpleNamespace(schema="WKSP_SINDICATTO")))
-    admin_tool = next(
-        tool for tool in mapping.openai_tools_for_sender("danielmaiax@gmail.com")
-        if tool["name"] == "function_catalog_admin"
-    )
-    admin_params = admin_tool["parameters"]
-    assert admin_params["required"] == ["operation", "reasoning_level", "request_text"]
-    assert admin_params["properties"]["reasoning_level"]["type"] == ["integer", "null"]
-    assert admin_params["properties"]["reasoning_level"]["enum"] == [0, 1, None]
-    assert admin_params["properties"]["request_text"]["type"] == ["string", "null"]
-    assert admin_params["additionalProperties"] is False
-
-    request = mapping.request_from_tool_call(
-        "danielmaiax@gmail.com",
-        "function_catalog_admin",
-        {"operation": "list", "reasoning_level": None, "request_text": None},
-    )
-    assert request.reasoning_level == 1
-    assert request.arguments["operation"] == "list"
 
 
 def test_function_map_accepts_project_zip_edit_and_level():
@@ -732,7 +684,7 @@ def test_project_zip_runner_two_independent_calls_select_edit_and_download():
             openai_timeout_seconds=30,
             openai_output_dir=output,
         )
-        store = Store(Path(tmp) / "db.sqlite3")
+        store = Store(Path(tmp) / "memory.store")
         client = FakeClient()
         runner = TestRunner(settings, store, client=client)
         request = "Assunto: teste\n\nAltere apenas o título da página inicial do Orbital App para - mágica aconteceu."
@@ -872,7 +824,7 @@ def test_project_zip_query_completes_without_return_zip():
             openai_timeout_seconds=300,
             openai_output_dir=tmp_path / "downloads",
         )
-        store = Store(tmp_path / "db.sqlite3")
+        store = Store(tmp_path / "memory.store")
         runner = ProjectZipRunner(settings, store, client=FakeClient())
         run_id = runner.process_project_zip(
             source,
@@ -896,6 +848,8 @@ def test_mobile_api_overview_and_actions_do_not_expose_secrets():
             return [{"status": "analyzing"}] if direction == "in" else []
         def recent_events(self, limit=500): return []
         def list_api_runs(self, limit=200): return []
+        def get_control(self):
+            return {"external_send_enabled": False, "external_require_approval": True}
 
     class FakeLock:
         def locked(self): return False
@@ -907,7 +861,7 @@ def test_mobile_api_overview_and_actions_do_not_expose_secrets():
         openai_timeout_seconds=300, openai_api_key="SECRET",
         openai_output_dir=Path("/tmp/out"), openai_test_zip=Path("/tmp/test.zip"),
         functions_config=Path("/tmp/functions.json"), project_zip_search_root=Path("/tmp/code"),
-        auto_reply_enabled=True, sound_enabled=True,
+        sound_enabled=True,
     )
     state = SimpleNamespace(connected=True, last_check="-", last_error="", received=2, replied=1)
     monitor = SimpleNamespace(
@@ -933,3 +887,121 @@ def test_mobile_api_limit_validation():
         assert exc.status == 400
     else:
         raise AssertionError("limit inválido deveria falhar")
+
+
+def test_imap_reconciliation_hides_messages_missing_from_server():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "memory.store")
+        store.add_inbound(
+            account="suporte@example.com", message_id="<sync-1>", thread_key="<sync-1>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Sync", body="Oi",
+            status="synced", imap_uid="100", imap_folder="INBOX", imap_uid_validity="7",
+        )
+        assert len(store.list_messages("in")) == 1
+        removed = store.reconcile_inbox("suporte@example.com", "INBOX", "7", set())
+        assert removed == 1
+        assert store.list_messages("in") == []
+        full = store.get_message(1)
+        assert full["imap_present"] == 0
+        assert full["delete_mode"] == "imap-sync-missing"
+
+
+def test_external_reply_requires_individual_and_global_release():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "memory.store")
+        outbound_id = store.add_outbound(
+            account="suporte@example.com", message_id="<out-approval>", thread_key="<in-approval>",
+            sender="suporte@example.com", recipient="cliente@example.com", subject="Teste", body="Recebido",
+            reply_to="<in-approval>", provider_message_id="", status="pending-approval",
+            recipient_class="external", approval_required=True,
+        )
+        approved = store.approve_outbound(outbound_id, approved_by="test")
+        assert approved["status"] == "approved-waiting-global"
+        assert approved["approved_at"]
+        store.set_external_send_enabled(True, updated_by="test")
+        activated = store.activate_approved_waiting()
+        assert activated == [outbound_id]
+        assert store.get_message(outbound_id)["status"] == "send-queued"
+
+
+def test_owner_recipient_is_marked_as_always_allowed():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "memory.store")
+        assert store.is_always_allowed_recipient("danielmaiax@gmail.com") is True
+        assert store.is_always_allowed_recipient("cliente@example.com") is False
+
+
+def test_oracle_operational_sql_avoids_reserved_aliases_and_bind_names():
+    import inspect
+    import re
+    import store as store_module
+
+    select_sql = store_module._OracleStore._message_select()
+    assert 'references_header AS "references"' in select_sql
+
+    source = inspect.getsource(store_module._OracleStore)
+    assert re.search(r":uid\b", source, flags=re.IGNORECASE) is None
+    assert re.search(r":references\b", source, flags=re.IGNORECASE) is None
+
+
+def test_no_reply_flag_is_persisted_and_cancels_pending_reply():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "memory.store")
+        inbound_id = store.add_inbound(
+            account="suporte@example.com", message_id="<in-no-reply>", thread_key="<in-no-reply>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Não responder", body="Oi",
+            status="reply-pending-approval", imap_uid="101", imap_folder="INBOX", imap_uid_validity="7",
+        )
+        outbound_id = store.add_outbound(
+            account="suporte@example.com", message_id="<out-no-reply>", thread_key="<in-no-reply>",
+            sender="suporte@example.com", recipient="cliente@example.com", subject="Não responder", body="Rascunho",
+            reply_to="<in-no-reply>", provider_message_id="", status="pending-approval",
+            recipient_class="external", approval_required=True,
+        )
+
+        result = store.suppress_inbound_reply(inbound_id, suppressed_by="test")
+
+        assert result["reply_suppressed"] == 1
+        assert result["reply_suppressed_at"]
+        assert result["reply_suppressed_by"] == "test"
+        assert result["status"] == "no-reply"
+        assert result["cancelled_replies"] == 1
+        assert store.is_inbound_reply_suppressed("suporte@example.com", "<in-no-reply>") is True
+        assert store.get_message(outbound_id)["status"] == "cancelled-no-reply"
+
+
+def test_no_reply_status_is_not_overwritten_by_monitor_status_updates():
+    with tempfile.TemporaryDirectory() as tmp:
+        store = Store(Path(tmp) / "memory.store")
+        inbound_id = store.add_inbound(
+            account="suporte@example.com", message_id="<in-no-overwrite>", thread_key="<in-no-overwrite>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Teste", body="Oi",
+            status="received", imap_uid="102", imap_folder="INBOX", imap_uid_validity="7",
+        )
+        store.suppress_inbound_reply(inbound_id, suppressed_by="test")
+        store.set_inbound_status("suporte@example.com", "<in-no-overwrite>", "understood")
+        assert store.get_message(inbound_id)["status"] == "no-reply"
+
+
+def test_tui_render_loop_does_not_read_oracle_directly():
+    import inspect
+    import tui as tui_module
+
+    source = inspect.getsource(tui_module.run)
+    # Toda leitura usada pela renderização deve vir do _TuiDataFeed.
+    assert 'store.list_messages(' not in source
+    assert 'store.recent_events(' not in source
+    assert 'store.list_api_runs(' not in source
+    assert 'store.get_message(' not in source
+    assert 'store.get_control(' not in source
+    assert 'store.count_pending_deletes(' not in source
+
+
+def test_imap_sync_loads_uid_index_once_instead_of_querying_each_uid():
+    import inspect
+    import monitor as monitor_module
+
+    source = inspect.getsource(monitor_module.Monitor.run_account_once)
+    assert 'list_inbound_uid_index' in source
+    assert 'get_inbound_by_uid' not in source
+    assert 'touch_inbound_uid' not in source

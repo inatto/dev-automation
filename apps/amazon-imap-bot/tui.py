@@ -6,6 +6,9 @@ import queue
 import textwrap
 import threading
 import time
+from copy import deepcopy
+
+from diagnostics import trace
 
 from config import Settings
 from api_runner import ApiTestRunner
@@ -27,11 +30,21 @@ STATUS_LABELS = {
     "understood": "ENTENDIDO",
     "awaiting-confirmation": "AGUARDANDO CONF.",
     "confirmed": "CONFIRMADO",
+    "synced": "SINCRONIZADO",
+    "reply-pending-approval": "RESP. PEND. ENVIO",
+    "reply-approved-waiting-global": "RESP. LIBERADA/BLOQ.",
+    "reply-queued": "RESP. NA FILA",
+    "pending-approval": "PENDENTE LIBERAÇÃO",
+    "approved-waiting-global": "LIBERADO/BLOQ. GLOBAL",
+    "send-queued": "ENVIO NA FILA",
+    "send-error": "ERRO ENVIO",
     "sending": "ENVIANDO",
     "executing": "EXECUTANDO",
     "completed": "CONCLUÍDO",
     "replied": "RESPONDIDO",
     "reply-error": "ERRO RESPOSTA",
+    "no-reply": "NÃO RESPONDER",
+    "cancelled-no-reply": "CANCELADA/NÃO RESP.",
     "function-error": "ERRO FUNÇÃO",
     "delete-queued": "REMOVENDO (FILA)",
     "deleting": "REMOVENDO",
@@ -39,7 +52,7 @@ STATUS_LABELS = {
     "sent": "ENVIADO",
     "error": "ERRO",
 }
-PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing", "delete-queued", "deleting"}
+PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing", "delete-queued", "deleting", "reply-queued", "send-queued"}
 
 
 def _status_label(status: str) -> str:
@@ -83,7 +96,7 @@ def _init_colors() -> Palette:
     curses.init_pair(7, curses.COLOR_BLUE, background)
     curses.init_pair(8, curses.COLOR_BLACK, curses.COLOR_WHITE)
     curses.init_pair(9, curses.COLOR_WHITE, curses.COLOR_BLUE)
-    curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_MAGENTA)
+    curses.init_pair(10, curses.COLOR_WHITE, curses.COLOR_GREEN)
     p.HEADER = curses.color_pair(1) | curses.A_BOLD
     p.TOP_BAR = curses.color_pair(10) | curses.A_BOLD
     p.BORDER = curses.color_pair(2)
@@ -112,13 +125,105 @@ def _status_attr(status: str, p: Palette) -> int:
     value = (status or "").lower()
     if "error" in value or "erro" in value:
         return p.ERROR
-    if value in {"awaiting-confirmation", "received"} or "ignored" in value or "warn" in value or "ignorado" in value:
+    if value in {"awaiting-confirmation", "received", "reply-pending-approval", "pending-approval", "reply-approved-waiting-global", "approved-waiting-global", "no-reply", "cancelled-no-reply"} or "ignored" in value or "warn" in value or "ignorado" in value:
         return p.WARN
     if value in {"sent", "replied", "completed", "confirmed", "online"} or "ok" in value:
         return p.OK
     if value in PROCESSING_STATUSES:
         return p.BORDER | curses.A_BOLD
     return 0
+
+
+def _safe_store_call(call, fallback):
+    try:
+        return call(), ""
+    except Exception as exc:
+        return fallback, f"{type(exc).__name__}: {exc}"
+
+
+
+class _TuiDataFeed:
+    """Snapshot Oracle fora da thread do curses.
+
+    Desenho, navegação e abertura de detalhes usam somente memória local.
+    """
+    def __init__(self, store, monitor, refresh_seconds: float = 1.0):
+        self.store = store
+        self.monitor = monitor
+        self.refresh_seconds = max(0.5, float(refresh_seconds))
+        self._lock = threading.RLock()
+        self._wake = threading.Event()
+        self._stop = threading.Event()
+        self._active_tab = TAB_INBOX
+        self._data = {
+            "header": {"external_send_enabled": False, "pending_deletes": 0,
+                       "pending_approvals": 0, "approved_waiting_global": 0},
+            "rows": {TAB_INBOX: [], TAB_REPLIES: [], TAB_CONSOLE: [], TAB_API: []},
+            "errors": {}, "updated_at": 0.0,
+        }
+        self._thread = threading.Thread(target=self._run, name="amazon-imap-tui-feed", daemon=True)
+
+    def start(self):
+        self._thread.start()
+        self.request_refresh()
+
+    def stop(self, timeout: float = 5.0):
+        self._stop.set(); self._wake.set()
+        if self._thread.is_alive(): self._thread.join(timeout=timeout)
+
+    def request_refresh(self):
+        self._wake.set()
+
+    def set_active_tab(self, tab: int):
+        with self._lock:
+            changed = tab != self._active_tab
+            self._active_tab = tab
+        if changed: self._wake.set()
+
+    def patch_message_status(self, message_id: int, status: str):
+        with self._lock:
+            for tab in (TAB_INBOX, TAB_REPLIES):
+                for row in self._data["rows"].get(tab, []):
+                    if int(row.get("id") or 0) == int(message_id): row["status"] = status
+
+    def patch_global(self, enabled: bool):
+        with self._lock: self._data["header"]["external_send_enabled"] = bool(enabled)
+
+    def snapshot(self, tab: int) -> dict:
+        with self._lock:
+            return {"header": deepcopy(self._data["header"]),
+                    "rows": deepcopy(self._data["rows"].get(tab, [])),
+                    "error": str(self._data["errors"].get(tab, "")),
+                    "header_error": str(self._data["errors"].get("header", "")),
+                    "updated_at": float(self._data.get("updated_at") or 0.0)}
+
+    def _load_tab(self, tab: int):
+        if tab == TAB_INBOX: return self.store.list_messages("in", 500)
+        if tab == TAB_REPLIES: return self.store.list_messages("out", 500)
+        if tab == TAB_CONSOLE: return self.store.recent_events(500)
+        if tab == TAB_API: return self.store.list_api_runs(200)
+        return []
+
+    def _refresh(self):
+        started=time.monotonic()
+        with self._lock: tab=self._active_tab
+        try: header, header_error = self.store.get_tui_header(), ""
+        except Exception as exc: header, header_error = None, f"{type(exc).__name__}: {exc}"
+        try: rows, tab_error = self._load_tab(tab), ""
+        except Exception as exc: rows, tab_error = None, f"{type(exc).__name__}: {exc}"
+        with self._lock:
+            if header is not None: self._data["header"] = header
+            if rows is not None: self._data["rows"][tab] = rows
+            self._data["errors"]["header"] = header_error
+            self._data["errors"][tab] = tab_error
+            self._data["updated_at"] = time.monotonic()
+        trace(f"TUI FEED tab={TAB_NAMES[tab]} rows={len(rows) if rows is not None else -1} elapsed={time.monotonic()-started:.3f}s")
+
+    def _run(self):
+        while not self._stop.is_set():
+            self._refresh()
+            self._wake.wait(self.refresh_seconds)
+            self._wake.clear()
 
 
 def _format_date(value: str) -> str:
@@ -161,6 +266,31 @@ def _message_lines(row: dict, width: int) -> list[str]:
         lines.append(f"In-Reply-To: {row.get('reply_to_message_id')}")
     if row.get("provider_message_id"):
         lines.append(f"SES MessageId: {row.get('provider_message_id')}")
+    if direction == "in" and int(row.get("reply_suppressed") or 0) == 1:
+        lines.append("Resposta: NÃO RESPONDER / BLOQUEADA MANUALMENTE")
+        if row.get("reply_suppressed_at"):
+            lines.append(
+                f"Marcado em: {row.get('reply_suppressed_at')} por {row.get('reply_suppressed_by') or '-'}"
+            )
+    if direction == "out":
+        recipient_class = str(row.get("recipient_class") or "external").strip().lower()
+        approval_required = int(row.get("approval_required") or 0) == 1
+        lines.append(
+            "Destino: " + (
+                "PROPRIETÁRIO / SEM BLOQUEIO DE CLIENTE"
+                if recipient_class == "owner"
+                else "CLIENTE/TERCEIRO"
+            )
+        )
+        lines.append(
+            "Liberação individual: " + (
+                "OBRIGATÓRIA" if approval_required else "NÃO EXIGIDA"
+            )
+        )
+        if row.get("approved_at"):
+            lines.append(
+                f"Liberado em: {row.get('approved_at')} por {row.get('approved_by') or '-'}"
+            )
     if row.get("error"):
         lines.extend(["", f"ERRO: {row.get('error')}"])
     lines.extend(["", "CONTEÚDO", "--------"])
@@ -325,6 +455,35 @@ def _popup_confirm_delete(stdscr, row: dict, p: Palette) -> bool:
             return False
 
 
+
+
+def _popup_confirm_action(stdscr, title: str, lines: list[str], p: Palette, *, danger: bool = False) -> bool:
+    attr = p.ERROR if danger else p.WARN
+    h, w = stdscr.getmaxyx()
+    content_width = max([len(title)] + [len(line) for line in lines] + [42])
+    pw = min(max(62, content_width + 8), max(34, w - 4))
+    ph = min(max(10, len(lines) + 6), max(10, h - 2))
+    top = max(0, (h - ph) // 2)
+    left = max(0, (w - pw) // 2)
+    win = curses.newwin(ph, pw, top, left)
+    win.keypad(True)
+    try:
+        win.attron(attr)
+        win.border()
+        win.attroff(attr)
+    except curses.error:
+        pass
+    _safe_add(win, 0, 2, f" {title} ", pw - 4, attr | curses.A_BOLD)
+    for idx, line in enumerate(lines[: ph - 5]):
+        _safe_add(win, 2 + idx, 3, line, pw - 6, attr if idx == 0 else 0)
+    _safe_add(win, ph - 2, 3, "S ou Enter = CONFIRMAR   N ou Esc = CANCELAR", pw - 6, p.DIM)
+    win.refresh()
+    while True:
+        ch = win.getch()
+        if ch in (ord("s"), ord("S"), ord("y"), ord("Y"), 10, 13, curses.KEY_ENTER):
+            return True
+        if ch in (ord("n"), ord("N"), 27, ord("q"), ord("Q")):
+            return False
 
 
 def _wrap_labeled(lines: list[str], prefix: str, value: object, width: int) -> None:
@@ -611,9 +770,9 @@ def _popup_api_run(stdscr, row: dict, p: Palette) -> None:
 
 def run(settings: Settings, startup_log=None) -> int:
     startup_log = startup_log or (lambda text: None)
-    startup_log(f"TUI: abrindo SQLite local em {settings.database_path}...")
-    store = Store(settings.database_path)
-    startup_log("TUI: SQLite local OK.")
+    startup_log("TUI: abrindo armazenamento operacional Oracle...")
+    store = Store(settings.function_database, log=startup_log)
+    startup_log("TUI: armazenamento Oracle OK.")
     events: queue.Queue[str] = queue.Queue()
     startup_log("TUI: inicializando monitor...")
     monitor = Monitor(settings, store, events.put, on_startup=startup_log)
@@ -624,7 +783,21 @@ def run(settings: Settings, startup_log=None) -> int:
     thread = threading.Thread(target=monitor.run_forever, daemon=True)
     startup_log("TUI: iniciando thread de monitoramento IMAP...")
     thread.start()
-    startup_log("TUI: thread IMAP iniciada; abrindo interface curses.")
+    startup_log("TUI: thread IMAP iniciada; preparando snapshot assíncrono da interface.")
+    feed = _TuiDataFeed(store, monitor, refresh_seconds=1.0)
+    feed.start()
+    action_results: queue.Queue[tuple[str, str]] = queue.Queue()
+    startup_log("TUI: interface desacoplada do Oracle; abrindo curses.")
+
+    def _background_action(fn, *, success_level="OK"):
+        def runner():
+            try:
+                action_results.put((str(fn() or "Operação concluída."), success_level))
+            except Exception as exc:
+                action_results.put((f"ERRO: {type(exc).__name__}: {exc}", "ERROR"))
+            finally:
+                feed.request_refresh()
+        threading.Thread(target=runner, name="amazon-imap-tui-action", daemon=True).start()
 
     def draw(stdscr):
         try:
@@ -645,12 +818,23 @@ def run(settings: Settings, startup_log=None) -> int:
         notice_until = 0.0
 
         while not monitor.stop_event.is_set():
+            saw_event = False
             while True:
                 try:
-                    events.get_nowait()
+                    events.get_nowait(); saw_event = True
                 except queue.Empty:
                     break
-
+            if saw_event: feed.request_refresh()
+            while True:
+                try:
+                    result_text, result_level = action_results.get_nowait()
+                except queue.Empty:
+                    break
+                notice = result_text
+                notice_attr = p.ERROR if result_level == "ERROR" else (p.WARN if result_level == "WARN" else p.OK)
+                notice_until = time.time() + (8 if result_level == "ERROR" else 5)
+            feed.set_active_tab(active_tab)
+            snapshot = feed.snapshot(active_tab)
             stdscr.erase()
             h, w = stdscr.getmaxyx()
             if h < 16 or w < 78:
@@ -682,13 +866,33 @@ def run(settings: Settings, startup_log=None) -> int:
                 f"IMAP {settings.imap_host}:{settings.imap_port}  |  SES {settings.aws_region}/{settings.aws_profile}  |  GPT {settings.openai_model}",
                 w - 2, p.DIM,
             )
+            header = snapshot.get("header") or {}
+            external_enabled = bool(header.get("external_send_enabled"))
+            pending_approval = int(header.get("pending_approvals") or 0)
+            approved_waiting = int(header.get("approved_waiting_global") or 0)
+            pending_deletes = int(header.get("pending_deletes") or 0)
+            top_error = snapshot.get("header_error") or ""
+            if top_error:
+                notice = f"ERRO ORACLE NA TUI: {top_error}"
+                notice_attr = p.ERROR
+                notice_until = time.time() + 8
             _safe_add(
                 stdscr, 2, 1,
                 f"Caixas online {online}/{len(monitor.states)}  Erros {errors}  Recebidos {received}  Respondidos {replied}  "
-                f"Remoções {store.count_pending_deletes()}  "
-                f"Auto-resposta {'ON' if settings.auto_reply_enabled else 'OFF'}  Poll {settings.poll_seconds}s",
+                f"Remoções {pending_deletes}  Pendentes aprovação {pending_approval}  Poll {settings.poll_seconds}s",
                 w - 2,
                 p.OK if errors == 0 else p.WARN,
+            )
+            gate_text = (
+                "CLIENTES: ENVIO GLOBAL LIBERADO" if external_enabled
+                else "CLIENTES: ENVIO GLOBAL BLOQUEADO"
+            )
+            gate_suffix = (
+                f"  |  Aprovação individual OBRIGATÓRIA  |  Aprovados aguardando global {approved_waiting}  |  G alterna"
+            )
+            _safe_add(
+                stdscr, 3, 1, gate_text + gate_suffix, w - 2,
+                p.OK if external_enabled else p.ERROR,
             )
 
             x = 1
@@ -707,14 +911,15 @@ def run(settings: Settings, startup_log=None) -> int:
 
             rows: list[dict] = []
             function_lines: list[str] = []
+            load_error = ""
             if active_tab == TAB_INBOX:
-                rows = store.list_messages("in", 500)
+                rows, load_error = snapshot.get("rows", []), snapshot.get("error", "")
                 _safe_add(box, 1, 2, "DATA        REMETENTE                         ASSUNTO                                  STATUS", w - 4, p.DIM)
             elif active_tab == TAB_REPLIES:
-                rows = store.list_messages("out", 500)
+                rows, load_error = snapshot.get("rows", []), snapshot.get("error", "")
                 _safe_add(box, 1, 2, "DATA        DESTINATÁRIO                      ASSUNTO                                  STATUS", w - 4, p.DIM)
             elif active_tab == TAB_CONSOLE:
-                rows = store.recent_events(500)
+                rows, load_error = snapshot.get("rows", []), snapshot.get("error", "")
                 _safe_add(box, 1, 2, "DATA        TIPO     NÍVEL   EVENTO", w - 4, p.DIM)
             elif active_tab == TAB_ACCOUNTS:
                 rows = [
@@ -730,7 +935,7 @@ def run(settings: Settings, startup_log=None) -> int:
                 ]
                 _safe_add(box, 1, 2, "STATUS     CONTA                                      REC   RESP   ÚLTIMA VERIFICAÇÃO", w - 4, p.DIM)
             elif active_tab == TAB_API:
-                rows = store.list_api_runs(200)
+                rows, load_error = snapshot.get("rows", []), snapshot.get("error", "")
                 cfg1 = f"Modelo={settings.openai_model}  Raciocínio={settings.openai_reasoning_effort}  Timeout={settings.openai_timeout_seconds}s  Chave={'CONFIGURADA' if settings.openai_api_key else 'AUSENTE'}"
                 cfg2 = f"Base URL={settings.openai_base_url}"
                 cfg3 = f"Saída={settings.openai_output_dir}  ZIP teste={settings.openai_test_zip}  Projetos ZIP={settings.project_zip_search_root}  Funções={monitor.function_map.source_name}"
@@ -740,6 +945,11 @@ def run(settings: Settings, startup_log=None) -> int:
                 _safe_add(box, 4, 2, "ID    TIPO    INÍCIO      ESTADO         MODELO             NÍVEL   TEMPO     RESULTADO", w - 4, p.DIM)
             else:
                 function_lines = _function_view_lines(monitor.function_map, w - 6)
+
+            if load_error:
+                notice = f"ERRO ORACLE AO CARREGAR {TAB_NAMES[active_tab]}: {load_error}"
+                notice_attr = p.ERROR
+                notice_until = time.time() + 8
 
             if active_tab == TAB_FUNCTIONS:
                 page = max(1, usable - 1)
@@ -816,7 +1026,9 @@ def run(settings: Settings, startup_log=None) -> int:
             if menu_focus:
                 footer = "←/→ selecionar menu  ↓ ou Enter entrar  F5 atualizar agora  Q sair"
             elif active_tab == TAB_INBOX:
-                footer = "↑/↓ navegar  Enter abrir  D remover  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+                footer = "↑/↓ navegar  Enter abrir  N não responder  D remover  PgUp/PgDn  Esc menu  F5 atualizar  Q sair"
+            elif active_tab == TAB_REPLIES:
+                footer = "↑/↓ navegar  Enter abrir  L liberar envio  G global clientes  PgUp/PgDn  Esc menu  Q sair"
             elif active_tab == TAB_API:
                 footer = "↑/↓ navegar  Enter abrir  T teste ZIP  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
             elif active_tab == TAB_FUNCTIONS:
@@ -831,7 +1043,8 @@ def run(settings: Settings, startup_log=None) -> int:
                 hint = (
                     "FUNÇÕES mostra o catálogo Oracle carregado pela camada de aplicação." if active_tab == TAB_FUNCTIONS else
                     "T na área API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
-                    "D remove da ENTRADA com confirmação e move o e-mail para a lixeira do servidor." if active_tab == TAB_INBOX else
+                    "N marca NÃO RESPONDER no Oracle e cancela resposta pendente; D remove também do IMAP." if active_tab == TAB_INBOX else
+                    "L libera individualmente a resposta selecionada; G controla o bloqueio global de clientes." if active_tab == TAB_REPLIES else
                     "Use ↑/Esc para voltar ao menu superior."
                 )
                 _safe_add(stdscr, h - 1, 1, hint, w - 2, p.DIM)
@@ -846,6 +1059,36 @@ def run(settings: Settings, startup_log=None) -> int:
                 monitor.stop()
                 break
 
+            if ch in (ord("g"), ord("G")):
+                new_enabled = not external_enabled
+                confirmed = True
+                if new_enabled:
+                    waiting = approved_waiting
+                    stdscr.nodelay(False)
+                    confirmed = _popup_confirm_action(
+                        stdscr,
+                        "LIBERAR ENVIO GLOBAL PARA CLIENTES",
+                        [
+                            "ATENÇÃO: o bloqueio global de clientes será removido.",
+                            "Respostas ainda NÃO aprovadas continuam bloqueadas individualmente.",
+                            f"Respostas já aprovadas aguardando este bloqueio: {waiting}.",
+                            "Confirma a liberação global?",
+                        ],
+                        p,
+                        danger=True,
+                    )
+                    stdscr.nodelay(True)
+                if confirmed:
+                    feed.patch_global(new_enabled)
+                    notice = f"Aplicando {'LIBERAÇÃO' if new_enabled else 'BLOQUEIO'} global no Oracle em segundo plano..."
+                    notice_attr = p.WARN; notice_until = time.time() + 4
+                    def toggle_global(enabled=new_enabled):
+                        activated = monitor.set_external_send_enabled(enabled, updated_by="tui")
+                        return f"Envio global para clientes {'LIBERADO' if enabled else 'BLOQUEADO'}. Enfileirados agora: {activated}."
+                    _background_action(toggle_global, success_level="OK" if new_enabled else "WARN")
+                time.sleep(0.12)
+                continue
+
             if ch in (curses.KEY_F5, ord("r"), ord("R")) and not checking:
                 checking = True
                 notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
@@ -859,7 +1102,8 @@ def run(settings: Settings, startup_log=None) -> int:
                     finally:
                         checking = False
                 threading.Thread(target=do_check, daemon=True).start()
-                time.sleep(0.12)
+                feed.request_refresh()
+                time.sleep(0.05)
                 continue
 
             if menu_focus:
@@ -908,17 +1152,108 @@ def run(settings: Settings, startup_log=None) -> int:
                 selected[active_tab] = min(len(rows) - 1, selected[active_tab] + page)
             elif ch in (10, 13, curses.KEY_ENTER) and rows and active_tab in (TAB_INBOX, TAB_REPLIES):
                 row = rows[selected[active_tab]]
-                full = store.get_message(int(row["id"]))
+                full = row
                 if full:
                     stdscr.nodelay(False)
                     _popup_message(stdscr, full, p)
                     stdscr.nodelay(True)
             elif ch in (10, 13, curses.KEY_ENTER) and rows and active_tab == TAB_API:
-                full = store.get_api_run(int(rows[selected[active_tab]]["id"]))
+                full = rows[selected[active_tab]]
                 if full:
                     stdscr.nodelay(False)
                     _popup_api_run(stdscr, full, p)
                     stdscr.nodelay(True)
+            elif ch in (ord("l"), ord("L")):
+                if active_tab != TAB_REPLIES:
+                    notice = "L: liberação manual disponível somente em RESPOSTAS."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 4
+                elif not rows:
+                    notice = "Nenhuma resposta selecionada para liberar."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 3
+                else:
+                    row = rows[selected[active_tab]]
+                    full = row
+                    if full:
+                        status = str(full.get("status") or "").lower()
+                        if status == "pending-approval":
+                            stdscr.nodelay(False)
+                            confirmed = _popup_confirm_action(
+                                stdscr,
+                                "LIBERAR RESPOSTA PARA CLIENTE",
+                                [
+                                    "A resposta selecionada será aprovada manualmente.",
+                                    f"Para: {full.get('recipient') or '-'}",
+                                    f"Assunto: {full.get('subject') or '(sem assunto)'}",
+                                    (
+                                        "O envio será enfileirado agora." if external_enabled
+                                        else "O envio continuará aguardando o bloqueio global de clientes."
+                                    ),
+                                    "Confirma a liberação individual?",
+                                ],
+                                p,
+                                danger=False,
+                            )
+                            stdscr.nodelay(True)
+                            if confirmed:
+                                feed.patch_message_status(int(full["id"]), "send-queued" if external_enabled else "approved-waiting-global")
+                                notice = "Liberação enfileirada; interface continua disponível."
+                                notice_attr = p.WARN; notice_until = time.time() + 4
+                                def approve_action(payload=deepcopy(full)):
+                                    approved = monitor.approve_outbound(payload, approved_by="tui")
+                                    return f"Resposta liberada. Estado: {_status_label(approved.get('status') or '')}."
+                                _background_action(approve_action, success_level="OK")
+                        elif status == "approved-waiting-global":
+                            notice = "Esta resposta já foi liberada; falta apenas ligar o envio global de clientes com G."
+                            notice_attr = p.WARN
+                            notice_until = time.time() + 6
+                        else:
+                            notice = f"Esta resposta não está pendente de liberação: {_status_label(status)}."
+                            notice_attr = p.WARN
+                            notice_until = time.time() + 5
+            elif ch in (ord("n"), ord("N")):
+                if active_tab != TAB_INBOX:
+                    notice = "N: opção NÃO RESPONDER disponível somente em ENTRADA."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 4
+                elif not rows:
+                    notice = "Nenhuma mensagem selecionada para marcar como não responder."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 3
+                else:
+                    row = rows[selected[active_tab]]
+                    full = row
+                    if full:
+                        if int(full.get("reply_suppressed") or 0) == 1:
+                            notice = "Este e-mail já está marcado como NÃO RESPONDER no Oracle."
+                            notice_attr = p.WARN
+                            notice_until = time.time() + 5
+                        else:
+                            stdscr.nodelay(False)
+                            confirmed = _popup_confirm_action(
+                                stdscr,
+                                "NÃO RESPONDER ESTE E-MAIL",
+                                [
+                                    "A mensagem ficará marcada no Oracle como NÃO RESPONDER.",
+                                    f"De: {full.get('sender') or '-'}",
+                                    f"Assunto: {full.get('subject') or '(sem assunto)'}",
+                                    "Se existir resposta pendente ou na fila, ela será cancelada.",
+                                    "Uma resposta já em envio ou já enviada não pode ser desfeita.",
+                                    "Confirma?",
+                                ],
+                                p,
+                                danger=True,
+                            )
+                            stdscr.nodelay(True)
+                            if confirmed:
+                                feed.patch_message_status(int(full["id"]), "no-reply")
+                                notice = "NÃO RESPONDER marcado na tela; gravando no Oracle em segundo plano."
+                                notice_attr = p.WARN; notice_until = time.time() + 5
+                                def suppress_action(payload=deepcopy(full)):
+                                    suppressed = monitor.suppress_inbound_reply(payload, suppressed_by="tui")
+                                    return f"NÃO RESPONDER gravado no Oracle. Respostas pendentes canceladas: {int(suppressed.get('cancelled_replies') or 0)}."
+                                _background_action(suppress_action, success_level="WARN")
             elif ch in (ord("d"), ord("D")):
                 if active_tab != TAB_INBOX:
                     notice = "D: remoção disponível somente em ENTRADA; respostas permanecem como histórico de envio."
@@ -930,7 +1265,7 @@ def run(settings: Settings, startup_log=None) -> int:
                     notice_until = time.time() + 3
                 else:
                     row = rows[selected[active_tab]]
-                    full = store.get_message(int(row["id"]))
+                    full = row
                     if full:
                         status = (full.get("status") or "").lower()
                         stdscr.nodelay(False)
@@ -964,18 +1299,15 @@ def run(settings: Settings, startup_log=None) -> int:
                             confirmed = _popup_confirm_delete(stdscr, full, p)
                         stdscr.nodelay(True)
                         if confirmed:
-                            try:
-                                pending = monitor.queue_delete_inbound(full)
-                                notice = f"Remoção adicionada à fila. Pendentes: {pending}."
-                                notice_attr = p.WARN
-                                notice_until = time.time() + 4
-                                if len(rows) > 1:
-                                    current = selected[TAB_INBOX]
-                                    selected[TAB_INBOX] = current + 1 if current < len(rows) - 1 else max(0, current - 1)
-                            except Exception as exc:
-                                notice = f"ERRO AO AGENDAR REMOÇÃO: {exc}"
-                                notice_attr = p.ERROR
-                                notice_until = time.time() + 8
+                            feed.patch_message_status(int(full["id"]), "delete-queued")
+                            notice = "Remoção enfileirada na tela; Oracle/IMAP serão processados em segundo plano."
+                            notice_attr = p.WARN; notice_until = time.time() + 4
+                            if len(rows) > 1:
+                                current = selected[TAB_INBOX]
+                                selected[TAB_INBOX] = current + 1 if current < len(rows) - 1 else max(0, current - 1)
+                            def delete_action(payload=deepcopy(full)):
+                                return f"Remoção adicionada à fila. Pendentes: {monitor.queue_delete_inbound(payload)}."
+                            _background_action(delete_action, success_level="WARN")
             elif ch in (ord("t"), ord("T")) and active_tab == TAB_API:
                 if api_testing:
                     notice = "Já existe um teste ZIP da API em andamento."
@@ -996,11 +1328,16 @@ def run(settings: Settings, startup_log=None) -> int:
                         finally:
                             api_testing = False
                     threading.Thread(target=do_api_test, daemon=True).start()
-            time.sleep(0.12)
+            time.sleep(0.03)
 
     try:
         curses.wrapper(draw)
     finally:
+        trace("TUI SHUTDOWN: sinalizando monitor/feed")
         monitor.stop()
-        thread.join(timeout=2)
+        feed.stop(timeout=5)
+        thread.join(timeout=15)
+        monitor.wait_workers(timeout=10)
+        trace(f"TUI SHUTDOWN: monitor_alive={thread.is_alive()} delete_alive={monitor.delete_thread.is_alive()} send_alive={monitor.send_thread.is_alive()}")
+        store.close()
     return 0

@@ -103,8 +103,8 @@ class MobileApiService:
             "function_database_schema": str(getattr(getattr(self.settings, "function_database", None), "schema", "")),
             "function_database_password_configured": bool(getattr(getattr(self.settings, "function_database", None), "password", "")),
             "project_zip_search_root": str(self.settings.project_zip_search_root),
-            "auto_reply_enabled": self.settings.auto_reply_enabled,
             "sound_enabled": self.settings.sound_enabled,
+            "external_delivery": self.store.get_control(),
         }
 
     def overview(self) -> dict:
@@ -314,7 +314,7 @@ class MobileApiHandler(BaseHTTPRequestHandler):
 def serve_mobile_api(settings, store: Store | None = None, monitor: Monitor | None = None) -> int:
     if not settings.mobile_api_token:
         raise RuntimeError("MOBILE_API_TOKEN ausente; a API mobile não inicia sem autenticação")
-    store = store or Store(settings.database_path)
+    store = store or Store(settings.function_database)
     monitor = monitor or Monitor(settings, store)
     service = MobileApiService(settings, store, monitor)
     monitor_thread = threading.Thread(target=monitor.run_forever, daemon=True)
@@ -333,4 +333,5 @@ def serve_mobile_api(settings, store: Store | None = None, monitor: Monitor | No
     finally:
         monitor.stop()
         server.server_close()
+        store.close()
     return 0

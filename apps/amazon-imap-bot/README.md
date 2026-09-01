@@ -4,16 +4,16 @@ Monitor de caixas IMAP Amazon com painel TUI navegável, confirmação automáti
 
 ## Fluxo
 
-1. Consulta mensagens `UNSEEN` via IMAP.
-2. Deduplica por `Message-ID` no SQLite local.
-3. Ignora mensagens automáticas, listas, bounces e remetentes próprios. Mensagens sem corpo continuam válidas e recebem confirmação genérica.
-4. Toca `assets/sounds/soft-notification.wav`.
-5. Envia remetente, assunto e corpo textual para a OpenAI.
-6. A IA gera **somente confirmação de recebimento**, sem resolver o assunto.
-7. Sanitiza cabeçalhos externos antes de construir a resposta para impedir CR/LF em Subject, Message-ID, References e endereços.
-8. Responde via SES usando o perfil em `~/.aws`.
-9. Registra entrada, resposta, erros, UID IMAP, `MessageId` do SES e console operacional no SQLite.
-10. Mantém estados visíveis durante o fluxo: `RECEBIDO`, `ANALISANDO`, `ENTENDIDO`, `AGUARDANDO CONF.`, `ENVIANDO`, `RESPONDIDO`, `IGNORADO` e `ERRO RESPOSTA`.
+1. Abre a pasta IMAP configurada e consulta `ALL`; o servidor IMAP é a fonte autoritativa da `ENTRADA`.
+2. Identifica a pasta por `UIDVALIDITY` + UID e sincroniza as mensagens no Oracle.
+3. Na primeira sincronização, importa o estado atual sem responder retroativamente. Nos polls seguintes, somente UIDs novos entram no fluxo de resposta.
+4. Se uma mensagem desaparecer da pasta IMAP (apagada ou movida por outro cliente), ela também some da `ENTRADA` do bot no próximo poll.
+5. Ignora mensagens automáticas, listas, bounces e remetentes próprios. Mensagens sem corpo continuam válidas.
+6. Toca `assets/sounds/soft-notification.wav` para mensagem nova elegível.
+7. Gera a confirmação pela OpenAI.
+8. Para destinatários sempre liberados, enfileira o SES imediatamente. Para clientes/terceiros, grava a resposta no Oracle como pendente e exige liberação individual; além disso, o envio externo precisa estar globalmente liberado.
+9. Envia via Amazon SES somente depois de todas as regras de liberação.
+10. Entradas, respostas, eventos, chamadas de API, estado de sincronização IMAP e controles de envio ficam no Oracle. Não há SQLite em runtime.
 
 ## TUI
 
@@ -28,14 +28,23 @@ O painel possui seis áreas no menu superior:
 
 As teclas `F1`, `F2`, `F3`, `F4` e `F6` ficam livres para uso futuro. No menu superior, use `←/→` para escolher uma área e `↓` ou `Enter` para entrar. Dentro da área, use `↑/↓`, `PgUp/PgDn` e `Enter` quando houver detalhes; `Esc` ou `↑` no primeiro item retorna ao menu. `F5` é global e executa imediatamente a mesma verificação IMAP do poll automático de 30 segundos. `R` permanece como atalho alternativo. `Q` sai. Na área `API`, `T` executa o teste de ZIP.
 
-Na área `ENTRADA`, `D` remove a mensagem. A TUI sempre exige confirmação e diferencia visualmente os casos:
+Na área `ENTRADA`, `N` marca a mensagem no Oracle como `NÃO RESPONDER`; se houver resposta pendente, liberada aguardando o bloqueio global ou ainda na fila, ela é cancelada. Uma resposta já em envio ou já enviada não pode ser desfeita. `D` remove a mensagem do IMAP. A TUI sempre exige confirmação e diferencia visualmente os casos:
 
 - `RESPONDIDO`: confirmação verde informando que a resposta já foi enviada.
 - `ERRO RESPOSTA` ou qualquer mensagem ainda não respondida: alerta vermelho antes da remoção.
 - `IGNORADO` / `AGUARDANDO CONF.`: alerta amarelo informando que não houve resposta.
 - Estados em processamento (`ANALISANDO`, `ENTENDIDO`, `ENVIANDO`, `EXECUTANDO`) bloqueiam a remoção até a etapa terminar.
 
-A remoção move o e-mail no servidor IMAP para a pasta marcada como `\Trash`. Se o servidor não anunciar essa pasta, usa `Deleted Items`. A linha fica oculta da Entrada, mas o registro de deduplicação é preservado no SQLite para impedir reprocessamento acidental. As respostas continuam em `RESPOSTAS` como histórico do que foi enviado.
+A remoção move o e-mail no servidor IMAP para a pasta marcada como `\Trash`. Se o servidor não anunciar essa pasta, usa `Deleted Items`. O IMAP é mandatório: a `ENTRADA` mostra somente mensagens que continuam presentes na pasta monitorada. Se um e-mail for removido ou movido diretamente no Outlook/cliente IMAP, o próximo poll marca o registro Oracle como ausente e o retira do grid. O histórico de respostas continua em `RESPOSTAS`.
+
+O controle de clientes aparece em destaque no topo:
+
+- `G` alterna o bloqueio geral de envio externo.
+- Toda resposta para cliente/terceiro exige também liberação individual em `RESPOSTAS` com `L`.
+- Se `G` estiver desligado, a liberação individual deixa a resposta em `LIBERADO/BLOQ. GLOBAL`. Ao ligar `G`, essas respostas já aprovadas entram na fila.
+- Destinatários cadastrados em `IMAP_BOT_ALWAYS_ALLOWED_RECIPIENTS` ignoram esses dois bloqueios e seguem direto para a fila de envio.
+- A `ENTRADA` mostra `RESP. PEND. ENVIO`, `RESP. LIBERADA/BLOQ.`, `RESP. NA FILA`, `RESPONDIDO` e `NÃO RESPONDER`, deixando o estado visível.
+- A marcação `NÃO RESPONDER` é persistente no Oracle (`REPLY_SUPPRESSED`, data e usuário) e continua valendo após reinício do bot.
 
 ## Configuração
 
@@ -89,7 +98,9 @@ Preencha a senha somente nesse arquivo local. O bot usa o driver Python `oracled
 
 Na inicialização, o terminal mostra cada etapa com tempo acumulado, inclusive resolução do DSN, host/porta/service do Oracle (sem senha), política de retry/timeout, abertura da conexão e leitura de cada parte do catálogo. Os valores `DB_CONNECT_*` sobrescrevem os retries do descriptor apenas no processo do bot, para que falhas de rede/ACL apareçam rapidamente em vez de deixarem a tela aparentemente travada.
 
-O pacote não distribui scripts `.sql`. O catálogo Oracle já existente é tratado como infraestrutura externa: o runtime somente consulta as tabelas e nunca executa DDL ou DML de catálogo automaticamente.
+O projeto não distribui arquivos `.sql`. Mudanças de schema são aplicadas manualmente fora do ZIP com o SQL fornecido no atendimento. O bot não executa DDL automaticamente.
+
+Além do catálogo de funções, o runtime usa tabelas Oracle próprias para mensagens, eventos, chamadas de API, estado da pasta IMAP e regras de liberação de envio. O SQLite antigo não é lido nem criado.
 
 A `.config/**` já é protegida por git-crypt neste projeto.
 
@@ -109,7 +120,7 @@ amazon-imap-bot --once
 
 ## Funções acionadas por e-mail
 
-As definições e autorizações são carregadas do Oracle pela camada de aplicação do Amazon IMAP Bot. `functions.json` não é necessário no funcionamento normal.
+As definições e autorizações são carregadas do Oracle pela camada de aplicação do Amazon IMAP Bot. `functions.json` não é usado nem distribuído no funcionamento normal; o catálogo vem do Oracle.
 
 O catálogo é composto pelas tabelas:
 
@@ -122,11 +133,18 @@ O catálogo é composto pelas tabelas:
 - `IMAP_BOT_FUNCTION_SENDERS`
 - `IMAP_BOT_SENDER_FUNCTIONS`
 
+O armazenamento operacional usa também:
+
+- `IMAP_BOT_MESSAGES`
+- `IMAP_BOT_EVENTS`
+- `IMAP_BOT_API_RUNS`
+- `IMAP_BOT_MAILBOX_STATE`
+- `IMAP_BOT_CONTROL`
+- `IMAP_BOT_ALWAYS_ALLOWED_RECIPIENTS`
+
 O banco não armazena schema, parâmetros nem níveis permitidos em JSON. Cada dado fica em coluna própria e, quando há múltiplos valores, em tabela filha relacional. O schema exigido pela API da OpenAI é montado somente em memória a partir dessas linhas; ele não é persistido no Oracle.
 
-Não há patch/seed SQL dentro do aplicativo. Estrutura e dados do catálogo são administrados diretamente no Oracle; para diagnóstico pontual, use somente consultas SQL executadas manualmente fora do pacote.
-
-A coluna relacional `REQUIRED` mantém a semântica de obrigatório/opcional da aplicação. Ao chamar a OpenAI em `strict` mode, o bot monta outra representação apenas em memória: todas as propriedades entram em `required`, como a API exige, e as que são opcionais no Oracle são convertidas para tipos nullable. Nada disso é persistido como JSON no banco.
+As funções atuais `api_zip_test`, `project_zip_edit` e `function_catalog_admin`, seus parâmetros, opções, níveis e autorizações permanecem no catálogo relacional Oracle.
 
 Fluxo:
 
@@ -146,7 +164,7 @@ A nova função administra o catálogo em memória sem fazer DDL/DML:
 - `operation=list`: lista versão, funções ativas e remetentes autorizados.
 - `operation=sync`: descarta o snapshot atual e recarrega definições e autorizações do Oracle.
 
-A mesma sincronização está disponível para clientes da API em `POST /api/v1/actions/functions-sync`. Alterações persistentes são feitas diretamente na administração do Oracle; o Amazon IMAP Bot continua somente-leitura para o catálogo.
+A mesma sincronização está disponível para clientes da API em `POST /api/v1/actions/functions-sync`. Alterações persistentes do schema/dados administrativos continuam sendo feitas por comandos SQL manuais fornecidos fora do projeto.
 
 
 ## Função `project_zip_edit`
@@ -190,3 +208,12 @@ Principais rotas:
 - `POST /api/v1/actions/api-zip-test`
 - `POST /api/v1/actions/functions-sync`
 - `DELETE /api/v1/messages/{id}`
+
+### Responsividade da TUI e diagnóstico de crash
+
+A TUI não consulta o Oracle na thread do curses. Um feed em segundo plano mantém o snapshot exibido; navegação e abertura de detalhes usam memória local. A sincronização IMAP carrega o índice de UIDs do Oracle uma única vez por ciclo, evitando SELECT/UPDATE por mensagem já conhecida.
+
+Diagnóstico persistente:
+
+- `.config/amazon-imap-bot/runtime.log`: tempos de consultas Oracle, ciclos IMAP, atualização do feed da TUI e threads.
+- `.config/amazon-imap-bot/crash.log`: faulthandler com stack de todas as threads em falhas fatais. Em Linux, `kill -USR1 <pid>` também grava um dump das stacks nesse arquivo sem encerrar o processo.

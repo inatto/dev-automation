@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import imaplib
-import json
 import queue
 import socket
 import ssl
@@ -24,6 +23,7 @@ from message import parse, should_reply
 from ses import SesSender
 from sound import notify
 from store import Store
+from diagnostics import trace
 
 
 @dataclass
@@ -106,10 +106,36 @@ class Monitor:
             self.on_startup(
                 f"Monitor: retomando {len(pending_deletes)} remoção(ões) pendente(s) na fila assíncrona."
             )
+
+        self.send_queue: queue.Queue[int] = queue.Queue()
+        pending_sends = self.store.list_send_queue()
+        for pending in pending_sends:
+            self.store.set_outbound_status(int(pending["id"]), "send-queued")
+            self.send_queue.put(int(pending["id"]))
+        if self.store.get_control().get("external_send_enabled"):
+            for outbound_id in self.store.activate_approved_waiting():
+                self.send_queue.put(int(outbound_id))
+        self.send_thread = threading.Thread(
+            target=self._send_worker_loop,
+            name="amazon-imap-send-worker",
+            daemon=True,
+        )
+        self.send_thread.start()
+        if pending_sends:
+            self.on_startup(
+                f"Monitor: retomando {len(pending_sends)} envio(s) pendente(s) na fila assíncrona."
+            )
         self.on_startup(f"Monitor: pronto; {len(self.states)} conta(s) ativa(s).")
 
     def stop(self) -> None:
         self.stop_event.set()
+
+    def wait_workers(self, timeout: float = 10.0) -> None:
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        for worker in (self.delete_thread, self.send_thread):
+            remaining = max(0.0, deadline - time.monotonic())
+            if worker.is_alive() and remaining > 0:
+                worker.join(timeout=remaining)
 
     @staticmethod
     def _preview(text: str, limit: int = 180) -> str:
@@ -123,6 +149,226 @@ class Monitor:
         except Exception:
             pass
         self.on_event(f"{stamp} [{category}] {text}")
+
+    def _queue_generated_reply(self, account: Account, item, body: str) -> int:
+        if self.store.is_inbound_reply_suppressed(account.email, item.message_id):
+            self.store.set_inbound_status(account.email, item.message_id, "no-reply")
+            self._event(
+                f"NÃO RESPONDER ativo para {item.sender_email} | {item.subject or '(sem assunto)'}; resposta não foi criada",
+                "EMAIL",
+                "WARN",
+            )
+            return 0
+        recipient = str(item.sender_email or "").strip().lower()
+        if not recipient:
+            raise RuntimeError("destinatário da resposta está vazio")
+        control = self.store.get_control()
+        owner_recipient = self.store.is_always_allowed_recipient(recipient)
+        # Segundo bloqueio é mandatório: todo destinatário externo exige liberação individual.
+        approval_required = not owner_recipient
+
+        if owner_recipient:
+            recipient_class = "owner"
+            status = "send-queued"
+            approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            approved_by = "always-allowed"
+        elif approval_required:
+            recipient_class = "external"
+            status = "pending-approval"
+            approved_at = None
+            approved_by = ""
+        elif bool(control.get("external_send_enabled")):
+            recipient_class = "external"
+            status = "send-queued"
+            approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            approved_by = "policy"
+        else:
+            recipient_class = "external"
+            status = "approved-waiting-global"
+            approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            approved_by = "policy"
+
+        local_id = self.ses.new_message_id(account)
+        outbound_id = self.store.add_outbound(
+            account=account.email,
+            message_id=local_id,
+            thread_key=item.thread_key,
+            sender=account.email,
+            recipient=recipient,
+            subject=item.subject,
+            body=body,
+            reply_to=item.message_id,
+            provider_message_id="",
+            status=status,
+            references=item.references,
+            recipient_class=recipient_class,
+            approval_required=approval_required,
+            approved_at=approved_at,
+            approved_by=approved_by,
+        )
+
+        if status == "pending-approval":
+            self.store.set_inbound_status(account.email, item.message_id, "reply-pending-approval")
+            self._event(
+                f"RESPOSTA GERADA e pendente de liberação manual para={recipient} resposta_id={outbound_id}",
+                "EMAIL",
+                "WARN",
+            )
+        elif status == "approved-waiting-global":
+            self.store.set_inbound_status(account.email, item.message_id, "reply-approved-waiting-global")
+            self._event(
+                f"RESPOSTA GERADA para={recipient}; liberação individual OK, mas envio externo global está bloqueado",
+                "EMAIL",
+                "WARN",
+            )
+        else:
+            self.store.set_inbound_status(account.email, item.message_id, "reply-queued")
+            self.send_queue.put(int(outbound_id))
+            self._event(
+                f"ENVIO ENFILEIRADO para={recipient} resposta_id={outbound_id} classe={recipient_class}",
+                "SES",
+            )
+        return int(outbound_id)
+
+    def approve_outbound(self, row: dict, approved_by: str = "tui") -> dict:
+        fresh = self.store.get_message(int(row.get("id") or 0))
+        if fresh is None:
+            raise RuntimeError("resposta não encontrada")
+        approved = self.store.approve_outbound(int(fresh["id"]), approved_by=approved_by)
+        inbound_message_id = str(approved.get("reply_to_message_id") or "")
+        account_email = str(approved.get("account_email") or "")
+        if approved.get("status") == "send-queued":
+            if inbound_message_id:
+                self.store.set_inbound_status(account_email, inbound_message_id, "reply-queued")
+            self.send_queue.put(int(approved["id"]))
+            self._event(
+                f"RESPOSTA LIBERADA resposta_id={approved['id']} para={approved.get('recipient') or '-'}; envio enfileirado",
+                "EMAIL",
+                "WARN",
+            )
+        else:
+            if inbound_message_id:
+                self.store.set_inbound_status(account_email, inbound_message_id, "reply-approved-waiting-global")
+            self._event(
+                f"RESPOSTA LIBERADA resposta_id={approved['id']} para={approved.get('recipient') or '-'}; "
+                "aguardando liberação global de clientes",
+                "EMAIL",
+                "WARN",
+            )
+        return approved
+
+    def suppress_inbound_reply(self, row: dict, suppressed_by: str = "tui") -> dict:
+        fresh = self.store.get_message(int(row.get("id") or 0))
+        if fresh is None or fresh.get("deleted_at"):
+            raise RuntimeError("mensagem de entrada não encontrada")
+        result = self.store.suppress_inbound_reply(int(fresh["id"]), suppressed_by=suppressed_by)
+        self._event(
+            f"NÃO RESPONDER marcado para mensagem_id={fresh['id']} de={fresh.get('sender') or '-'}; "
+            f"respostas pendentes canceladas={int(result.get('cancelled_replies') or 0)}",
+            "EMAIL",
+            "WARN",
+        )
+        return result
+
+    def set_external_send_enabled(self, enabled: bool, updated_by: str = "tui") -> int:
+        self.store.set_external_send_enabled(bool(enabled), updated_by=updated_by)
+        activated = 0
+        if enabled:
+            ids = self.store.activate_approved_waiting()
+            for outbound_id in ids:
+                row = self.store.get_message(int(outbound_id))
+                if row and row.get("reply_to_message_id"):
+                    self.store.set_inbound_status(
+                        str(row.get("account_email") or ""),
+                        str(row.get("reply_to_message_id") or ""),
+                        "reply-queued",
+                    )
+                self.send_queue.put(int(outbound_id))
+            activated = len(ids)
+        self._event(
+            f"ENVIO EXTERNO GLOBAL {'LIBERADO' if enabled else 'BLOQUEADO'} por {updated_by}; "
+            f"{activated} resposta(s) previamente aprovadas enfileirada(s)",
+            "EMAIL",
+            "WARN" if not enabled else "INFO",
+        )
+        return activated
+
+    def _send_outbound_now(self, row: dict) -> None:
+        if row.get("direction") != "out":
+            raise RuntimeError("fila de envio recebeu registro que não é resposta")
+        account_email = str(row.get("account_email") or "").strip().lower()
+        account = self.accounts_by_email.get(account_email)
+        if account is None or not account.enabled:
+            raise RuntimeError(f"conta remetente não disponível: {account_email}")
+
+        inbound_message_id = str(row.get("reply_to_message_id") or "")
+        if inbound_message_id and self.store.is_inbound_reply_suppressed(account_email, inbound_message_id):
+            self.store.set_outbound_status(int(row["id"]), "cancelled-no-reply")
+            self.store.set_inbound_status(account_email, inbound_message_id, "no-reply")
+            self._event(
+                f"ENVIO CANCELADO resposta_id={row['id']}: mensagem marcada como NÃO RESPONDER",
+                "SES",
+                "WARN",
+            )
+            return
+
+        recipient_class = str(row.get("recipient_class") or "external").strip().lower()
+        if recipient_class != "owner":
+            control = self.store.get_control()
+            if not bool(control.get("external_send_enabled")):
+                self.store.set_outbound_status(int(row["id"]), "approved-waiting-global")
+                if row.get("reply_to_message_id"):
+                    self.store.set_inbound_status(account_email, str(row["reply_to_message_id"]), "reply-approved-waiting-global")
+                return
+            if int(row.get("approval_required") or 0) == 1 and not row.get("approved_at"):
+                self.store.set_outbound_status(int(row["id"]), "pending-approval")
+                if row.get("reply_to_message_id"):
+                    self.store.set_inbound_status(account_email, str(row["reply_to_message_id"]), "reply-pending-approval")
+                return
+
+        self.store.set_outbound_status(int(row["id"]), "sending")
+        if row.get("reply_to_message_id"):
+            self.store.set_inbound_status(account_email, str(row["reply_to_message_id"]), "sending")
+        self._event(
+            f"SEND para={row.get('recipient') or '-'} assunto={self._preview(row.get('subject') or '(sem assunto)', 90)}",
+            "SES",
+        )
+        _message_id, ses_id = self.ses.send_stored_reply(account, row)
+        self.store.set_outbound_status(int(row["id"]), "sent", provider_message_id=ses_id)
+        if row.get("reply_to_message_id"):
+            self.store.set_inbound_status(account_email, str(row["reply_to_message_id"]), "replied")
+        state = self.states.get(account.email)
+        if state is not None:
+            state.replied += 1
+        self._event(f"OK para={row.get('recipient') or '-'} MessageId={ses_id}", "SES")
+
+    def _send_worker_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                message_row_id = self.send_queue.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            try:
+                row = self.store.get_message(int(message_row_id))
+                if row is None or row.get("deleted_at") or row.get("status") not in {"send-queued", "sending"}:
+                    continue
+                self._send_outbound_now(row)
+            except Exception as exc:
+                try:
+                    current = self.store.get_message(int(message_row_id))
+                    if current is not None:
+                        self.store.set_outbound_status(int(message_row_id), "send-error", str(exc))
+                        if current.get("reply_to_message_id"):
+                            self.store.set_inbound_status(
+                                str(current.get("account_email") or ""),
+                                str(current.get("reply_to_message_id") or ""),
+                                "reply-error",
+                            )
+                except Exception:
+                    pass
+                self._event(f"ERRO AO ENVIAR resposta_id={message_row_id}: {exc}", "SES", "ERROR")
+            finally:
+                self.send_queue.task_done()
 
     def _execute_function_request(self, account: Account, item, request: FunctionRequest, state: AccountState) -> None:
         """Executa uma função explicitamente autorizada pelo catálogo Oracle."""
@@ -166,7 +412,7 @@ class Monitor:
                 input_path="",
                 output_path="",
                 request_summary=f"{operation} do catálogo de funções Oracle",
-                request_payload=json.dumps(request.arguments, ensure_ascii=False),
+                request_payload="\n".join(f"{key}={value}" for key, value in sorted(request.arguments.items())), 
                 listed_item_count=0,
             )
             try:
@@ -209,28 +455,14 @@ class Monitor:
             reply_lines.extend(["", "Resultado da API:", result[:2500]])
         reply_body = "\n".join(reply_lines)
 
-        self.store.set_inbound_status(account.email, item.message_id, "sending")
-        local_id, ses_id = self.ses.send_reply(account, item, reply_body)
-        self.store.add_outbound(
-            account=account.email,
-            message_id=local_id,
-            thread_key=item.thread_key,
-            sender=account.email,
-            recipient=item.sender_email,
-            subject=item.subject,
-            body=reply_body,
-            reply_to=item.message_id,
-            provider_message_id=ses_id,
-            status="sent",
-        )
-        self.store.set_inbound_status(account.email, item.message_id, "replied")
-        state.replied += 1
-        self._event(f"OK função={request.name} resposta enviada para={item.sender_email} MessageId={ses_id}", "SES")
+        self._queue_generated_reply(account, item, reply_body)
 
     def run_account_once(self, account: Account) -> None:
         state = self.states[account.email]
         conn = None
+        cycle_started = time.monotonic()
         try:
+            trace(f"IMAP CYCLE START account={account.email} folder={self.settings.imap_folder}")
             self._event(f"Consultando {account.email} em {self.settings.imap_folder}", "IMAP")
             conn = imaplib.IMAP4_SSL(
                 self.settings.imap_host,
@@ -244,14 +476,41 @@ class Monitor:
             state.connected = True
             state.last_error = ""
             state.last_check = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-            status, data = conn.uid("search", None, "UNSEEN")
-            if status != "OK":
-                raise RuntimeError("falha ao consultar mensagens não lidas")
-            uids = data[0].split() if data and data[0] else []
-            self._event(f"{account.email}: {len(uids)} mensagem(ns) UNSEEN", "IMAP")
+            uid_validity = self.mailbox.uid_validity(conn)
+            mailbox_state = self.store.get_mailbox_state(account.email, self.settings.imap_folder)
+            previous_uid_validity = str((mailbox_state or {}).get("uid_validity") or "")
+            previous_max_uid = int((mailbox_state or {}).get("last_max_uid") or 0)
+            initial_sync = mailbox_state is None or previous_uid_validity != str(uid_validity)
 
+            status, data = conn.uid("search", None, "ALL")
+            if status != "OK":
+                raise RuntimeError("falha ao consultar todas as mensagens da pasta IMAP")
+            uids = data[0].split() if data and data[0] else []
+            present_uids = {
+                (uid.decode("ascii", errors="ignore") if isinstance(uid, bytes) else str(uid))
+                for uid in uids
+            }
+            current_max_uid = max((int(uid) for uid in present_uids if str(uid).isdigit()), default=0)
+            self._event(
+                f"{account.email}: sincronizando {len(uids)} mensagem(ns) da pasta {self.settings.imap_folder} "
+                f"UIDVALIDITY={uid_validity}",
+                "IMAP",
+            )
+
+            uid_index_started = time.monotonic()
+            existing_by_uid = self.store.list_inbound_uid_index(
+                account.email, self.settings.imap_folder, str(uid_validity)
+            )
+            trace(
+                f"IMAP UID INDEX account={account.email} oracle_rows={len(existing_by_uid)} "
+                f"elapsed={time.monotonic()-uid_index_started:.3f}s"
+            )
+            new_uid_count = 0
             for uid in uids:
                 uid_text = uid.decode("ascii", errors="ignore") if isinstance(uid, bytes) else str(uid)
+                if uid_text in existing_by_uid:
+                    continue
+                new_uid_count += 1
                 status, parts = conn.uid("fetch", uid, "(RFC822)")
                 if status != "OK" or not parts:
                     self._event(f"Falha ao baixar UID {uid_text}", "IMAP", "WARN")
@@ -260,11 +519,19 @@ class Monitor:
                 if not raw:
                     self._event(f"UID {uid_text} retornou sem conteúdo", "IMAP", "WARN")
                     continue
-                item = parse(raw)
-                if self.store.seen(account.email, item.message_id):
-                    continue
 
+                item = parse(raw)
                 allowed, reason = should_reply(item, self.own)
+                should_process = (
+                    not initial_sync
+                    and uid_text.isdigit()
+                    and int(uid_text) > previous_max_uid
+                )
+                initial_status = (
+                    ("received" if allowed else f"ignored:{reason}")
+                    if should_process
+                    else "synced"
+                )
                 self.store.add_inbound(
                     account=account.email,
                     message_id=item.message_id,
@@ -273,12 +540,21 @@ class Monitor:
                     recipient=item.recipient,
                     subject=item.subject,
                     body=item.body,
-                    status="received" if allowed else f"ignored:{reason}",
+                    status=initial_status,
                     mail_date=item.mail_date,
                     imap_uid=uid_text,
                     imap_folder=self.settings.imap_folder,
+                    imap_uid_validity=str(uid_validity),
+                    references=item.references,
                 )
                 state.received += 1
+                if not should_process:
+                    self._event(
+                        f"SINCRONIZADO {account.email} <- {item.sender_email} UID={uid_text} | "
+                        f"{item.subject or '(sem assunto)'}",
+                        "IMAP",
+                    )
+                    continue
                 self._event(
                     f"RECEBIDO {account.email} <- {item.sender_email} | {item.subject or '(sem assunto)'}",
                     "EMAIL",
@@ -368,19 +644,9 @@ class Monitor:
                             "O erro foi registrado no console do bot para análise."
                         )
                         try:
-                            local_id, ses_id = self.ses.send_reply(account, item, failure_body)
-                            self.store.add_outbound(
-                                account=account.email, message_id=local_id, thread_key=item.thread_key,
-                                sender=account.email, recipient=item.sender_email, subject=item.subject,
-                                body=failure_body, reply_to=item.message_id, provider_message_id=ses_id, status="sent",
-                            )
+                            self._queue_generated_reply(account, item, failure_body)
                         except Exception as reply_exc:
-                            self._event(f"Falha ao avisar erro da função para {item.sender_email}: {reply_exc}", "SES", "ERROR")
-                    continue
-
-                if not self.settings.auto_reply_enabled:
-                    self.store.set_inbound_status(account.email, item.message_id, "awaiting-confirmation")
-                    self._event(f"AGUARDANDO CONFIRMAÇÃO {item.sender_email} | auto-resposta desativada", "EMAIL", "WARN")
+                            self._event(f"Falha ao preparar aviso de erro da função para {item.sender_email}: {reply_exc}", "SES", "ERROR")
                     continue
 
                 generated_body = ""
@@ -424,27 +690,7 @@ class Monitor:
                         f"RESPONSE {len(generated_body)} chars | {self._preview(generated_body)}",
                         "GPT",
                     )
-                    self.store.set_inbound_status(account.email, item.message_id, "sending")
-                    self._event(
-                        f"SEND para={item.sender_email} assunto={self._preview(item.subject or '(sem assunto)', 90)}",
-                        "SES",
-                    )
-                    local_id, ses_id = self.ses.send_reply(account, item, generated_body)
-                    self.store.add_outbound(
-                        account=account.email,
-                        message_id=local_id,
-                        thread_key=item.thread_key,
-                        sender=account.email,
-                        recipient=item.sender_email,
-                        subject=item.subject,
-                        body=generated_body,
-                        reply_to=item.message_id,
-                        provider_message_id=ses_id,
-                        status="sent",
-                    )
-                    self.store.set_inbound_status(account.email, item.message_id, "replied")
-                    state.replied += 1
-                    self._event(f"OK para={item.sender_email} MessageId={ses_id}", "SES")
+                    self._queue_generated_reply(account, item, generated_body)
                 except Exception as exc:
                     self.store.set_inbound_status(account.email, item.message_id, "reply-error")
                     try:
@@ -464,12 +710,38 @@ class Monitor:
                     except Exception:
                         pass
                     self._event(f"Resposta para {item.sender_email}: {exc}", "ERROR", "ERROR")
+
+            reconcile_started = time.monotonic()
+            removed_by_sync = self.store.reconcile_inbox(
+                account.email, self.settings.imap_folder, str(uid_validity), present_uids
+            )
+            trace(
+                f"IMAP RECONCILE account={account.email} present={len(present_uids)} new={new_uid_count} "
+                f"removed={removed_by_sync} elapsed={time.monotonic()-reconcile_started:.3f}s"
+            )
+            self.store.set_mailbox_state(
+                account.email, self.settings.imap_folder, str(uid_validity), current_max_uid, initialized=True
+            )
+            if initial_sync:
+                self._event(
+                    f"SINCRONIZAÇÃO INICIAL concluída: {len(present_uids)} mensagem(ns) espelhadas; "
+                    "mensagens já existentes não foram respondidas automaticamente.",
+                    "IMAP",
+                )
+            if removed_by_sync:
+                self._event(
+                    f"SINCRONIZAÇÃO IMAP removeu {removed_by_sync} registro(s) da ENTRADA local porque "
+                    "não existem mais na pasta do servidor.",
+                    "IMAP",
+                    "WARN",
+                )
         except (imaplib.IMAP4.error, OSError, socket.error, RuntimeError) as exc:
             state.connected = False
             state.last_error = str(exc)
             state.last_check = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             self._event(f"{account.email}: {exc}", "IMAP", "ERROR")
         finally:
+            trace(f"IMAP CYCLE END account={account.email} elapsed={time.monotonic()-cycle_started:.3f}s")
             if conn is not None:
                 try:
                     conn.logout()
@@ -588,5 +860,12 @@ class Monitor:
 
     def run_forever(self) -> None:
         while not self.stop_event.is_set():
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception as exc:
+                self._event(
+                    f"ERRO NO CICLO IMAP: {type(exc).__name__}: {exc}",
+                    "SYSTEM",
+                    "ERROR",
+                )
             self.stop_event.wait(self.settings.poll_seconds)

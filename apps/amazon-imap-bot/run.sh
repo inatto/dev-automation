@@ -24,12 +24,13 @@ bootstrap_venv() {
     printf '[amazon-imap-bot] launcher: ambiente Python OK (%s)\n' "$PYTHON" >&2
   fi
 
-  if ! "$PYTHON" -c 'import boto3, openai, oracledb' >/dev/null 2>&1; then
+  if ! "$PYTHON" -c 'import sys,boto3,openai,oracledb; v=tuple(int(x) for x in oracledb.__version__.split(".")[:2]); raise SystemExit(1 if sys.version_info >= (3,14) and v < (3,3) else 0)' >/dev/null 2>&1; then
     printf '[amazon-imap-bot] instalando dependências...
 ' >&2
     "$PYTHON" -m pip install -r "$REQUIREMENTS"
   else
     printf '[amazon-imap-bot] launcher: dependências OK\n' >&2
+    "$PYTHON" -c 'import sys,oracledb; print(f"[amazon-imap-bot] launcher: Python {sys.version.split()[0]} | python-oracledb {oracledb.__version__}", file=sys.stderr, flush=True)'
   fi
 }
 

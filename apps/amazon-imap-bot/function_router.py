@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import json
-
 from function_map import FunctionMap, FunctionRequest
 
 
@@ -69,10 +67,35 @@ class FunctionRouter:
     def audit_payload(self, sender: str, subject: str, body: str) -> str:
         tools = self.function_map.openai_tools_for_sender(sender)
         prompt = self.build_prompt(sender, subject, body)
+        tool_lines: list[str] = []
+        for tool in tools:
+            name = str(tool.get("name") or "-")
+            description = str(tool.get("description") or "").strip()
+            tool_lines.append(f"FUNÇÃO: {name}")
+            if description:
+                tool_lines.append(f"Descrição: {description}")
+            parameters = tool.get("parameters") or {}
+            required = set(parameters.get("required") or [])
+            properties = parameters.get("properties") or {}
+            for parameter_name, spec in properties.items():
+                raw_type = spec.get("type")
+                if isinstance(raw_type, list):
+                    type_text = "/".join(str(value) for value in raw_type)
+                else:
+                    type_text = str(raw_type or "-")
+                option_text = ""
+                if spec.get("enum"):
+                    option_text = " opções=" + ",".join(str(value) for value in spec.get("enum") or [])
+                tool_lines.append(
+                    f"  - {parameter_name}: tipo={type_text} "
+                    f"required_api={'sim' if parameter_name in required else 'não'}{option_text}"
+                )
+            tool_lines.append("")
+        tools_text = "\n".join(tool_lines).rstrip() or "(nenhuma)"
         return (
             "INSTRUCTIONS:\n" + ROUTER_INSTRUCTIONS +
             "\n\nINPUT:\n" + prompt +
-            "\n\nTOOLS AUTORIZADAS ENVIADAS:\n" + json.dumps(tools, ensure_ascii=False, indent=2)
+            "\n\nTOOLS AUTORIZADAS ENVIADAS:\n" + tools_text
         )
 
     def route(self, sender: str, subject: str, body: str) -> RouteResult:

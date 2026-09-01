@@ -17,6 +17,9 @@ STATE_DIR="$STATE_ROOT/desktops"
 OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-2}"
 TAB_INTERVAL_SECONDS="${TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
+WORKSPACE_SETTLE_SECONDS="${TERMINALS_WORKSPACE_SETTLE_SECONDS:-1}"
+AUTO_INSTALL_GNOME_TERMINAL="${TERMINALS_AUTO_INSTALL_GNOME_TERMINAL:-1}"
+ALLOW_PTYXIS_FALLBACK="${TERMINALS_ALLOW_PTYXIS_FALLBACK:-0}"
 
 log(){ printf '[terminals] %s\n' "$*"; }
 warn(){ printf '[terminals] AVISO: %s\n' "$*" >&2; }
@@ -49,11 +52,33 @@ load_projects() {
 
 terminal_backend() {
   local path
-  if path="$(command -v ptyxis 2>/dev/null)"; then printf 'ptyxis\t%s\n' "$path"; return 0; fi
+  # GNOME Terminal é preferido deliberadamente: com duas abas ele mantém a
+  # barra de abas visível. O Ptyxis do Ubuntu 26 usa overview e não oferece
+  # a mesma barra persistente.
   if path="$(command -v gnome-terminal 2>/dev/null)"; then printf 'gnome-terminal\t%s\n' "$path"; return 0; fi
+  if [[ "$ALLOW_PTYXIS_FALLBACK" == 1 ]] && path="$(command -v ptyxis 2>/dev/null)"; then printf 'ptyxis\t%s\n' "$path"; return 0; fi
   if path="$(command -v kgx 2>/dev/null)"; then printf 'kgx\t%s\n' "$path"; return 0; fi
   if path="$(command -v xdg-terminal-exec 2>/dev/null)"; then printf 'xdg-terminal-exec\t%s\n' "$path"; return 0; fi
   if path="$(command -v x-terminal-emulator 2>/dev/null)"; then printf 'x-terminal-emulator\t%s\n' "$path"; return 0; fi
+  return 1
+}
+
+ensure_visible_tabs_terminal() {
+  command -v gnome-terminal >/dev/null 2>&1 && return 0
+  [[ "$AUTO_INSTALL_GNOME_TERMINAL" == 1 ]] || return 1
+  command -v apt-get >/dev/null 2>&1 || return 1
+  command -v sudo >/dev/null 2>&1 || return 1
+
+  # `terminals` normalmente é chamado de um terminal interativo. Nesse caso,
+  # instala uma única vez o GNOME Terminal, necessário para a barra clássica de
+  # abas. Em execução não interativa, só tenta quando sudo já está autorizado.
+  if [[ -t 0 && -t 1 ]] || sudo -n true >/dev/null 2>&1; then
+    log 'GNOME Terminal não encontrado. Instalando uma vez para permitir abas Local/Remote sempre visíveis...'
+    if sudo apt-get install -y gnome-terminal; then
+      hash -r
+      command -v gnome-terminal >/dev/null 2>&1 && return 0
+    fi
+  fi
   return 1
 }
 
@@ -80,7 +105,8 @@ terminal_exec_string() {
 
 launch_terminal_window() {
   local backend="$1" terminal="$2" working_dir="$3" title="${4:-}" command_name="${5:-}"
-  local exec_string=""
+  local second_title="${6:-}" second_command="${7:-}"
+  local exec_string="" first_shell="" second_shell="" second_argv=""
   [[ -z "$command_name" ]] || exec_string="$(terminal_exec_string "$command_name")"
 
   case "$backend" in
@@ -93,7 +119,25 @@ launch_terminal_window() {
       ;;
     gnome-terminal)
       if [[ -n "$command_name" ]]; then
-        nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+        # `gnome-terminal --tab` chamado pelo controlador externo não possui a
+        # identidade da janela recém-criada e pode abrir outra janela. Quando
+        # existe Remote, agendamos a criação da segunda aba DE DENTRO da primeira
+        # aba. O processo herda GNOME_TERMINAL_SERVICE/GNOME_TERMINAL_SCREEN e o
+        # GNOME Terminal consegue anexar a aba à janela correta mesmo em Wayland.
+        if [[ -n "$second_command" ]]; then
+          printf -v second_shell 'export PATH="$HOME/.local/bin:$PATH"; exec %q' "$second_command"
+          printf -v second_argv '%q ' \
+            "$terminal" --tab --working-directory="$working_dir" --title="$second_title" -- \
+            bash -lc "$second_shell"
+          printf -v first_shell \
+            'nohup bash -c %q >/dev/null 2>&1 & export PATH="$HOME/.local/bin:$PATH"; exec %q' \
+            "sleep $TAB_INTERVAL_SECONDS; $second_argv" "$command_name"
+          nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- \
+            bash -lc "$first_shell" >/dev/null 2>&1 &
+        else
+          nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- \
+            bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+        fi
       else
         nohup "$terminal" --window --working-directory="$working_dir" ${title:+--title="$title"} >/dev/null 2>&1 &
       fi
@@ -208,6 +252,7 @@ show_diagnose() {
   printf 'Sessão: %s / %s\n' "${XDG_CURRENT_DESKTOP:-?}" "${XDG_SESSION_TYPE:-?}"
   printf 'Destinos: %s (projetos + lrdp1/lrdp2; workspaces 2..%s; LAZER excluído)\n' "$count" "$((count + 1))"
   printf 'Intervalo: %s segundo(s) entre abas/aberturas\n' "$TAB_INTERVAL_SECONDS"
+  printf 'Estabilização GNOME: %s segundo(s) antes de cada janela\n' "$WORKSPACE_SETTLE_SECONDS"
   printf 'Terminal: '; terminal_backend || printf 'nenhum terminal compatível encontrado\n'
   printf 'Monitores:\n'
   command -v xrandr >/dev/null 2>&1 && xrandr --listmonitors 2>/dev/null || true
@@ -239,6 +284,7 @@ case "${1:-}" in
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
     printf 'Fluxo único: ativa cada workspace e abre uma janela por projeto. Projetos com deploy local/remoto recebem abas AUTO no mesmo terminal.\n'
     printf 'Aba local: <Projeto> Auto. Aba remota: Remote <Projeto> Auto. O intervalo padrão entre abas/aberturas é 2 segundos.\n'
+    printf 'No Ubuntu 26, o fluxo prefere GNOME Terminal porque o Ptyxis não mantém a barra clássica de abas visível.\n'
     printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos terminais simples.\n'
     exit 0
     ;;
@@ -252,8 +298,20 @@ esac
   fail "intervalo entre abas inválido: $TAB_INTERVAL_SECONDS"
 [[ "$CAPTURE_TIMEOUT_TENTHS" =~ ^[0-9]+$ ]] || \
   fail "timeout inválido: $CAPTURE_TIMEOUT_TENTHS"
+[[ "$WORKSPACE_SETTLE_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+  fail "tempo de estabilização GNOME inválido: $WORKSPACE_SETTLE_SECONDS"
+[[ "$AUTO_INSTALL_GNOME_TERMINAL" =~ ^[01]$ ]] || \
+  fail "TERMINALS_AUTO_INSTALL_GNOME_TERMINAL deve ser 0 ou 1"
+[[ "$ALLOW_PTYXIS_FALLBACK" =~ ^[01]$ ]] || \
+  fail "TERMINALS_ALLOW_PTYXIS_FALLBACK deve ser 0 ou 1"
 
 acquire_lock
+if ! ensure_visible_tabs_terminal; then
+  if [[ "$ALLOW_PTYXIS_FALLBACK" != 1 ]]; then
+    fail "GNOME Terminal não está instalado e não foi possível instalá-lo. O Ptyxis cria abas, mas não mantém a barra clássica visível. Instale uma vez com: sudo apt install -y gnome-terminal"
+  fi
+  warn 'GNOME Terminal indisponível; usando Ptyxis como fallback. As abas existem, mas a barra persistente pode não aparecer.'
+fi
 IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
   fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
 ensure_workspaces_on_all_monitors
@@ -262,6 +320,7 @@ reset_previous_managed_batch
 log 'FLUXO ÚNICO: uma janela por projeto/workspace; abas AUTO local e remota no mesmo terminal quando disponíveis.'
 log "Terminal: $terminal_kind -> $terminal"
 log "Intervalo entre abas/aberturas: $TAB_INTERVAL_SECONDS segundo(s)."
+log "Estabilização após troca de desktop/monitor: $WORKSPACE_SETTLE_SECONDS segundo(s)."
 
 for ((project_index=0; project_index<count; project_index++)); do
   workspace_number=$((project_index + 2))
@@ -298,6 +357,13 @@ for ((project_index=0; project_index<count; project_index++)); do
      "$ready_monitor" =~ ^[0-9]+$ && "$ready_all_monitors" == 1 ]] || \
     fail "o GNOME recusou o destino direto de '$project_name' (desktop esperado=$workspace_number, confirmado=${ready_workspace:-nenhum}; slot esperado=$slot, confirmado=${ready_slot:-nenhum}; monitor=${ready_monitor:-nenhum}; workspaces-em-todos-monitores=${ready_all_monitors:-não}; válido=${ready_valid:-não})."
 
+  # O controlador já confirmou o destino, mas o Shell ainda pode estar no fim da
+  # animação/troca de workspace. Abrir imediatamente é a corrida que fazia a
+  # primeira execução cair no monitor atual e a segunda funcionar.
+  if [[ "$WORKSPACE_SETTLE_SECONDS" != 0 && "$WORKSPACE_SETTLE_SECONDS" != 0.0 ]]; then
+    sleep "$WORKSPACE_SETTLE_SECONDS"
+  fi
+
   first_command=""
   second_command=""
   first_title=""
@@ -322,10 +388,10 @@ for ((project_index=0; project_index<count; project_index++)); do
   fi
 
   launch_rc=0
-  launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" "$first_title" "$first_command" || launch_rc=$?
+  launch_terminal_window "$terminal_kind" "$terminal" "$working_dir" "$first_title" "$first_command" "$second_title" "$second_command" || launch_rc=$?
   case "$launch_rc" in
     0) ;;
-    2) fail "o terminal $terminal_kind não suporta executar abas AUTO; instale/use Ptyxis ou GNOME Terminal." ;;
+    2) fail "o terminal $terminal_kind não suporta executar abas AUTO; use GNOME Terminal para manter as abas visíveis." ;;
     *) fail "falha ao abrir terminal via $terminal_kind para '$project_name'" ;;
   esac
 
@@ -343,10 +409,16 @@ for ((project_index=0; project_index<count; project_index++)); do
   fi
 
   if [[ -n "$second_command" ]]; then
-    sleep "$TAB_INTERVAL_SECONDS"
-    launch_terminal_tab "$terminal_kind" "$terminal" "$working_dir" "$second_title" "$second_command" || \
-      fail "falha ao abrir a aba '$second_title' via $terminal_kind"
-    log "ABA: $second_title -> $second_command"
+    if [[ "$terminal_kind" == gnome-terminal ]]; then
+      # A segunda aba já foi agendada pela primeira aba, para que herde a
+      # identidade da janela e não vire uma segunda janela independente.
+      log "ABA: $second_title -> $second_command (mesma janela, após ${TAB_INTERVAL_SECONDS}s)"
+    else
+      sleep "$TAB_INTERVAL_SECONDS"
+      launch_terminal_tab "$terminal_kind" "$terminal" "$working_dir" "$second_title" "$second_command" || \
+        fail "falha ao abrir a aba '$second_title' via $terminal_kind"
+      log "ABA: $second_title -> $second_command"
+    fi
   fi
 
   if (( project_index + 1 < count )); then

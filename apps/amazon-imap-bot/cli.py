@@ -10,6 +10,7 @@ from monitor import Monitor
 from store import Store
 from tui import run as run_tui
 from mobile_api import serve_mobile_api
+from diagnostics import configure as configure_diagnostics, trace
 
 
 def doctor(settings, startup_log=None) -> int:
@@ -46,7 +47,7 @@ def doctor(settings, startup_log=None) -> int:
     except Exception as exc:
         print(f"AWS: ERRO · {exc}")
         errors += 1
-    print(f"Banco: {settings.database_path}")
+    print(f"Armazenamento operacional: Oracle · schema={db.schema or 'AUSENTE'}")
     print(f"Som: {settings.sound_file} ({'OK' if settings.sound_file.is_file() else 'fallback terminal'})")
     return 1 if errors else 0
 
@@ -61,12 +62,16 @@ def main(argv=None) -> int:
 
     def startup_log(text: str) -> None:
         elapsed = time.monotonic() - started
-        print(f"[amazon-imap-bot] +{elapsed:7.2f}s {text}", file=sys.stderr, flush=True)
+        line = f"[amazon-imap-bot] +{elapsed:7.2f}s {text}"
+        print(line, file=sys.stderr, flush=True)
+        trace(line)
 
     try:
         startup_log("Inicialização iniciada.")
         startup_log("Carregando settings.env e database.env...")
         settings = load_settings()
+        runtime_log, crash_log = configure_diagnostics(settings.config_root)
+        startup_log(f"Diagnóstico persistente: runtime={runtime_log} crash={crash_log}")
         startup_log(
             f"Configuração carregada: root={settings.config_root} "
             f"contas_ativas={sum(1 for account in settings.accounts if account.enabled)}."
@@ -81,13 +86,17 @@ def main(argv=None) -> int:
             print("Nenhuma conta ativa em .config/amazon-imap-bot/settings.env", file=sys.stderr)
             return 2
         if args.once:
-            startup_log(f"Abrindo SQLite local em {settings.database_path}...")
-            store = Store(settings.database_path)
-            startup_log("SQLite local OK; inicializando monitor --once...")
-            monitor = Monitor(settings, store, print, on_startup=startup_log)
-            startup_log("Monitor --once pronto; executando verificação IMAP.")
-            monitor.run_once()
-            return 0
+            startup_log("Abrindo armazenamento operacional Oracle...")
+            store = Store(settings.function_database, log=startup_log)
+            try:
+                startup_log("Armazenamento Oracle OK; inicializando monitor --once...")
+                monitor = Monitor(settings, store, print, on_startup=startup_log)
+                startup_log("Monitor --once pronto; executando verificação IMAP.")
+                monitor.run_once()
+                monitor.stop()
+                return 0
+            finally:
+                store.close()
         return run_tui(settings, startup_log=startup_log)
     except KeyboardInterrupt:
         return 130

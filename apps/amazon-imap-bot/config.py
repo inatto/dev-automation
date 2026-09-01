@@ -48,9 +48,7 @@ class Settings:
     openai_test_zip: Path
     function_database: FunctionDatabase
     project_zip_search_root: Path
-    auto_reply_enabled: bool
     sound_enabled: bool
-    database_path: Path
     sound_file: Path
     imap_trash_folder: str = ""
     mobile_api_host: str = "127.0.0.1"
@@ -163,9 +161,7 @@ def load_settings() -> Settings:
         openai_test_zip=Path(env.get("OPENAI_TEST_ZIP", config_root / "api-test-input.zip")).expanduser(),
         function_database=function_database,
         project_zip_search_root=Path(env.get("PROJECT_ZIP_SEARCH_ROOT", Path.home() / "Code")).expanduser(),
-        auto_reply_enabled=_bool(env.get("AUTO_REPLY_ENABLED", "true"), True),
         sound_enabled=_bool(env.get("SOUND_ENABLED", "true"), True),
-        database_path=Path(env.get("DATABASE_PATH", config_root / "mailbot.sqlite3")).expanduser(),
         sound_file=Path(env.get(
             "SOUND_FILE",
             project_root / "assets" / "sounds" / "soft-notification.wav",
