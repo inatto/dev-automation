@@ -179,6 +179,75 @@ class MobileApiService:
         )
         return action
 
+    def context_files(self, relative_path: str = "") -> dict:
+        try:
+            return self.monitor.reply_context.browse(relative_path)
+        except (ValueError, FileNotFoundError) as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc))
+
+    @staticmethod
+    def _context_file_list(body: dict) -> list[str]:
+        raw = body.get("files") or []
+        if not isinstance(raw, list):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "files deve ser uma lista de caminhos relativos à pasta Code")
+        values = []
+        for item in raw:
+            value = str(item or "").strip()
+            if value and value not in values:
+                values.append(value)
+        return values
+
+    def generate_reply(self, message_id: int, body: dict) -> dict:
+        row = self.store.get_message(message_id)
+        if row is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "mensagem não encontrada")
+        instruction = str(body.get("instruction") or "").strip()
+        files = self._context_file_list(body)
+        action = self._new_action(
+            "reply-compose",
+            f"message_id={message_id} arquivos={len(files)} instrução={instruction[:180] or '[padrão]'}",
+        )
+
+        def callback():
+            result = self.monitor.generate_or_regenerate_reply(
+                row, instruction=instruction, context_files=files, requested_by="mobile-api"
+            )
+            return (
+                f"inbound_id={result['inbound_id']} outbound_id={result['outbound_id']} "
+                f"status={result['status']} api_run_id={result['api_run_id']}"
+            )
+
+        self._run_action(action, callback)
+        return action
+
+    def approve_message(self, message_id: int) -> dict:
+        row = self.store.get_message(message_id)
+        if row is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "mensagem não encontrada")
+        try:
+            return self.monitor.approve_outbound(row, approved_by="mobile-api")
+        except RuntimeError as exc:
+            raise ApiError(HTTPStatus.CONFLICT, str(exc))
+
+    def suppress_reply(self, message_id: int) -> dict:
+        row = self.store.get_message(message_id)
+        if row is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, "mensagem não encontrada")
+        try:
+            return self.monitor.suppress_inbound_reply(row, suppressed_by="mobile-api")
+        except RuntimeError as exc:
+            raise ApiError(HTTPStatus.CONFLICT, str(exc))
+
+    def external_delivery(self) -> dict:
+        return self.store.get_control()
+
+    def set_external_delivery(self, body: dict) -> dict:
+        if "enabled" not in body or not isinstance(body.get("enabled"), bool):
+            raise ApiError(HTTPStatus.BAD_REQUEST, "enabled deve ser booleano")
+        enabled = bool(body["enabled"])
+        activated = self.monitor.set_external_send_enabled(enabled, updated_by="mobile-api")
+        return {**self.store.get_control(), "activated": activated}
+
     def delete_message(self, message_id: int) -> dict:
         row = self.store.get_message(message_id)
         if row is None:
@@ -259,11 +328,30 @@ class MobileApiHandler(BaseHTTPRequestHandler):
             return HTTPStatus.OK, service.functions()
         if method == "GET" and path == "/api/v1/actions":
             return HTTPStatus.OK, service.actions()
+        if method == "GET" and path == "/api/v1/context-files":
+            relative = str((query.get("path") or [""])[0])
+            return HTTPStatus.OK, service.context_files(relative)
+        if method == "GET" and path == "/api/v1/external-delivery":
+            return HTTPStatus.OK, service.external_delivery()
+        if method == "PUT" and path == "/api/v1/external-delivery":
+            return HTTPStatus.OK, service.set_external_delivery(self._body())
         if method == "GET" and path == "/api/v1/messages":
             direction = str((query.get("direction") or ["in"])[0]).lower()
             if direction not in {"in", "out"}:
                 raise ApiError(HTTPStatus.BAD_REQUEST, "direction deve ser in ou out")
             return HTTPStatus.OK, service.store.list_messages(direction, service._limit(query, 500, 2000))
+
+        reply_match = __import__("re").fullmatch(r"/api/v1/messages/(\d+)/reply", path)
+        if reply_match and method == "POST":
+            return HTTPStatus.ACCEPTED, service.generate_reply(int(reply_match.group(1)), self._body())
+
+        approve_match = __import__("re").fullmatch(r"/api/v1/messages/(\d+)/approve", path)
+        if approve_match and method == "POST":
+            return HTTPStatus.OK, service.approve_message(int(approve_match.group(1)))
+
+        suppress_match = __import__("re").fullmatch(r"/api/v1/messages/(\d+)/no-reply", path)
+        if suppress_match and method == "POST":
+            return HTTPStatus.OK, service.suppress_reply(int(suppress_match.group(1)))
 
         match = __import__("re").fullmatch(r"/api/v1/messages/(\d+)", path)
         if match and method == "GET":
@@ -297,6 +385,9 @@ class MobileApiHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         self._dispatch("DELETE")
+
+    def do_PUT(self) -> None:
+        self._dispatch("PUT")
 
     def _dispatch(self, method: str) -> None:
         try:

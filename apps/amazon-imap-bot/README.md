@@ -26,7 +26,12 @@ O painel possui seis áreas no menu superior:
 - `API`: configuração efetiva da OpenAI e pilha/histórico das chamadas de API (e-mail e teste ZIP), com estado, modelo, nível de raciocínio, tempo, Response ID e arquivo de retorno.
 - `FUNÇÕES`: leitura do catálogo Oracle carregado pela camada de aplicação, mostrando funções, estado, descrição, níveis, parâmetros e permissões por remetente.
 
-As teclas `F1`, `F2`, `F3`, `F4` e `F6` ficam livres para uso futuro. No menu superior, use `←/→` para escolher uma área e `↓` ou `Enter` para entrar. Dentro da área, use `↑/↓`, `PgUp/PgDn` e `Enter` quando houver detalhes; `Esc` ou `↑` no primeiro item retorna ao menu. `F5` é global e executa imediatamente a mesma verificação IMAP do poll automático de 30 segundos. `R` permanece como atalho alternativo. `Q` sai. Na área `API`, `T` executa o teste de ZIP.
+As teclas `F1`, `F2`, `F3`, `F4` e `F6` ficam livres para uso futuro. No menu superior, use `←/→` para escolher uma área e `↓` ou `Enter` para entrar. Dentro da área, use `↑/↓`, `PgUp/PgDn` e `Enter` quando houver detalhes; `Esc` ou `↑` no primeiro item retorna ao menu. `F5` é global e executa imediatamente a mesma verificação IMAP do poll automático. `R` é reservado para gerar/refazer respostas em `ENTRADA` e `RESPOSTAS`. `Q` sai. Na área `API`, `T` executa o teste de ZIP.
+
+
+Na área `ENTRADA`, `R` funciona também para mensagens antigas apenas sincronizadas: abre o painel de composição manual e envia o e-mail original para a OpenAI para produzir um rascunho. O operador pode incluir uma instrução escrita e selecionar até oito arquivos abaixo de `PROJECT_ZIP_SEARCH_ROOT` (padrão `~/Code`) como contexto. A navegação de arquivos é restrita a essa raiz. Arquivos de texto são enviados como contexto; ZIPs podem fornecer manifesto e conteúdo textual interno dentro dos limites de tamanho configurados em código.
+
+Na área `RESPOSTAS`, `R` usa o mesmo fluxo para refazer/direcionar um rascunho existente. O texto não é editado manualmente: o operador envia uma nova instrução e/ou novos arquivos e a API produz outra versão. Para cliente/terceiro, toda reescrita invalida qualquer aprovação anterior e volta para `PENDENTE LIBERAÇÃO`, exigindo `L` novamente. Respostas que já estejam `ENVIO NA FILA`, `ENVIANDO` ou `ENVIADO` não podem ser refeitas. A chamada acontece em segundo plano e a TUI continua navegável.
 
 Na área `ENTRADA`, `N` marca a mensagem no Oracle como `NÃO RESPONDER`; se houver resposta pendente, liberada aguardando o bloqueio global ou ainda na fila, ela é cancelada. Uma resposta já em envio ou já enviada não pode ser desfeita. `D` remove a mensagem do IMAP. A TUI sempre exige confirmação e diferencia visualmente os casos:
 
@@ -72,7 +77,7 @@ OPENAI_TEST_ZIP=.config/amazon-imap-bot/api-test-input.zip
 
 `gpt-5.6` é o alias do modelo flagship GPT-5.6 Sol. O nível de raciocínio fica explícito e configurável. O teste ZIP faz upload como `user_data`, disponibiliza o ZIP para o Code Interpreter, exige a criação de um novo ZIP, localiza a `container_file_citation` retornada e baixa imediatamente o arquivo para `OPENAI_OUTPUT_DIR`. Por padrão, em `/home/daniel`, isso resulta em `/home/daniel/Downloads/amazon-imap-bot-api-test-return.zip`. Se o nome já existir, adiciona data/hora para não sobrescrever.
 
-A aba API registra também as chamadas normais usadas para responder e-mails. Assim é possível ver uma chamada em `AGUARDANDO`, seguida de `CONCLUÍDO` ou `ERRO`, e o tempo total ao finalizar. A chave da API nunca é exibida; aparece apenas `CONFIGURADA` ou `AUSENTE`.
+A aba API registra também as chamadas normais usadas para responder e-mails, inclusive `reply-compose` e `reply-rewrite` acionadas manualmente. Assim é possível ver uma chamada em `AGUARDANDO`, seguida de `CONCLUÍDO` ou `ERRO`, e o tempo total ao finalizar. A chave da API nunca é exibida; aparece apenas `CONFIGURADA` ou `AUSENTE`.
 
 
 ### Catálogo de funções no Oracle
@@ -203,6 +208,10 @@ Principais rotas:
 
 - `GET /api/v1/overview`, `/accounts`, `/events`, `/functions`, `/actions`
 - `GET /api/v1/messages?direction=in|out` e `/messages/{id}`
+- `POST /api/v1/messages/{id}/reply` para gerar ou refazer a resposta com `instruction` e `files`
+- `POST /api/v1/messages/{id}/approve` e `/messages/{id}/no-reply`
+- `GET /api/v1/context-files?path=...` para navegar com segurança sob `PROJECT_ZIP_SEARCH_ROOT`
+- `GET /api/v1/external-delivery` e `PUT /api/v1/external-delivery` para consultar/alterar o bloqueio global
 - `GET /api/v1/api-runs` e `/api-runs/{id}`
 - `POST /api/v1/actions/refresh`
 - `POST /api/v1/actions/api-zip-test`

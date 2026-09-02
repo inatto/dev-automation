@@ -343,6 +343,53 @@ class _MemoryStore:
             except RuntimeError:
                 return None
 
+    def get_inbound_by_message_id(self, account: str, message_id: str) -> dict | None:
+        with self._lock:
+            row = next((
+                item for item in self.messages
+                if item["direction"] == "in"
+                and item["account_email"].lower() == str(account or "").lower()
+                and item["message_key"] == _message_key(message_id)
+                and not item.get("deleted_at")
+            ), None)
+            return deepcopy(row) if row else None
+
+    def find_latest_outbound_for_inbound(self, account: str, inbound_message_id: str) -> dict | None:
+        with self._lock:
+            rows = [
+                item for item in self.messages
+                if item["direction"] == "out"
+                and item["account_email"].lower() == str(account or "").lower()
+                and str(item.get("reply_to_message_id") or "") == str(inbound_message_id or "")
+                and not item.get("deleted_at")
+            ]
+            if not rows:
+                return None
+            return deepcopy(max(rows, key=lambda item: int(item["id"])))
+
+    def rewrite_outbound_draft(
+        self, message_row_id: int, *, body: str, status: str, recipient_class: str,
+        approval_required: bool, approved_at: str | None, approved_by: str = "",
+    ) -> dict:
+        with self._lock:
+            row = self._message(message_row_id)
+            if row["direction"] != "out" or row.get("deleted_at"):
+                raise RuntimeError("resposta não encontrada")
+            current = str(row.get("status") or "").lower()
+            if current in {"send-queued", "sending", "sent"}:
+                raise RuntimeError(f"resposta não pode ser refeita no estado {current}")
+            row["body"] = str(body or "")
+            row["status"] = str(status)
+            row["recipient_class"] = recipient_class
+            row["approval_required"] = 1 if approval_required else 0
+            row["approved_at"] = approved_at
+            row["approved_by"] = approved_by or None
+            row["send_queued_at"] = _now_text() if status == "send-queued" else None
+            row["sent_at"] = None
+            row["provider_message_id"] = None
+            row["error"] = ""
+            return deepcopy(row)
+
     def recent_events(self, limit: int = 500) -> list[dict]:
         with self._lock:
             return [deepcopy(row) for row in sorted(self.events, key=lambda r: r["id"], reverse=True)[:limit]]
@@ -950,6 +997,49 @@ class _OracleStore:
             f"SELECT {self._message_select()} FROM {self.schema}.IMAP_BOT_MESSAGES WHERE id=:id",
             {"id": int(message_id)},
         )
+
+    def get_inbound_by_message_id(self, account: str, message_id: str) -> dict | None:
+        return self._fetchone(
+            f"SELECT {self._message_select()} FROM {self.schema}.IMAP_BOT_MESSAGES "
+            "WHERE direction='in' AND LOWER(account_email)=LOWER(:b_account) "
+            "AND message_key=:b_message_key AND deleted_at IS NULL FETCH FIRST 1 ROW ONLY",
+            {"b_account": account, "b_message_key": _message_key(message_id)},
+        )
+
+    def find_latest_outbound_for_inbound(self, account: str, inbound_message_id: str) -> dict | None:
+        return self._fetchone(
+            f"SELECT {self._message_select()} FROM {self.schema}.IMAP_BOT_MESSAGES "
+            "WHERE direction='out' AND LOWER(account_email)=LOWER(:b_account) "
+            "AND reply_to_message_id=:b_reply_to AND deleted_at IS NULL ORDER BY id DESC FETCH FIRST 1 ROW ONLY",
+            {"b_account": account, "b_reply_to": inbound_message_id},
+        )
+
+    def rewrite_outbound_draft(
+        self, message_row_id: int, *, body: str, status: str, recipient_class: str,
+        approval_required: bool, approved_at: str | None, approved_by: str = "",
+    ) -> dict:
+        current = self.get_message(int(message_row_id))
+        if not current or current.get("direction") != "out" or current.get("deleted_at"):
+            raise RuntimeError("resposta não encontrada")
+        current_status = str(current.get("status") or "").lower()
+        if current_status in {"send-queued", "sending", "sent"}:
+            raise RuntimeError(f"resposta não pode ser refeita no estado {current_status}")
+        count = self._execute(
+            f"UPDATE {self.schema}.IMAP_BOT_MESSAGES SET body=:b_body,status=:b_status,error_message=NULL,"
+            "recipient_class=:b_recipient_class,approval_required=:b_approval_required,"
+            "approved_at=:b_approved_at,approved_by=:b_approved_by,provider_message_id=NULL,"
+            "send_queued_at=CASE WHEN :b_status_queue='send-queued' THEN SYSTIMESTAMP ELSE NULL END,"
+            "sent_at=NULL,updated_at=SYSTIMESTAMP "
+            "WHERE id=:b_id AND direction='out' AND deleted_at IS NULL",
+            {
+                "b_body": str(body or ""), "b_status": status, "b_recipient_class": recipient_class,
+                "b_approval_required": 1 if approval_required else 0, "b_approved_at": _parse_dt(approved_at),
+                "b_approved_by": approved_by or None, "b_status_queue": status, "b_id": int(message_row_id),
+            },
+        )
+        if count != 1:
+            raise RuntimeError("resposta não encontrada para reescrita")
+        return self.get_message(int(message_row_id)) or current
 
     def recent_events(self, limit: int = 500) -> list[dict]:
         return self._cached(

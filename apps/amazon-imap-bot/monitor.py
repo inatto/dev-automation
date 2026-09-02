@@ -19,11 +19,12 @@ from function_map import FunctionMap, FunctionRequest
 from function_router import FunctionRouter
 from mailbox import MailboxClient
 from project_zip_runner import ProjectZipRunner
-from message import parse, should_reply
+from message import Incoming, parse, should_reply
 from ses import SesSender
 from sound import notify
 from store import Store
 from diagnostics import trace
+from reply_context import ReplyContextFiles
 
 
 @dataclass
@@ -87,6 +88,11 @@ class Monitor:
         self.project_zip_runner = ProjectZipRunner(
             settings, store,
             lambda text: self.on_event(f"{datetime.now().strftime('%H:%M:%S')} [API] {text}"),
+        )
+        self.reply_context = ReplyContextFiles(settings.project_zip_search_root)
+        self.reply_generation_lock = threading.Lock()
+        self.on_startup(
+            f"Monitor: contexto manual de respostas limitado a {self.reply_context.root}."
         )
         self.on_startup("Monitor: executores de API/ZIP OK.")
         self.accounts_by_email = {a.email.lower(): a for a in settings.accounts}
@@ -229,6 +235,221 @@ class Monitor:
                 "SES",
             )
         return int(outbound_id)
+
+    @staticmethod
+    def _incoming_from_store_row(row: dict) -> Incoming:
+        return Incoming(
+            message_id=str(row.get("message_id") or ""),
+            thread_key=str(row.get("thread_key") or row.get("message_id") or ""),
+            sender_name=str(row.get("sender") or ""),
+            sender_email=str(row.get("sender") or "").strip().lower(),
+            recipient=str(row.get("recipient") or row.get("account_email") or ""),
+            subject=str(row.get("subject") or ""),
+            body=str(row.get("body") or ""),
+            references=str(row.get("references") or ""),
+            auto_submitted="",
+            precedence="",
+            list_id="",
+            mail_date=str(row.get("mail_date") or ""),
+        )
+
+    def _resolve_reply_pair(self, row: dict) -> tuple[dict, dict | None, Account]:
+        fresh = self.store.get_message(int(row.get("id") or 0))
+        if fresh is None or fresh.get("deleted_at"):
+            raise RuntimeError("mensagem não encontrada")
+        direction = str(fresh.get("direction") or "").lower()
+        account_email = str(fresh.get("account_email") or "").strip().lower()
+        account = self.accounts_by_email.get(account_email)
+        if account is None or not account.enabled:
+            raise RuntimeError(f"conta não disponível para resposta: {account_email}")
+        if direction == "in":
+            inbound = fresh
+            outbound = self.store.find_latest_outbound_for_inbound(account_email, str(inbound.get("message_id") or ""))
+        elif direction == "out":
+            outbound = fresh
+            inbound = self.store.get_inbound_by_message_id(
+                account_email, str(outbound.get("reply_to_message_id") or "")
+            )
+            if inbound is None:
+                raise RuntimeError("e-mail original da resposta não foi encontrado")
+        else:
+            raise RuntimeError("registro não é e-mail de entrada nem resposta")
+        return inbound, outbound, account
+
+    @staticmethod
+    def _status_after_draft(outbound: dict | None) -> str:
+        if not outbound:
+            return "received"
+        status = str(outbound.get("status") or "").lower()
+        if status == "pending-approval":
+            return "reply-pending-approval"
+        if status == "approved-waiting-global":
+            return "reply-approved-waiting-global"
+        if status in {"send-queued", "sending"}:
+            return "reply-queued"
+        if status == "sent":
+            return "replied"
+        return "reply-error"
+
+    def generate_or_regenerate_reply(
+        self,
+        row: dict,
+        *,
+        instruction: str = "",
+        context_files: list[str] | tuple[str, ...] | None = None,
+        requested_by: str = "tui",
+    ) -> dict:
+        """Gera uma resposta para mensagem antiga/nova ou refaz um rascunho existente.
+
+        A chamada é síncrona para a camada de aplicação; TUI/API a executam em thread
+        própria. Reescrita externa sempre invalida aprovação anterior e exige nova
+        liberação individual.
+        """
+        with self.reply_generation_lock:
+            inbound, outbound, account = self._resolve_reply_pair(row)
+            account_email = str(account.email).lower()
+            inbound_message_id = str(inbound.get("message_id") or "")
+            if int(inbound.get("reply_suppressed") or 0) == 1:
+                raise RuntimeError("este e-mail está marcado como NÃO RESPONDER")
+            if not str(inbound.get("sender") or "").strip():
+                raise RuntimeError("e-mail original não possui remetente para resposta")
+            if outbound is not None:
+                current_status = str(outbound.get("status") or "").lower()
+                if current_status in {"send-queued", "sending", "sent"}:
+                    raise RuntimeError(
+                        f"a resposta já entrou no fluxo de envio ({current_status}); não pode mais ser refeita"
+                    )
+
+            loaded = self.reply_context.load(context_files or [])
+            item = self._incoming_from_store_row(inbound)
+            current_draft = str((outbound or {}).get("body") or "")
+            manual_instruction = str(instruction or "").strip()
+            if not manual_instruction and current_draft:
+                manual_instruction = (
+                    "Produza uma nova versão da resposta. Preserve somente o que estiver sustentado pelo "
+                    "e-mail e pelo contexto disponível; melhore clareza, objetividade e adequação ao pedido."
+                )
+
+            audit_payload = self.ai.audit_manual_payload(
+                item,
+                instruction=manual_instruction,
+                current_draft=current_draft,
+                context_text=loaded.text,
+                context_files=loaded.files,
+            )
+            kind = "reply-rewrite" if outbound else "reply-compose"
+            request_summary = (
+                f"{kind} message_id={inbound.get('id')} de={inbound.get('sender') or '-'} "
+                f"arquivos={len(loaded.files)} instrução={self._preview(manual_instruction or '[padrão]', 220)}"
+            )
+            api_run_id = self.store.add_api_run(
+                kind=kind,
+                status="aguardando-resposta",
+                model=self.settings.openai_model,
+                reasoning_effort=self.settings.openai_reasoning_effort,
+                input_path=";".join(loaded.files)[:1900],
+                output_path="",
+                request_summary=request_summary,
+                request_payload=audit_payload,
+                request_bytes=len(audit_payload.encode("utf-8")),
+                input_file_bytes=loaded.total_bytes,
+                input_file_count=len(loaded.files),
+                listed_item_count=len(loaded.files),
+            )
+            started = time.monotonic()
+            previous_inbound_status = str(inbound.get("status") or "")
+            self.store.set_inbound_status(account_email, inbound_message_id, "analyzing")
+            self._event(
+                f"RESPOSTA MANUAL REQUEST mensagem_id={inbound.get('id')} arquivos={len(loaded.files)} "
+                f"por={requested_by}",
+                "GPT",
+            )
+            try:
+                generated_body = self.ai.generate_manual(
+                    item,
+                    instruction=manual_instruction,
+                    current_draft=current_draft,
+                    context_text=loaded.text,
+                    context_files=loaded.files,
+                )
+                self.store.update_api_run(
+                    api_run_id,
+                    status="concluido",
+                    response_id=self.ai.last_response_id,
+                    response_summary=generated_body[:1000],
+                    response_bytes=len(generated_body.encode("utf-8")),
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    finished=True,
+                )
+
+                recipient = str(inbound.get("sender") or "").strip().lower()
+                owner_recipient = self.store.is_always_allowed_recipient(recipient)
+                if owner_recipient:
+                    target_status = "send-queued"
+                    recipient_class = "owner"
+                    approval_required = False
+                    approved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    approved_by = "always-allowed"
+                else:
+                    target_status = "pending-approval"
+                    recipient_class = "external"
+                    approval_required = True
+                    approved_at = None
+                    approved_by = ""
+
+                if outbound is None:
+                    outbound_id = self._queue_generated_reply(account, item, generated_body)
+                    outbound = self.store.get_message(outbound_id) if outbound_id else None
+                else:
+                    outbound = self.store.rewrite_outbound_draft(
+                        int(outbound["id"]),
+                        body=generated_body,
+                        status=target_status,
+                        recipient_class=recipient_class,
+                        approval_required=approval_required,
+                        approved_at=approved_at,
+                        approved_by=approved_by,
+                    )
+                    if owner_recipient:
+                        self.store.set_inbound_status(account_email, inbound_message_id, "reply-queued")
+                        self.send_queue.put(int(outbound["id"]))
+                    else:
+                        self.store.set_inbound_status(account_email, inbound_message_id, "reply-pending-approval")
+                    self._event(
+                        f"RESPOSTA REFEITA resposta_id={outbound['id']} para={recipient}; "
+                        + ("envio liberado por política do proprietário" if owner_recipient else "nova aprovação manual obrigatória"),
+                        "EMAIL",
+                        "WARN" if not owner_recipient else "INFO",
+                    )
+                self._event(
+                    f"RESPOSTA MANUAL RESPONSE {len(generated_body)} chars resposta_id={int((outbound or {}).get('id') or 0)}",
+                    "GPT",
+                )
+                return {
+                    "api_run_id": api_run_id,
+                    "inbound_id": int(inbound.get("id") or 0),
+                    "outbound_id": int((outbound or {}).get("id") or 0),
+                    "status": str((outbound or {}).get("status") or ""),
+                    "files": list(loaded.files),
+                    "context_truncated": bool(loaded.truncated),
+                }
+            except Exception as exc:
+                self.store.update_api_run(
+                    api_run_id,
+                    status="erro",
+                    error=str(exc),
+                    elapsed_ms=int((time.monotonic() - started) * 1000),
+                    finished=True,
+                )
+                if outbound is None:
+                    self.store.set_inbound_status(account_email, inbound_message_id, "reply-error")
+                else:
+                    restore = self._status_after_draft(outbound)
+                    if restore == "received" and previous_inbound_status:
+                        restore = previous_inbound_status
+                    self.store.set_inbound_status(account_email, inbound_message_id, restore)
+                self._event(f"ERRO AO GERAR/REFAZER RESPOSTA: {exc}", "GPT", "ERROR")
+                raise
 
     def approve_outbound(self, row: dict, approved_by: str = "tui") -> dict:
         fresh = self.store.get_message(int(row.get("id") or 0))

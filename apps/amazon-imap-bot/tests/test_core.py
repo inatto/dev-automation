@@ -1005,3 +1005,150 @@ def test_imap_sync_loads_uid_index_once_instead_of_querying_each_uid():
     assert 'list_inbound_uid_index' in source
     assert 'get_inbound_by_uid' not in source
     assert 'touch_inbound_uid' not in source
+
+
+def test_reply_context_browser_is_confined_to_code_root_and_loads_selected_files():
+    import pytest
+    from reply_context import ReplyContextFiles
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "Code"
+        root.mkdir()
+        (root / "project").mkdir()
+        (root / "project" / "app.py").write_text("VALUE = 123\n", encoding="utf-8")
+        browser = ReplyContextFiles(root)
+        listing = browser.browse("project")
+        assert listing["path"] == "project"
+        assert any(item["path"] == "project/app.py" for item in listing["entries"])
+        loaded = browser.load(["project/app.py"])
+        assert loaded.files == ("project/app.py",)
+        assert "VALUE = 123" in loaded.text
+        with pytest.raises(ValueError):
+            browser.browse("../../")
+
+
+def _manual_reply_monitor(store, root: Path):
+    import queue as queue_module
+    import threading
+    from types import SimpleNamespace
+    from monitor import Monitor
+    from reply_context import ReplyContextFiles
+
+    class FakeAI:
+        last_response_id = ""
+
+        def audit_manual_payload(self, item, **kwargs):
+            return "AUDIT\n" + str(kwargs.get("instruction") or "")
+
+        def generate_manual(self, item, **kwargs):
+            self.last_response_id = "resp_manual_1"
+            instruction = str(kwargs.get("instruction") or "").strip()
+            current = str(kwargs.get("current_draft") or "").strip()
+            if current:
+                return "Resposta refeita conforme: " + (instruction or "padrão")
+            return "Resposta gerada conforme: " + (instruction or "padrão")
+
+    class FakeSes:
+        def new_message_id(self, account):
+            return "<manual-out@example.com>"
+
+    monitor = Monitor.__new__(Monitor)
+    monitor.settings = SimpleNamespace(
+        openai_model="gpt-test",
+        openai_reasoning_effort="medium",
+        project_zip_search_root=root,
+    )
+    monitor.store = store
+    account = SimpleNamespace(email="suporte@example.com", enabled=True)
+    monitor.accounts_by_email = {account.email: account}
+    monitor.ai = FakeAI()
+    monitor.ses = FakeSes()
+    monitor.send_queue = queue_module.Queue()
+    monitor.reply_context = ReplyContextFiles(root)
+    monitor.reply_generation_lock = threading.Lock()
+    monitor.on_event = lambda _text: None
+    return monitor
+
+
+def test_manual_r_generates_reply_for_old_synced_message_and_requires_approval():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        store = Store(root / "memory.store")
+        inbound_id = store.add_inbound(
+            account="suporte@example.com", message_id="<old-in>", thread_key="<old-in>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Mensagem antiga",
+            body="Preciso de uma resposta completa.", status="synced", imap_uid="10", imap_folder="INBOX",
+            imap_uid_validity="1",
+        )
+        monitor = _manual_reply_monitor(store, root)
+        result = monitor.generate_or_regenerate_reply(
+            store.get_message(inbound_id), instruction="Explique objetivamente.", requested_by="test"
+        )
+        outbound = store.get_message(result["outbound_id"])
+        assert outbound["status"] == "pending-approval"
+        assert outbound["approval_required"] == 1
+        assert "Explique objetivamente" in outbound["body"]
+        assert store.get_message(inbound_id)["status"] == "reply-pending-approval"
+
+
+def test_regenerating_external_draft_reuses_row_and_resets_previous_approval():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        store = Store(root / "memory.store")
+        inbound_id = store.add_inbound(
+            account="suporte@example.com", message_id="<rewrite-in>", thread_key="<rewrite-in>",
+            sender="cliente@example.com", recipient="suporte@example.com", subject="Reescrever",
+            body="Pedido original.", status="reply-pending-approval", imap_uid="11", imap_folder="INBOX",
+            imap_uid_validity="1",
+        )
+        outbound_id = store.add_outbound(
+            account="suporte@example.com", message_id="<rewrite-out>", thread_key="<rewrite-in>",
+            sender="suporte@example.com", recipient="cliente@example.com", subject="Reescrever",
+            body="Rascunho inicial", reply_to="<rewrite-in>", provider_message_id="",
+            status="pending-approval", recipient_class="external", approval_required=True,
+        )
+        approved = store.approve_outbound(outbound_id, approved_by="test")
+        assert approved["status"] == "approved-waiting-global"
+        assert approved["approved_at"]
+
+        monitor = _manual_reply_monitor(store, root)
+        result = monitor.generate_or_regenerate_reply(
+            store.get_message(outbound_id), instruction="Deixe mais técnico.", requested_by="test"
+        )
+        assert result["outbound_id"] == outbound_id
+        rewritten = store.get_message(outbound_id)
+        assert rewritten["status"] == "pending-approval"
+        assert rewritten["approved_at"] is None
+        assert rewritten["approved_by"] is None
+        assert rewritten["body"] == "Resposta refeita conforme: Deixe mais técnico."
+        assert store.get_message(inbound_id)["status"] == "reply-pending-approval"
+
+
+def test_tui_r_is_reply_action_and_f5_is_imap_refresh():
+    import inspect
+    import tui as tui_module
+
+    source = inspect.getsource(tui_module.run)
+    assert 'if ch == curses.KEY_F5 and not checking:' in source
+    assert 'elif ch in (ord("r"), ord("R")):' in source
+    assert "generate_or_regenerate_reply" in source
+
+
+def test_manual_reply_audit_does_not_persist_selected_file_contents():
+    from ai import ReplyGenerator
+    item = Incoming(
+        message_id="<audit>", thread_key="<audit>", sender_name="Cliente",
+        sender_email="cliente@example.com", recipient="suporte@example.com",
+        subject="Teste", body="Corpo", references="", auto_submitted="",
+        precedence="", list_id="",
+    )
+    generator = ReplyGenerator.__new__(ReplyGenerator)
+    audit = generator.audit_manual_payload(
+        item,
+        instruction="Use o contexto.",
+        current_draft="Rascunho",
+        context_text="SEGREDO_DO_ARQUIVO",
+        context_files=["projeto/config.py"],
+    )
+    assert "projeto/config.py" in audit
+    assert "SEGREDO_DO_ARQUIVO" not in audit

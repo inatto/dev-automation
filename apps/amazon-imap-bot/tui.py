@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+import curses.textpad
 import json
 import queue
 import textwrap
@@ -374,6 +375,247 @@ def _popup_notice(stdscr, title: str, lines: list[str], p: Palette, attr: int = 
             break
     stdscr.touchwin()
     stdscr.refresh()
+
+
+def _popup_text_editor(stdscr, title: str, initial: str, p: Palette) -> str | None:
+    h, w = stdscr.getmaxyx()
+    ph = max(12, min(h - 2, 18))
+    pw = max(54, min(w - 4, 120))
+    top = max(0, (h - ph) // 2)
+    left = max(0, (w - pw) // 2)
+    win = curses.newwin(ph, pw, top, left)
+    win.keypad(True)
+    try:
+        win.border()
+    except curses.error:
+        pass
+    _safe_add(win, 0, 2, f" {title} ", pw - 4, p.HEADER)
+    _safe_add(win, 1, 2, "Escreva como a API deve gerar/refazer a resposta.", pw - 4)
+    _safe_add(win, 2, 2, "Pode deixar vazio para a API produzir uma nova versão por padrão.", pw - 4, p.DIM)
+    edit_top = 4
+    edit_h = max(3, ph - 8)
+    edit_w = max(20, pw - 6)
+    edit = win.derwin(edit_h, edit_w, edit_top, 3)
+    try:
+        edit.border()
+    except curses.error:
+        pass
+    inner = edit.derwin(max(1, edit_h - 2), max(1, edit_w - 2), 1, 1)
+    initial_text = str(initial or "")[:8000]
+    try:
+        inner.addstr(0, 0, initial_text)
+    except curses.error:
+        pass
+    _safe_add(win, ph - 3, 2, "F10 salvar · Esc cancelar · Enter cria nova linha", pw - 4, p.DIM)
+    win.refresh()
+    cancelled = False
+
+    def validator(ch):
+        nonlocal cancelled
+        if ch == curses.KEY_F10:
+            return 7  # Ctrl-G encerra Textbox
+        if ch == 27:
+            cancelled = True
+            return 7
+        return ch
+
+    try:
+        curses.curs_set(1)
+    except curses.error:
+        pass
+    box = curses.textpad.Textbox(inner, insert_mode=True)
+    box.edit(validator)
+    value = box.gather().strip()
+    try:
+        curses.curs_set(0)
+    except curses.error:
+        pass
+    stdscr.touchwin(); stdscr.refresh()
+    return None if cancelled else value
+
+
+def _format_file_size(value: int) -> str:
+    size = max(0, int(value or 0))
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KiB"
+    return f"{size / (1024 * 1024):.1f} MiB"
+
+
+def _popup_file_picker(stdscr, browser, p: Palette, initial: list[str] | None = None) -> list[str] | None:
+    selected_files = set(str(item) for item in (initial or []) if str(item or "").strip())
+    current = ""
+    cursor = 0
+    offset = 0
+    while True:
+        try:
+            listing = browser.browse(current)
+        except Exception as exc:
+            _popup_notice(stdscr, "ERRO AO ABRIR PASTA CODE", [str(exc)], p, p.ERROR)
+            return None
+        entries = list(listing.get("entries") or [])
+        h, w = stdscr.getmaxyx()
+        ph = max(14, min(h - 2, 34))
+        pw = max(68, min(w - 4, 140))
+        top = max(0, (h - ph) // 2)
+        left = max(0, (w - pw) // 2)
+        win = curses.newwin(ph, pw, top, left)
+        win.keypad(True)
+        try:
+            win.border()
+        except curses.error:
+            pass
+        _safe_add(win, 0, 2, " ARQUIVOS DE CONTEXTO :: PASTA CODE ", pw - 4, p.HEADER)
+        location = str(listing.get("path") or ".")
+        _safe_add(win, 1, 2, f"Root: {listing.get('root')}", pw - 4, p.DIM)
+        _safe_add(win, 2, 2, f"Pasta: /{location if location != '.' else ''}", pw - 4)
+        _safe_add(
+            win, 3, 2,
+            f"Selecionados {len(selected_files)}/{listing.get('max_files', 8)} · conteúdo selecionado será enviado à API",
+            pw - 4, p.WARN if selected_files else p.DIM,
+        )
+        page = max(1, ph - 8)
+        if entries:
+            cursor = max(0, min(cursor, len(entries) - 1))
+        else:
+            cursor = 0
+        if cursor < offset:
+            offset = cursor
+        if cursor >= offset + page:
+            offset = cursor - page + 1
+        offset = max(0, min(offset, max(0, len(entries) - page)))
+        for pos, entry in enumerate(entries[offset:offset + page]):
+            absolute = offset + pos
+            path = str(entry.get("path") or "")
+            if entry.get("type") == "dir":
+                mark = "   "
+                kind = "DIR "
+                suffix = "/"
+            else:
+                mark = "[x]" if path in selected_files else "[ ]"
+                kind = "FILE"
+                suffix = f"  {_format_file_size(int(entry.get('size') or 0))}"
+            line = f"{mark} {kind:<4} {entry.get('name')}{suffix}"
+            attr = p.SELECTED if absolute == cursor else (p.OK if path in selected_files else 0)
+            _safe_add(win, 5 + pos, 2, line, pw - 4, attr)
+        if not entries:
+            _safe_add(win, 6, 3, "Pasta vazia.", pw - 6, p.DIM)
+        _safe_add(win, ph - 2, 2, "↑↓ navegar · Enter abrir/marcar · Espaço marcar · Backspace voltar · F10 confirmar · Esc cancelar", pw - 4, p.DIM)
+        win.refresh()
+        ch = win.getch()
+        if ch == 27:
+            stdscr.touchwin(); stdscr.refresh()
+            return None
+        if ch == curses.KEY_F10:
+            stdscr.touchwin(); stdscr.refresh()
+            return sorted(selected_files)
+        if ch == curses.KEY_UP and entries:
+            cursor = max(0, cursor - 1)
+            continue
+        if ch == curses.KEY_DOWN and entries:
+            cursor = min(len(entries) - 1, cursor + 1)
+            continue
+        if ch == curses.KEY_PPAGE and entries:
+            cursor = max(0, cursor - page)
+            continue
+        if ch == curses.KEY_NPAGE and entries:
+            cursor = min(len(entries) - 1, cursor + page)
+            continue
+        if ch in (curses.KEY_BACKSPACE, 8, 127, curses.KEY_LEFT):
+            current = str(listing.get("parent") or "")
+            cursor = 0; offset = 0
+            continue
+        if ch in (10, 13, curses.KEY_ENTER, ord(" ")) and entries:
+            entry = entries[cursor]
+            path = str(entry.get("path") or "")
+            if entry.get("type") == "dir" and ch != ord(" "):
+                current = path
+                cursor = 0; offset = 0
+                continue
+            if entry.get("type") == "file":
+                if path in selected_files:
+                    selected_files.remove(path)
+                else:
+                    maximum = int(listing.get("max_files") or 8)
+                    if len(selected_files) >= maximum:
+                        _popup_notice(
+                            stdscr, "LIMITE DE ARQUIVOS",
+                            [f"Selecione no máximo {maximum} arquivos de contexto."], p, p.WARN,
+                        )
+                    else:
+                        selected_files.add(path)
+                continue
+
+
+def _popup_reply_interaction(stdscr, row: dict, browser, p: Palette) -> dict | None:
+    instruction = ""
+    files: list[str] = []
+    cursor = 0
+    options = (
+        "Instrução / contexto escrito",
+        "Selecionar arquivos da pasta Code",
+        "GERAR / REFAZER RESPOSTA",
+        "Cancelar",
+    )
+    while True:
+        h, w = stdscr.getmaxyx()
+        ph = max(16, min(h - 2, 24))
+        pw = max(68, min(w - 4, 120))
+        top = max(0, (h - ph) // 2)
+        left = max(0, (w - pw) // 2)
+        win = curses.newwin(ph, pw, top, left)
+        win.keypad(True)
+        try:
+            win.border()
+        except curses.error:
+            pass
+        title = "GERAR RESPOSTA" if str(row.get("direction") or "") == "in" else "REFAZER / DIRECIONAR RESPOSTA"
+        _safe_add(win, 0, 2, f" {title} ", pw - 4, p.HEADER)
+        peer = row.get("sender") if str(row.get("direction") or "") == "in" else row.get("recipient")
+        _safe_add(win, 2, 3, f"Contato: {peer or '-'}", pw - 6)
+        _safe_add(win, 3, 3, f"Assunto: {row.get('subject') or '(sem assunto)'}", pw - 6)
+        _safe_add(win, 5, 3, "A API sempre usa o e-mail original. Se já houver rascunho, ele entra como base para a reescrita.", pw - 6, p.DIM)
+        inst_preview = " ".join(instruction.split())[: max(20, pw - 25)] if instruction else "(sem instrução adicional)"
+        _safe_add(win, 7, 3, f"Instrução: {inst_preview}", pw - 6, p.WARN if instruction else p.DIM)
+        _safe_add(win, 8, 3, f"Arquivos: {len(files)} selecionado(s)", pw - 6, p.WARN if files else p.DIM)
+        if files:
+            _safe_add(win, 9, 5, ", ".join(files)[: pw - 10], pw - 10, p.DIM)
+        start_y = 11
+        for idx, option in enumerate(options):
+            attr = p.SELECTED if idx == cursor else (p.OK if idx == 2 else 0)
+            _safe_add(win, start_y + idx, 4, option, pw - 8, attr)
+        _safe_add(win, ph - 2, 3, "↑↓ escolher · Enter executar opção · F10 gerar · Esc cancelar", pw - 6, p.DIM)
+        win.refresh()
+        ch = win.getch()
+        if ch == 27:
+            stdscr.touchwin(); stdscr.refresh()
+            return None
+        if ch == curses.KEY_UP:
+            cursor = (cursor - 1) % len(options)
+            continue
+        if ch == curses.KEY_DOWN:
+            cursor = (cursor + 1) % len(options)
+            continue
+        if ch == curses.KEY_F10:
+            stdscr.touchwin(); stdscr.refresh()
+            return {"instruction": instruction, "files": list(files)}
+        if ch not in (10, 13, curses.KEY_ENTER):
+            continue
+        if cursor == 0:
+            updated = _popup_text_editor(stdscr, "INSTRUÇÃO PARA A RESPOSTA", instruction, p)
+            if updated is not None:
+                instruction = updated
+        elif cursor == 1:
+            updated_files = _popup_file_picker(stdscr, browser, p, files)
+            if updated_files is not None:
+                files = updated_files
+        elif cursor == 2:
+            stdscr.touchwin(); stdscr.refresh()
+            return {"instruction": instruction, "files": list(files)}
+        else:
+            stdscr.touchwin(); stdscr.refresh()
+            return None
 
 
 def _delete_confirmation_text(row: dict) -> tuple[str, list[str], str]:
@@ -1026,9 +1268,9 @@ def run(settings: Settings, startup_log=None) -> int:
             if menu_focus:
                 footer = "←/→ selecionar menu  ↓ ou Enter entrar  F5 atualizar agora  Q sair"
             elif active_tab == TAB_INBOX:
-                footer = "↑/↓ navegar  Enter abrir  N não responder  D remover  PgUp/PgDn  Esc menu  F5 atualizar  Q sair"
+                footer = "↑/↓ navegar  Enter abrir  R gerar/refazer  N não responder  D remover  PgUp/PgDn  Esc menu  F5 atualizar  Q sair"
             elif active_tab == TAB_REPLIES:
-                footer = "↑/↓ navegar  Enter abrir  L liberar envio  G global clientes  PgUp/PgDn  Esc menu  Q sair"
+                footer = "↑/↓ navegar  Enter abrir  R refazer/interagir  L liberar envio  G global clientes  PgUp/PgDn  Esc menu  Q sair"
             elif active_tab == TAB_API:
                 footer = "↑/↓ navegar  Enter abrir  T teste ZIP  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
             elif active_tab == TAB_FUNCTIONS:
@@ -1043,8 +1285,8 @@ def run(settings: Settings, startup_log=None) -> int:
                 hint = (
                     "FUNÇÕES mostra o catálogo Oracle carregado pela camada de aplicação." if active_tab == TAB_FUNCTIONS else
                     "T na área API envia um ZIP de teste e salva o retorno na pasta configurada." if active_tab == TAB_API else
-                    "N marca NÃO RESPONDER no Oracle e cancela resposta pendente; D remove também do IMAP." if active_tab == TAB_INBOX else
-                    "L libera individualmente a resposta selecionada; G controla o bloqueio global de clientes." if active_tab == TAB_REPLIES else
+                    "R gera/refaz a resposta com instrução e arquivos; N bloqueia resposta; D remove também do IMAP." if active_tab == TAB_INBOX else
+                    "R manda a API refazer/direcionar o rascunho; L libera; G controla o bloqueio global de clientes." if active_tab == TAB_REPLIES else
                     "Use ↑/Esc para voltar ao menu superior."
                 )
                 _safe_add(stdscr, h - 1, 1, hint, w - 2, p.DIM)
@@ -1089,7 +1331,7 @@ def run(settings: Settings, startup_log=None) -> int:
                 time.sleep(0.12)
                 continue
 
-            if ch in (curses.KEY_F5, ord("r"), ord("R")) and not checking:
+            if ch == curses.KEY_F5 and not checking:
                 checking = True
                 notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
                 notice_attr = p.WARN
@@ -1163,6 +1405,52 @@ def run(settings: Settings, startup_log=None) -> int:
                     stdscr.nodelay(False)
                     _popup_api_run(stdscr, full, p)
                     stdscr.nodelay(True)
+            elif ch in (ord("r"), ord("R")):
+                if active_tab not in (TAB_INBOX, TAB_REPLIES):
+                    notice = "R: gerar/refazer resposta está disponível em ENTRADA e RESPOSTAS. F5 atualiza o IMAP."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 5
+                elif not rows:
+                    notice = "Nenhuma mensagem selecionada para gerar/refazer resposta."
+                    notice_attr = p.WARN
+                    notice_until = time.time() + 4
+                else:
+                    row = rows[selected[active_tab]]
+                    status = str(row.get("status") or "").lower()
+                    if active_tab == TAB_INBOX and int(row.get("reply_suppressed") or 0) == 1:
+                        notice = "Este e-mail está marcado como NÃO RESPONDER; R não pode gerar resposta enquanto esse bloqueio estiver ativo."
+                        notice_attr = p.ERROR
+                        notice_until = time.time() + 7
+                    elif active_tab == TAB_REPLIES and status in {"send-queued", "sending", "sent"}:
+                        notice = f"Resposta já entrou no fluxo de envio ({_status_label(status)}); não pode mais ser refeita."
+                        notice_attr = p.ERROR
+                        notice_until = time.time() + 7
+                    else:
+                        stdscr.nodelay(False)
+                        request = _popup_reply_interaction(stdscr, row, monitor.reply_context, p)
+                        stdscr.nodelay(True)
+                        if request is not None:
+                            if active_tab == TAB_INBOX:
+                                feed.patch_message_status(int(row["id"]), "analyzing")
+                            notice = (
+                                f"API gerando/refazendo resposta em segundo plano; arquivos={len(request['files'])}. "
+                                "Você pode continuar navegando."
+                            )
+                            notice_attr = p.WARN
+                            notice_until = time.time() + 7
+
+                            def reply_action(payload=deepcopy(row), spec=deepcopy(request)):
+                                result = monitor.generate_or_regenerate_reply(
+                                    payload,
+                                    instruction=str(spec.get("instruction") or ""),
+                                    context_files=list(spec.get("files") or []),
+                                    requested_by="tui",
+                                )
+                                return (
+                                    f"Resposta pronta: #{result['outbound_id']} · {_status_label(result['status'])} · "
+                                    f"arquivos={len(result['files'])}."
+                                )
+                            _background_action(reply_action, success_level="OK")
             elif ch in (ord("l"), ord("L")):
                 if active_tab != TAB_REPLIES:
                     notice = "L: liberação manual disponível somente em RESPOSTAS."
