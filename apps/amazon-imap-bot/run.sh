@@ -1,41 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-VENV="$HERE/.venv"
-PYTHON="$VENV/bin/python"
-REQUIREMENTS="$HERE/requirements.txt"
+LOCAL="$HERE/deploy/local"
+API_VENV="$HERE/apps/api/.venv/bin/python"
+WEB_MODULES="$HERE/apps/web/node_modules"
 
-printf '[amazon-imap-bot] launcher: iniciando em %s\n' "$HERE" >&2
+command="${1:-}"
 
-bootstrap_venv() {
-  local system_python
-  system_python="$(command -v python3 || true)"
-  if [[ -z "$system_python" ]]; then
-    printf '[amazon-imap-bot] ERRO: python3 não encontrado.
-' >&2
-    exit 1
-  fi
-
-  if [[ ! -x "$PYTHON" ]]; then
-    printf '[amazon-imap-bot] preparando ambiente Python...
-' >&2
-    "$system_python" -m venv "$VENV"
-  else
-    printf '[amazon-imap-bot] launcher: ambiente Python OK (%s)\n' "$PYTHON" >&2
-  fi
-
-  if ! "$PYTHON" -c 'import sys,boto3,openai,oracledb; v=tuple(int(x) for x in oracledb.__version__.split(".")[:2]); raise SystemExit(1 if sys.version_info >= (3,14) and v < (3,3) else 0)' >/dev/null 2>&1; then
-    printf '[amazon-imap-bot] instalando dependências...
-' >&2
-    "$PYTHON" -m pip install -r "$REQUIREMENTS"
-  else
-    printf '[amazon-imap-bot] launcher: dependências OK\n' >&2
-    "$PYTHON" -c 'import sys,oracledb; print(f"[amazon-imap-bot] launcher: Python {sys.version.split()[0]} | python-oracledb {oracledb.__version__}", file=sys.stderr, flush=True)'
-  fi
-}
-
-bootstrap_venv
-export PYTHONUNBUFFERED=1
-export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
-printf '[amazon-imap-bot] launcher: executando aplicação\n' >&2
-exec "$PYTHON" "$HERE/__main__.py" "$@"
+case "$command" in
+  --setup)
+    exec "$LOCAL/setup.sh"
+    ;;
+  --doctor|--test)
+    exec "$LOCAL/test.sh"
+    ;;
+  --api)
+    exec "$LOCAL/start-api.sh"
+    ;;
+  --web)
+    exec "$LOCAL/start-web.sh"
+    ;;
+  ""|--start)
+    if [[ ! -x "$API_VENV" || ! -d "$WEB_MODULES" ]]; then
+      echo "[amazon-imap-bot] ambiente Web/API ainda não preparado; executando setup local..."
+      exec "$LOCAL/setup.sh"
+    fi
+    echo "[amazon-imap-bot] iniciando Web + API..."
+    exec "$LOCAL/start.sh"
+    ;;
+  *)
+    echo "Uso: amazon-imap-bot [--start|--setup|--doctor|--test|--api|--web]" >&2
+    exit 2
+    ;;
+esac

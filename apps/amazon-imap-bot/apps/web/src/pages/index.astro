@@ -1,0 +1,128 @@
+---
+import '../styles/global.css';
+import appScript from '../scripts/app.js?url';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+const buildVersion = fs.readFileSync(fileURLToPath(new URL('../../../../VERSION', import.meta.url)), 'utf8').trim();
+---
+<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Amazon IMAP Bot</title>
+</head>
+<body>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark">AI</div>
+            <div><strong>Amazon IMAP Bot</strong><span>Central do agente</span></div>
+        </div>
+        <nav id="nav" class="nav">
+            <button data-view="overview" class="nav-item active"><span>▦</span>Visão geral</button>
+            <button data-view="inbox" class="nav-item"><span>✉</span>Entrada <b id="navInboxCount">0</b></button>
+            <button data-view="replies" class="nav-item"><span>↩</span>Respostas <b id="navPendingCount">0</b></button>
+            <button data-view="api" class="nav-item"><span>⌁</span>API / Agente</button>
+            <button data-view="console" class="nav-item"><span>›_</span>Console</button>
+            <button data-view="functions" class="nav-item"><span>ƒ</span>Funções</button>
+            <button data-view="accounts" class="nav-item"><span>◎</span>Contas</button>
+        </nav>
+        <div class="sidebar-footer">
+            <span class="dot" id="sidebarDot"></span><span id="sidebarStatus">Conectando...</span>
+        </div>
+    </aside>
+
+    <main class="main">
+        <header class="topbar">
+            <div>
+                <h1 id="pageTitle">Visão geral</h1>
+                <p id="pageDescription">Operação, IMAP, respostas e API em uma única visão.</p>
+            </div>
+            <div class="top-actions">
+                <button id="refreshButton" class="button secondary">Atualizar IMAP</button>
+                <label class="delivery-switch" title="Mesmo ligado, respostas externas ainda exigem aprovação individual.">
+                    <input id="globalDeliveryToggle" type="checkbox" />
+                    <span class="switch-track"><span></span></span>
+                    <span><strong>Envio a clientes</strong><small id="globalDeliveryText">Bloqueado</small></span>
+                </label>
+            </div>
+        </header>
+
+        <div id="versionBadge" class="version-badge">{buildVersion}</div>
+        <div id="toastHost" class="toast-host"></div>
+
+        <section id="view-overview" class="view active">
+            <div class="metric-grid">
+                <article class="metric"><span>Caixas online</span><strong id="metricOnline">—</strong><small id="metricAccounts">—</small></article>
+                <article class="metric"><span>Entrada sincronizada</span><strong id="metricReceived">—</strong><small>IMAP é a fonte de verdade</small></article>
+                <article class="metric warning"><span>Pendentes de aprovação</span><strong id="metricPending">—</strong><small>liberação individual obrigatória</small></article>
+                <article class="metric"><span>Respostas enviadas</span><strong id="metricReplied">—</strong><small>via Amazon SES</small></article>
+            </div>
+            <div class="overview-grid">
+                <article class="panel">
+                    <div class="panel-title"><div><h2>Atividade do agente</h2><p>Fila operacional em tempo real.</p></div><span class="live-pill">auto 3s</span></div>
+                    <div id="actionsList" class="activity-list"><div class="empty">Nenhuma ação recente.</div></div>
+                </article>
+                <article class="panel">
+                    <div class="panel-title"><div><h2>Configuração ativa</h2><p>Resumo seguro do runtime.</p></div></div>
+                    <dl class="config-list">
+                        <div><dt>Modelo</dt><dd id="cfgModel">—</dd></div>
+                        <div><dt>Raciocínio</dt><dd id="cfgReasoning">—</dd></div>
+                        <div><dt>Polling</dt><dd id="cfgPoll">—</dd></div>
+                        <div><dt>IMAP</dt><dd id="cfgImap">—</dd></div>
+                    </dl>
+                </article>
+            </div>
+        </section>
+
+        <section id="view-inbox" class="view">
+            <div class="toolbar">
+                <div class="search"><input id="inboxSearch" placeholder="Buscar remetente, assunto ou status" /></div>
+                <span class="toolbar-info" id="inboxSummary"></span>
+            </div>
+            <div class="table-card"><div class="table-scroll"><table><thead><tr><th>Data</th><th>Remetente</th><th>Assunto</th><th>Status</th><th class="actions-col">Ações</th></tr></thead><tbody id="inboxBody"></tbody></table></div></div>
+        </section>
+
+        <section id="view-replies" class="view">
+            <div class="toolbar"><div class="search"><input id="replySearch" placeholder="Buscar destinatário, assunto ou status" /></div><span class="toolbar-info" id="replySummary"></span></div>
+            <div class="table-card"><div class="table-scroll"><table><thead><tr><th>Data</th><th>Destinatário</th><th>Assunto</th><th>Status</th><th>Classe</th><th class="actions-col">Ações</th></tr></thead><tbody id="replyBody"></tbody></table></div></div>
+        </section>
+
+        <section id="view-api" class="view">
+            <div class="toolbar"><button id="zipTestButton" class="button primary">Novo teste ZIP</button><span class="toolbar-info">Fila do agente e histórico OpenAI / Code Interpreter.</span></div>
+            <div class="panel agent-queue-panel">
+                <div class="panel-title"><div><h2>Fila do agente</h2><p>O pedido aparece aqui imediatamente, antes mesmo da chamada OpenAI começar.</p></div><span class="live-pill">AO VIVO</span></div>
+                <div id="agentQueue" class="activity-list"><div class="empty">Nenhuma ação recente.</div></div>
+            </div>
+            <div class="table-card api-history-card"><div class="table-scroll"><table><thead><tr><th>ID</th><th>Tipo</th><th>Início</th><th>Status</th><th>Modelo</th><th>Raciocínio</th><th>Tempo</th></tr></thead><tbody id="apiRunsBody"></tbody></table></div></div>
+        </section>
+
+        <section id="view-console" class="view">
+            <div class="console-toolbar"><span>Eventos persistidos no Oracle</span><button id="consoleRefresh" class="button secondary small">Atualizar</button></div>
+            <div id="consoleBody" class="console"></div>
+        </section>
+
+        <section id="view-functions" class="view">
+            <div class="toolbar"><button id="functionsSync" class="button primary">Recarregar catálogo</button><span class="toolbar-info" id="functionSummary"></span></div>
+            <div id="functionsGrid" class="function-grid"></div>
+        </section>
+
+        <section id="view-accounts" class="view"><div id="accountsGrid" class="account-grid"></div></section>
+    </main>
+</div>
+
+<dialog id="messageDialog" class="dialog wide"><div class="dialog-card"><header><div><span class="eyebrow" id="messageDirection"></span><h2 id="messageTitle">Mensagem</h2></div><button class="icon-close" data-close="messageDialog">×</button></header><div class="message-meta" id="messageMeta"></div><pre id="messageBody" class="message-body"></pre><footer id="messageActions" class="dialog-actions"></footer></div></dialog>
+
+<dialog id="replyDialog" class="dialog wide"><div class="dialog-card"><header><div><span class="eyebrow">AGENTE DE RESPOSTA</span><h2>Gerar / refazer resposta</h2><p>Você direciona a IA; o texto final continua sendo produzido pela API.</p></div><button class="icon-close" data-close="replyDialog">×</button></header><label>Instrução para a API<textarea id="replyInstruction" rows="6" placeholder="Ex.: responda tecnicamente, use o arquivo selecionado como contexto e explique apenas o erro principal."></textarea></label><div class="context-box"><div><strong>Arquivos de contexto</strong><small>Somente arquivos dentro da pasta Code configurada.</small></div><button id="chooseFilesButton" class="button secondary">Escolher arquivos</button></div><div id="selectedFiles" class="selected-files"><span>Nenhum arquivo selecionado.</span></div><footer class="dialog-actions"><button class="button secondary" data-close="replyDialog">Cancelar</button><button id="generateReplyButton" class="button primary">Gerar nova versão</button></footer></div></dialog>
+
+<dialog id="fileDialog" class="dialog"><div class="dialog-card"><header><div><span class="eyebrow">CONTEXTO LOCAL</span><h2>Selecionar arquivos</h2><p id="filePath">Code/</p></div><button class="icon-close" data-close="fileDialog">×</button></header><div id="fileList" class="file-list"></div><footer class="dialog-actions split"><button id="fileBackButton" class="button secondary">Voltar</button><div><button class="button secondary" data-close="fileDialog">Cancelar</button><button id="fileConfirmButton" class="button primary">Usar selecionados</button></div></footer></div></dialog>
+
+<dialog id="zipDialog" class="dialog"><div class="dialog-card"><header><div><span class="eyebrow">OPENAI API</span><h2>Teste ZIP</h2></div><button class="icon-close" data-close="zipDialog">×</button></header><label>Raciocínio<select id="zipReasoning"><option>low</option><option selected>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label><label>Instrução<textarea id="zipRequest" rows="5" placeholder="O que a API deve responder dentro do teste?"></textarea></label><footer class="dialog-actions"><button class="button secondary" data-close="zipDialog">Cancelar</button><button id="runZipButton" class="button primary">Executar teste</button></footer></div></dialog>
+
+<dialog id="apiRunDialog" class="dialog wide"><div class="dialog-card"><header><div><span class="eyebrow">EXECUÇÃO DA API</span><h2 id="apiRunTitle">Execução</h2></div><button class="icon-close" data-close="apiRunDialog">×</button></header><div class="message-meta" id="apiRunMeta"></div><div class="api-run-columns"><div><strong>Pedido</strong><pre id="apiRunRequest" class="message-body"></pre></div><div><strong>Resposta / erro</strong><pre id="apiRunResponse" class="message-body"></pre></div></div><footer class="dialog-actions"><button class="button secondary" data-close="apiRunDialog">Fechar</button></footer></div></dialog>
+
+<script type="module" src={appScript}></script>
+</body>
+</html>

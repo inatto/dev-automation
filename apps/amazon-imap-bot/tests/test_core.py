@@ -1129,7 +1129,7 @@ def test_tui_r_is_reply_action_and_f5_is_imap_refresh():
     import tui as tui_module
 
     source = inspect.getsource(tui_module.run)
-    assert 'if ch == curses.KEY_F5 and not checking:' in source
+    assert 'if ch == KEY_CTRL_REFRESH and not checking:' in source
     assert 'elif ch in (ord("r"), ord("R")):' in source
     assert "generate_or_regenerate_reply" in source
 
@@ -1152,3 +1152,24 @@ def test_manual_reply_audit_does_not_persist_selected_file_contents():
     )
     assert "projeto/config.py" in audit
     assert "SEGREDO_DO_ARQUIVO" not in audit
+
+
+def test_tui_does_not_use_function_keys():
+    import inspect
+    import re
+    import tui as tui_module
+
+    source = inspect.getsource(tui_module)
+    assert re.search(r"KEY_F\d+|\bF\d+\b", source) is None
+    assert "Ctrl+Enter gerar/enviar" in source
+    assert "KEY_CTRL_REFRESH" in source
+
+
+def test_reply_editor_ctrl_enter_submits_without_function_key():
+    import inspect
+    import tui as tui_module
+
+    source = inspect.getsource(tui_module._popup_text_editor)
+    assert "_read_ctrl_enter_after_escape" in source
+    assert "submitted = True" in source
+    assert "Ctrl+Enter gerar/enviar" in source

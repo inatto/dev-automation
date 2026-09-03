@@ -16,13 +16,7 @@ ORACLE_MONITOR_DIR="$PROJECT_ROOT/apps/oracle-monitor"
 VOICE_COMMANDS_SOURCE="$PROJECT_ROOT/apps/voice-commands/run.sh"
 GPT_CONSOLE_SOURCE="$PROJECT_ROOT/apps/gpt-console/run.sh"
 AMAZON_IMAP_BOT_DIR="$PROJECT_ROOT/apps/amazon-imap-bot"
-AMAZON_IMAP_BOT_TERMINAL_SOURCE="$AMAZON_IMAP_BOT_DIR/terminal/run.sh"
-AMAZON_IMAP_BOT_LEGACY_SOURCE="$AMAZON_IMAP_BOT_DIR/run.sh"
-if [[ -f "$AMAZON_IMAP_BOT_TERMINAL_SOURCE" ]]; then
-  AMAZON_IMAP_BOT_SOURCE="$AMAZON_IMAP_BOT_TERMINAL_SOURCE"
-else
-  AMAZON_IMAP_BOT_SOURCE="$AMAZON_IMAP_BOT_LEGACY_SOURCE"
-fi
+AMAZON_IMAP_BOT_SOURCE="$AMAZON_IMAP_BOT_DIR/deploy/local/start.sh"
 AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE="$PROJECT_ROOT/scripts/amazon-imap-bot-auto-status.sh"
 SCRIPT_DEV_AUTOMATION_SOURCE="$PROJECT_ROOT/apps/script-dev-automation/run.sh"
 CHROMES_SOURCE="$PROJECT_ROOT/scripts/chromes.sh"
@@ -228,8 +222,7 @@ EOF_WRAPPER
   auto_target_file="$TARGET_DIR/$command_name-auto"
   case "$command_name" in
     amazon-imap-bot)
-      # As interfaces Terminal, Flutter e API são independentes, mas o AUTO
-      # acompanha o subaplicativo completo e relança a interface Terminal.
+      # O AUTO acompanha o subaplicativo completo e relança o launcher local.
       watch_dir="$AMAZON_IMAP_BOT_DIR"
       ;;
     *)

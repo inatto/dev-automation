@@ -3,6 +3,7 @@ from __future__ import annotations
 import curses
 import curses.textpad
 import json
+import os
 import queue
 import textwrap
 import threading
@@ -54,6 +55,67 @@ STATUS_LABELS = {
     "error": "ERRO",
 }
 PROCESSING_STATUSES = {"analyzing", "understood", "sending", "executing", "delete-queued", "deleting", "reply-queued", "send-queued"}
+
+
+KEY_CTRL_ENTER = 0x110001
+KEY_CTRL_REFRESH = 18  # Ctrl+R
+
+
+def _terminal_modified_keys(enabled: bool) -> None:
+    """Pede ao terminal para diferenciar Ctrl+Enter de Enter comum.
+
+    VTE/GNOME Terminal e terminais compatíveis com xterm modifyOtherKeys
+    passam Ctrl+Enter como uma sequência distinta. Terminais que ignorarem
+    esta extensão continuam funcionando com Enter normal e os demais atalhos.
+    """
+    try:
+        os.write(1, b"\x1b[>4;2m" if enabled else b"\x1b[>4;m")
+    except OSError:
+        pass
+
+
+def _read_ctrl_enter_after_escape(win) -> bool:
+    """Consome sequências conhecidas de Ctrl+Enter após um ESC inicial.
+
+    Suporta xterm modifyOtherKeys e CSI-u. Se não for Ctrl+Enter, devolve os
+    bytes lidos para a fila do curses, preservando o comportamento de Esc.
+    """
+    tail: list[int] = []
+    known = {
+        b"[27;5;13~",  # xterm modifyOtherKeys: Ctrl+Return
+        b"[27;5;10~",  # variante usando LF
+        b"[13;5u",     # CSI-u / kitty-style Return
+        b"[10;5u",     # CSI-u / kitty-style LF
+        b"[13;5~",
+    }
+    try:
+        win.timeout(30)
+        for _ in range(16):
+            ch = win.getch()
+            if ch == -1:
+                break
+            if 0 <= ch <= 255:
+                tail.append(ch)
+                raw = bytes(tail)
+                if raw in known:
+                    return True
+                if not any(item.startswith(raw) for item in known):
+                    break
+            else:
+                curses.ungetch(ch)
+                break
+    finally:
+        win.timeout(-1)
+    for ch in reversed(tail):
+        curses.ungetch(ch)
+    return False
+
+
+def _modal_getch(win) -> int:
+    ch = win.getch()
+    if ch == 27 and _read_ctrl_enter_after_escape(win):
+        return KEY_CTRL_ENTER
+    return ch
 
 
 def _status_label(status: str) -> str:
@@ -377,7 +439,7 @@ def _popup_notice(stdscr, title: str, lines: list[str], p: Palette, attr: int = 
     stdscr.refresh()
 
 
-def _popup_text_editor(stdscr, title: str, initial: str, p: Palette) -> str | None:
+def _popup_text_editor(stdscr, title: str, initial: str, p: Palette) -> tuple[str | None, bool]:
     h, w = stdscr.getmaxyx()
     ph = max(12, min(h - 2, 18))
     pw = max(54, min(w - 4, 120))
@@ -401,21 +463,30 @@ def _popup_text_editor(stdscr, title: str, initial: str, p: Palette) -> str | No
     except curses.error:
         pass
     inner = edit.derwin(max(1, edit_h - 2), max(1, edit_w - 2), 1, 1)
+    inner.keypad(True)
     initial_text = str(initial or "")[:8000]
     try:
         inner.addstr(0, 0, initial_text)
     except curses.error:
         pass
-    _safe_add(win, ph - 3, 2, "F10 salvar · Esc cancelar · Enter cria nova linha", pw - 4, p.DIM)
+    _safe_add(win, ph - 3, 2, "Ctrl+Enter gerar/enviar · Esc cancelar · Enter cria nova linha", pw - 4, p.DIM)
     win.refresh()
     cancelled = False
+    submitted = False
 
     def validator(ch):
-        nonlocal cancelled
-        if ch == curses.KEY_F10:
-            return 7  # Ctrl-G encerra Textbox
+        nonlocal cancelled, submitted
+        # Alguns terminais entregam Ctrl+Enter como sequência iniciada por ESC.
         if ch == 27:
+            if _read_ctrl_enter_after_escape(inner):
+                submitted = True
+                return 7  # encerra Textbox sem inserir caractere
             cancelled = True
+            return 7
+        # Fallback universal do Textbox para terminais que não distinguem
+        # Ctrl+Enter. Não é exibido como atalho principal.
+        if ch == 7:
+            submitted = True
             return 7
         return ch
 
@@ -431,7 +502,9 @@ def _popup_text_editor(stdscr, title: str, initial: str, p: Palette) -> str | No
     except curses.error:
         pass
     stdscr.touchwin(); stdscr.refresh()
-    return None if cancelled else value
+    if cancelled:
+        return None, False
+    return value, submitted
 
 
 def _format_file_size(value: int) -> str:
@@ -501,13 +574,13 @@ def _popup_file_picker(stdscr, browser, p: Palette, initial: list[str] | None = 
             _safe_add(win, 5 + pos, 2, line, pw - 4, attr)
         if not entries:
             _safe_add(win, 6, 3, "Pasta vazia.", pw - 6, p.DIM)
-        _safe_add(win, ph - 2, 2, "↑↓ navegar · Enter abrir/marcar · Espaço marcar · Backspace voltar · F10 confirmar · Esc cancelar", pw - 4, p.DIM)
+        _safe_add(win, ph - 2, 2, "↑↓ navegar · Enter abrir/marcar · Espaço marcar · Backspace voltar · Ctrl+Enter confirmar · Esc cancelar", pw - 4, p.DIM)
         win.refresh()
-        ch = win.getch()
+        ch = _modal_getch(win)
         if ch == 27:
             stdscr.touchwin(); stdscr.refresh()
             return None
-        if ch == curses.KEY_F10:
+        if ch in (KEY_CTRL_ENTER, 7):
             stdscr.touchwin(); stdscr.refresh()
             return sorted(selected_files)
         if ch == curses.KEY_UP and entries:
@@ -585,9 +658,9 @@ def _popup_reply_interaction(stdscr, row: dict, browser, p: Palette) -> dict | N
         for idx, option in enumerate(options):
             attr = p.SELECTED if idx == cursor else (p.OK if idx == 2 else 0)
             _safe_add(win, start_y + idx, 4, option, pw - 8, attr)
-        _safe_add(win, ph - 2, 3, "↑↓ escolher · Enter executar opção · F10 gerar · Esc cancelar", pw - 6, p.DIM)
+        _safe_add(win, ph - 2, 3, "↑↓ escolher · Enter executar opção · Ctrl+Enter gerar · Esc cancelar", pw - 6, p.DIM)
         win.refresh()
-        ch = win.getch()
+        ch = _modal_getch(win)
         if ch == 27:
             stdscr.touchwin(); stdscr.refresh()
             return None
@@ -597,15 +670,18 @@ def _popup_reply_interaction(stdscr, row: dict, browser, p: Palette) -> dict | N
         if ch == curses.KEY_DOWN:
             cursor = (cursor + 1) % len(options)
             continue
-        if ch == curses.KEY_F10:
+        if ch in (KEY_CTRL_ENTER, 7):
             stdscr.touchwin(); stdscr.refresh()
             return {"instruction": instruction, "files": list(files)}
         if ch not in (10, 13, curses.KEY_ENTER):
             continue
         if cursor == 0:
-            updated = _popup_text_editor(stdscr, "INSTRUÇÃO PARA A RESPOSTA", instruction, p)
+            updated, submit_now = _popup_text_editor(stdscr, "INSTRUÇÃO PARA A RESPOSTA", instruction, p)
             if updated is not None:
                 instruction = updated
+                if submit_now:
+                    stdscr.touchwin(); stdscr.refresh()
+                    return {"instruction": instruction, "files": list(files)}
         elif cursor == 1:
             updated_files = _popup_file_picker(stdscr, browser, p, files)
             if updated_files is not None:
@@ -1266,17 +1342,17 @@ def run(settings: Settings, startup_log=None) -> int:
                     _safe_add(box, 3, 3, "Nenhum registro ainda.", w - 6, p.DIM)
 
             if menu_focus:
-                footer = "←/→ selecionar menu  ↓ ou Enter entrar  F5 atualizar agora  Q sair"
+                footer = "←/→ selecionar menu  ↓ ou Enter entrar  Ctrl+R atualizar agora  Q sair"
             elif active_tab == TAB_INBOX:
-                footer = "↑/↓ navegar  Enter abrir  R gerar/refazer  N não responder  D remover  PgUp/PgDn  Esc menu  F5 atualizar  Q sair"
+                footer = "↑/↓ navegar  Enter abrir  R gerar/refazer  N não responder  D remover  PgUp/PgDn  Esc menu  Ctrl+R atualizar  Q sair"
             elif active_tab == TAB_REPLIES:
                 footer = "↑/↓ navegar  Enter abrir  R refazer/interagir  L liberar envio  G global clientes  PgUp/PgDn  Esc menu  Q sair"
             elif active_tab == TAB_API:
-                footer = "↑/↓ navegar  Enter abrir  T teste ZIP  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+                footer = "↑/↓ navegar  Enter abrir  T teste ZIP  PgUp/PgDn  Esc voltar ao menu  Ctrl+R atualizar  Q sair"
             elif active_tab == TAB_FUNCTIONS:
-                footer = "↑/↓ rolar  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+                footer = "↑/↓ rolar  PgUp/PgDn  Esc voltar ao menu  Ctrl+R atualizar  Q sair"
             else:
-                footer = "↑/↓ navegar  Enter abrir quando disponível  PgUp/PgDn  Esc voltar ao menu  F5 atualizar  Q sair"
+                footer = "↑/↓ navegar  Enter abrir quando disponível  PgUp/PgDn  Esc voltar ao menu  Ctrl+R atualizar  Q sair"
             _safe_add(stdscr, h - 2, 1, footer, w - 2, p.DIM)
             if notice and time.time() < notice_until:
                 _safe_add(stdscr, h - 1, 1, notice, w - 2, notice_attr)
@@ -1331,7 +1407,7 @@ def run(settings: Settings, startup_log=None) -> int:
                 time.sleep(0.12)
                 continue
 
-            if ch == curses.KEY_F5 and not checking:
+            if ch == KEY_CTRL_REFRESH and not checking:
                 checking = True
                 notice = "Atualizando agora: executando a mesma verificação IMAP do poll automático..."
                 notice_attr = p.WARN
@@ -1407,7 +1483,7 @@ def run(settings: Settings, startup_log=None) -> int:
                     stdscr.nodelay(True)
             elif ch in (ord("r"), ord("R")):
                 if active_tab not in (TAB_INBOX, TAB_REPLIES):
-                    notice = "R: gerar/refazer resposta está disponível em ENTRADA e RESPOSTAS. F5 atualiza o IMAP."
+                    notice = "R: gerar/refazer resposta está disponível em ENTRADA e RESPOSTAS. Ctrl+R atualiza o IMAP."
                     notice_attr = p.WARN
                     notice_until = time.time() + 5
                 elif not rows:
@@ -1618,9 +1694,11 @@ def run(settings: Settings, startup_log=None) -> int:
                     threading.Thread(target=do_api_test, daemon=True).start()
             time.sleep(0.03)
 
+    _terminal_modified_keys(True)
     try:
         curses.wrapper(draw)
     finally:
+        _terminal_modified_keys(False)
         trace("TUI SHUTDOWN: sinalizando monitor/feed")
         monitor.stop()
         feed.stop(timeout=5)

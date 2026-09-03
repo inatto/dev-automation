@@ -1,0 +1,17 @@
+{
+  "name": "amazon-imap-bot-web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "node --test ./scripts/web-contract.test.mjs",
+    "prebuild": "npm test"
+  },
+  "dependencies": {
+    "@astrojs/node": "^10.1.4",
+    "astro": "^6.4.8"
+  }
+}
