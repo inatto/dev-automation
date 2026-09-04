@@ -52,8 +52,8 @@ function messageActions(row, direction) {
     const sendingNow=status==='sending'||status==='reply-queued';
     const noReply=status==='no-reply';
     const generateLabel=status==='replied'?'Gerar novamente':sendingNow?'Em envio':noReply?'Bloqueada':'Gerar';
-    const generateButton=(terminalReply||noReply)
-      ? `<button class="row-action" disabled title="${status==='replied'?'A resposta já foi enviada e não pode ser refeita.':noReply?'Mensagem marcada como NÃO RESPONDER.':'Resposta já entrou no fluxo de envio.'}">${generateLabel}</button>`
+    const generateButton=(sendingNow||noReply)
+      ? `<button class="row-action" disabled title="${noReply?'Mensagem marcada como NÃO RESPONDER.':'Resposta já entrou no fluxo de envio; aguarde terminar.'}">${generateLabel}</button>`
       : `<button class="row-action" data-compose="${id}">${generateLabel}</button>`;
     return `<div class="row-actions"><button class="row-action" data-open-message="${id}">Abrir</button>${generateButton}<button class="row-action" data-no-reply="${id}">Não responder</button><button class="row-action danger" data-delete="${id}">Remover</button></div>`;
   }

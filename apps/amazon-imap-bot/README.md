@@ -60,3 +60,11 @@ saída; a resposta anterior permanece intacta no histórico.
 Enquanto uma resposta estiver `send-queued` ou `sending`, uma nova geração é
 bloqueada até o envio atual terminar. Para destinatário externo, cada nova
 resposta volta a exigir aprovação individual.
+
+
+## Correção Web 2026.09.03-V7
+
+Corrigida a renderização da Entrada: a variável legada `terminalReply` havia sido
+removida na V6, mas uma referência residual permanecia no botão de geração.
+Mensagem já `REPLIED` volta a exibir **Gerar novamente**; somente envio em
+andamento ou `NÃO RESPONDER` desabilitam a ação.

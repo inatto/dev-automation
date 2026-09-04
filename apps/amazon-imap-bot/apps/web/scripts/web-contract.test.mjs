@@ -15,3 +15,9 @@ test('polling web é single-flight e não usa setInterval',()=>{ assert.ok(js.in
 
 test('geração acompanha action até concluir ou falhar',()=>{ assert.ok(js.includes('waitForAction')); assert.ok(js.includes('/v1/actions/${encodeURIComponent(actionId)}')); assert.ok(js.includes("done.status==='error'")); });
 test('API agente mostra fila e permite nova resposta manual após SENT',()=>{ assert.ok(page.includes('Fila do agente')); assert.ok(page.includes('agentQueue')); assert.ok(js.includes("status==='replied'")); assert.ok(js.includes('Gerar novamente')); assert.ok(!js.includes("status==='replied'?'Já enviada'")); });
+
+test('grid de entrada não referencia variável terminalReply inexistente',()=>{
+  assert.ok(!js.includes('terminalReply'));
+  assert.ok(js.includes('sendingNow||noReply'));
+  assert.ok(js.includes('Gerar novamente'));
+});
