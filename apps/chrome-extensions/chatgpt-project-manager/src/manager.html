@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GPT Project Manager</title>
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>GPT Project Manager</h1>
+      <p>Hierarquia própria + Projects e novos chats automáticos no ChatGPT.</p>
+    </div>
+    <div class="top-actions">
+      <button id="refreshButton" class="primary">Atualizar fonte</button>
+      <button id="newFolderButton">Nova pasta</button>
+      <button id="settingsButton">Configurações</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="toolbar card">
+      <input id="searchInput" type="search" placeholder="Pesquisar projetos, caminhos ou contexto..." autocomplete="off">
+      <div id="status" class="status">Carregando...</div>
+    </section>
+
+    <section id="settingsPanel" class="settings card hidden">
+      <div class="settings-grid">
+        <label>
+          <span>URL de projetos (JSON ou .projects)</span>
+          <input id="sourceUrlInput" type="url" placeholder="http://localhost:3000/auto-code-manager.projects">
+        </label>
+        <div class="inline-buttons">
+          <button id="saveSourceButton" class="primary">Usar URL</button>
+          <button id="selectLocalFileButton" type="button">Selecionar arquivo local</button>
+          <input id="fileInput" class="hidden" type="file" accept=".projects,.json,.txt,application/json,text/plain">
+        </div>
+      </div>
+
+      <div id="localFileStatus" class="source-status">Nenhuma fonte configurada nesta máquina.</div>
+
+      <label class="toggle-row">
+        <input id="hideSidebarInput" type="checkbox">
+        <span>Ocultar visualmente a barra lateral original do ChatGPT</span>
+      </label>
+
+      <div class="settings-help">
+        Aceita diretamente <code>auto-code-manager.projects</code>: uma linha por projeto; linhas iniciadas por <code>#</code> são ignoradas. A fonte é somente leitura e é configurada separadamente em cada máquina.
+      </div>
+    </section>
+
+    <section class="columns">
+      <aside class="card sidebar">
+        <button class="nav-item active" data-view="all">Todos</button>
+        <button class="nav-item" data-view="favorites">Favoritos</button>
+        <button class="nav-item" data-view="unorganized">Não organizados</button>
+        <hr>
+        <div class="mini-title">Sincronização</div>
+        <p class="muted">Hierarquia, vínculos e contexto podem sincronizar; a escolha do arquivo/URL é local de cada máquina.</p>
+      </aside>
+
+      <section class="card tree-card">
+        <div id="tree" class="tree"></div>
+        <div id="emptyState" class="empty hidden">Nenhum projeto encontrado.</div>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="projectDialog">
+    <form method="dialog" id="projectForm">
+      <div class="dialog-head">
+        <h2 id="projectDialogTitle">Projeto</h2>
+        <button value="cancel" class="icon-button" aria-label="Fechar">×</button>
+      </div>
+
+      <input id="projectIdInput" type="hidden">
+
+      <div class="source-status">
+        O vínculo com o Project do ChatGPT é automático. Ao usar <strong>Novo chat</strong> ou <strong>Abrir GPT</strong>, a extensão procura um Project com o mesmo nome e, se necessário, tenta criá-lo.
+      </div>
+
+      <label>
+        <span>Pasta nossa</span>
+        <select id="folderSelect"></select>
+      </label>
+
+      <label>
+        <span>Contexto/notas da extensão</span>
+        <textarea id="contextInput" rows="7" placeholder="Contexto complementar deste projeto..."></textarea>
+      </label>
+
+      <div class="dialog-actions">
+        <button value="cancel">Cancelar</button>
+        <button id="saveProjectButton" value="default" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="manager.js"></script>
+</body>
+</html>

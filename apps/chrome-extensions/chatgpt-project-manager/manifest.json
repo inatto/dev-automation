@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "GPT Project Manager",
+  "version": "0.3.1",
+  "description": "Organiza projetos locais e cria/abre automaticamente chats dentro de Projects correspondentes no ChatGPT.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_title": "Abrir GPT Project Manager"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "src/manager.html",
+  "host_permissions": [
+    "https://chatgpt.com/*"
+  ]
+}

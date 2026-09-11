@@ -1,0 +1,7 @@
+#bots/importer
+bots/dev-automation
+infra/amazon-infra
+infra/amazon-infra/apps/monitor-app
+infra/oracle-infra
+orgs/orbital/orbital-app
+orgs/orbital/orbital-mail

@@ -1,0 +1,20 @@
+{
+  "projects": [
+    {
+      "id": "dev-automation",
+      "name": "dev-automation",
+      "path": "bots/dev-automation"
+    },
+    {
+      "id": "amazon-imap-bot",
+      "name": "amazon-imap-bot",
+      "path": "bots/dev-automation/apps/amazon-imap-bot"
+    },
+    {
+      "id": "orbital-app",
+      "name": "orbital-app",
+      "path": "orgs/orbital/orbital-app",
+      "gptUrl": "https://chatgpt.com/"
+    }
+  ]
+}
