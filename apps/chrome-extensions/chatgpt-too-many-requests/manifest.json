@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT — fechar “Too many requests”",
+  "version": "1.0.0",
+  "description": "Remove automaticamente a janela “Too many requests” do ChatGPT ao clicar em “Got it”.",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
