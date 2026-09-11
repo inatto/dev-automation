@@ -39,6 +39,8 @@ DEV_STATUS_SOURCE="$PROJECT_ROOT/scripts/dev-status.sh"
 CLEAR_TERMINAL_SOURCE="$PROJECT_ROOT/scripts/clear-terminal.sh"
 DEV_GITSETUP_SOURCE="$PROJECT_ROOT/scripts/dev-gitsetup.py"
 G512_RGB_SOURCE="$PROJECT_ROOT/scripts/g512-rgb.sh"
+GLOBAL_SHORTCUTS_SOURCE="$PROJECT_ROOT/scripts/Global Shortcuts/Global-Shortcuts.sh"
+GLOBAL_SHORTCUTS_TARGET="$TARGET_DIR/Global-Shortcuts"
 GLOBAL_AUTO_RUNNER="$PROJECT_ROOT/scripts/global-command-auto.sh"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 LRDP_DIR="${LRDP_DIR:-$PROJECT_ROOT/apps/lrdp}"
@@ -137,6 +139,7 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$CLEAR_TERMINAL_SOURCE" ]] || fail "script não encontrado: $CLEAR_TERMINAL_SOURCE"
 [[ -f "$DEV_GITSETUP_SOURCE" ]] || fail "script não encontrado: $DEV_GITSETUP_SOURCE"
 [[ -f "$G512_RGB_SOURCE" ]] || fail "script não encontrado: $G512_RGB_SOURCE"
+[[ -f "$GLOBAL_SHORTCUTS_SOURCE" ]] || fail "gerenciador de atalhos não encontrado: $GLOBAL_SHORTCUTS_SOURCE"
 [[ -f "$GLOBAL_AUTO_RUNNER" ]] || fail "supervisor AUTO não encontrado: $GLOBAL_AUTO_RUNNER"
 [[ -f "$LRDP_TUI_SOURCE" ]] || fail "script não encontrado: $LRDP_TUI_SOURCE"
 [[ -f "$LRDP1_SOURCE" ]] || fail "script não encontrado: $LRDP1_SOURCE"
@@ -144,7 +147,7 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 cleanup_legacy_google_drive_worker
-chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
+chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$GLOBAL_SHORTCUTS_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"
 cat > "$AUTO_TARGET" <<EOF_WRAPPER
@@ -181,6 +184,22 @@ exec bash "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "\$@"
 EOF_WRAPPER
 chmod +x "$AMAZON_IMAP_BOT_AUTO_STATUS_TARGET"
 log "criado: amazon-imap-bot-auto-status -> $AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE"
+
+LEGACY_DIGITAR_DATA_HORA_TARGET="$TARGET_DIR/digitar-data-hora"
+if [[ -f "$LEGACY_DIGITAR_DATA_HORA_TARGET" ]] && grep -qF 'generated-by: dev-automation-global-command' "$LEGACY_DIGITAR_DATA_HORA_TARGET"; then
+  rm -f "$LEGACY_DIGITAR_DATA_HORA_TARGET"
+  log "removido comando legado: digitar-data-hora"
+fi
+
+rm -f "$GLOBAL_SHORTCUTS_TARGET"
+cat > "$GLOBAL_SHORTCUTS_TARGET" <<EOF_WRAPPER
+#!/usr/bin/env bash
+# generated-by: dev-automation-global-command
+exec bash "$GLOBAL_SHORTCUTS_SOURCE" "\$@"
+EOF_WRAPPER
+chmod +x "$GLOBAL_SHORTCUTS_TARGET"
+log "criado: Global-Shortcuts -> $GLOBAL_SHORTCUTS_SOURCE"
+GLOBAL_SHORTCUTS_COMMAND="$GLOBAL_SHORTCUTS_TARGET" "$GLOBAL_SHORTCUTS_TARGET" ensure
 
 for command_name in chromes chromes-all chromes-close files files-all files-close terminals terminals-close chatgpts phpstorms pycharms pycharms-close phpstorm-dev dev-manager desktops local-nginx dev-status g512-rgb voice-commands gpt-console amazon-imap-bot script-dev-automation; do
   case "$command_name" in
@@ -350,4 +369,4 @@ hash -r 2>/dev/null || true
 
 printf '\nInstalação concluída com execução direta em primeiro plano.\n'
 printf 'No terminal atual, execute:\n  source ~/.bashrc\n\n'
-printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v chromes-close\n  command -v files\n  command -v files-all\n  command -v files-close\n  command -v terminals\n  command -v terminals-close\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v pycharms-close\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v gpt-console\n  command -v script-dev-automation\n  command -v oracle-monitor\n  command -v lrdp\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
+printf 'Testes:\n  command -v dev-gitsetup\n  command -v auto-code-manager\n  command -v dev-manager\n  command -v chromes\n  command -v chromes-all\n  command -v chromes-close\n  command -v files\n  command -v files-all\n  command -v files-close\n  command -v terminals\n  command -v terminals-close\n  command -v chatgpts\n  command -v phpstorms\n  command -v pycharms\n  command -v pycharms-close\n  command -v phpstorm-dev\n  command -v local-nginx\n  command -v dev-status\n  command -v g512-rgb\n  command -v voice-commands\n  command -v gpt-console\n  command -v script-dev-automation\n  command -v Global-Shortcuts\n  command -v oracle-monitor\n  command -v lrdp\n  command -v lrdp1\n  command -v lrdp2\n  command -v local-all\n  command -v remote-all\n  phpstorms --list\n  pycharms --list\n  orbital-app help\n  station-app dir\n'
