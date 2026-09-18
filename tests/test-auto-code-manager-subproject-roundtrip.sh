@@ -73,7 +73,7 @@ unzip -Z1 "$CHILD_ZIP" | grep -Fxq 'apps/amazon-imap-bot/bot.py'
 unzip -Z1 "$CHILD_ZIP" | grep -Fxq '.config/amazon-imap-bot/database.env'
 unzip -p "$CHILD_ZIP" .config/amazon-imap-bot/database.env | grep -Fxq 'DB_HOST=127.0.0.1'
 unzip -p "$CHILD_ZIP" .config/amazon-imap-bot/database.env | grep -Fxq 'DB_PASSWORD=********'
-if unzip -Z1 "$CHILD_ZIP" | grep -Ev '^(apps/|apps/amazon-imap-bot/|.config/|.config/amazon-imap-bot/)' | grep -q .; then
+if unzip -Z1 "$CHILD_ZIP" | grep -Ev '^(skills\.md$|apps/|apps/amazon-imap-bot/|.config/|.config/amazon-imap-bot/)' | grep -q .; then
   printf 'FALHOU: ZIP filho contém caminho fora de apps/amazon-imap-bot e .config/amazon-imap-bot\n' >&2
   unzip -Z1 "$CHILD_ZIP" >&2
   exit 1

@@ -5,6 +5,24 @@
 # Atualiza a versão do próprio Dev Automation somente quando ele entra em uma
 # rodada de backup por alteração real. VERSION é arquivo gerado: os monitores
 # ignoram a gravação feita aqui para não criar um ciclo infinito de backups.
+build_skills_markdown() {
+  local output_file="$1"
+  local skills_dir="$PROJECT_ROOT/skills"
+  local skill_file relative
+  local -a skill_files=()
+
+  : > "$output_file" || return 1
+  [ -d "$skills_dir" ] || return 0
+
+  mapfile -d '' -t skill_files < <(find "$skills_dir" -type f -print0 | sort -z)
+  for skill_file in "${skill_files[@]}"; do
+    relative="${skill_file#"$skills_dir/"}"
+    printf '# %s\n\n' "$relative" >> "$output_file" || return 1
+    cat -- "$skill_file" >> "$output_file" || return 1
+    printf '\n\n' >> "$output_file" || return 1
+  done
+}
+
 bump_dev_automation_build_version() {
   local version_file="$PROJECT_ROOT/VERSION"
   local current="" revision=0 next_revision new_version temp_file
@@ -167,6 +185,15 @@ backup_project() {
         log "Config irmã incluída no ZIP do subprojeto: $parent_config_rel/"
       fi
     fi
+  fi
+
+  # Contexto padrão para IAs: em todo ZIP gerado, coloca na raiz um
+  # skills.md consolidado a partir de todos os arquivos de PROJECT_ROOT/skills.
+  # O arquivo existe somente na árvore temporária do backup.
+  if ! build_skills_markdown "$archive_tree_dir/skills.md"; then
+    log "ERRO ao gerar skills.md para o backup: $project"
+    rm -rf -- "$temp_dir" ${archive_tree_dir:+"$archive_tree_dir"} ${filter_file:+"$filter_file"} "$temp_zip"
+    return 1
   fi
 
   if ! (cd "$archive_tree_dir" && zip -qry "$temp_zip" .); then

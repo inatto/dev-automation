@@ -57,9 +57,9 @@ PROJECTS
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
   "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
 
-[ "$(unzip -Z1 "$CODE_ROOT/apps.zip")" = 'dev-automation-exec-agent.zip' ]
+[ "$(unzip -Z1 "$CODE_ROOT/apps.zip" | sort)" = $'dev-automation-exec-agent.zip\nskills.md' ]
 code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
-[ "$code_entries" = $'apps.zip\ndev-automation.zip' ] || {
+[ "$code_entries" = $'apps.zip\ndev-automation.zip\nskills.md' ] || {
   printf 'FALHOU: Code.zip inesperado:\n%s\n' "$code_entries" >&2
   exit 1
 }

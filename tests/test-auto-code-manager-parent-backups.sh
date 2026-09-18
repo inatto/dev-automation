@@ -189,14 +189,14 @@ if unzip -Z1 "$CODE_ROOT/orbital.zip" | grep -Fxq 'README-parent.txt'; then
   exit 1
 fi
 
-if [ "$(unzip -Z1 "$CODE_ROOT/orbital.zip" | wc -l)" -ne "${#MODULES[@]}" ]; then
+if [ "$(unzip -Z1 "$CODE_ROOT/orbital.zip" | wc -l)" -ne "$(( ${#MODULES[@]} + 1 ))" ]; then
   printf 'FALHOU: orbital.zip deve conter somente os ZIPs filhos ativos.\n' >&2
   unzip -Z1 "$CODE_ROOT/orbital.zip" >&2
   exit 1
 fi
 
 code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"
-[ "$code_entries" = $'inst-app.zip\norbital.zip' ] || {
+[ "$code_entries" = $'inst-app.zip\norbital.zip\nskills.md' ] || {
   printf 'FALHOU: Code.zip deve representar o ramo orbital uma única vez:\n%s\n' "$code_entries" >&2
   exit 1
 }
