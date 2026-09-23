@@ -14,10 +14,10 @@ PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
-OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-2}"
+OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-16}"
 TAB_INTERVAL_SECONDS="${TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
-WORKSPACE_SETTLE_SECONDS="${TERMINALS_WORKSPACE_SETTLE_SECONDS:-1}"
+WORKSPACE_SETTLE_SECONDS="${TERMINALS_WORKSPACE_SETTLE_SECONDS:-4}"
 AUTO_INSTALL_GNOME_TERMINAL="${TERMINALS_AUTO_INSTALL_GNOME_TERMINAL:-1}"
 ALLOW_PTYXIS_FALLBACK="${TERMINALS_ALLOW_PTYXIS_FALLBACK:-0}"
 
@@ -191,22 +191,56 @@ acquire_lock() {
   trap 'rmdir "$lock_dir" 2>/dev/null || true' EXIT
 }
 
-reset_previous_managed_batch() {
-  [[ -s "$STATE_DIR/terminals.batch" ]] || return 0
+reuse_previous_managed_batch() {
+  [[ -s "$STATE_DIR/terminals.batch" ]] || return 1
 
-  local fields managed overflow rc=0
+  local fields managed missing overflow rc=0
   fields="$(printf 'count=%s' "$count")"
-  log 'REALINHAMENTO: lote anterior detectado; fechando somente os terminais gerenciados pelo Dev Automation.'
-  gnome_placement_prepare terminals managed-reset "$fields" || rc=$?
+
+  # Primeiro apenas consulta. Isso é deliberadamente não destrutivo: uma nova
+  # chamada de `terminals` nunca deve matar processos que já estão rodando.
+  gnome_placement_prepare terminals status "$fields" || rc=$?
   case "$rc" in
     0) ;;
     75) fail "o controlador GNOME foi atualizado no disco, mas a sessão ainda usa o código antigo. Faça logout/login UMA vez e rode 'terminals' novamente." ;;
-    76) fail "o controlador GNOME carregado não suporta o reset seguro do lote de terminals. Rode 'desktops --ensure-controller', faça logout/login UMA vez e execute 'terminals' novamente." ;;
-    *) fail "não foi possível limpar o lote anterior de terminals${GNOME_PLACEMENT_LAST_ERROR:+: $GNOME_PLACEMENT_LAST_ERROR}." ;;
+    76) fail "o controlador GNOME carregado não suporta a consulta segura do lote de terminals. Rode 'desktops --ensure-controller', faça logout/login UMA vez e execute 'terminals' novamente." ;;
+    *) fail "não foi possível consultar o lote anterior de terminals${GNOME_PLACEMENT_LAST_ERROR:+: $GNOME_PLACEMENT_LAST_ERROR}." ;;
   esac
+
   managed="$(gnome_placement_ready_field managed 2>/dev/null || printf '0')"
+  missing="$(gnome_placement_ready_field missing 2>/dev/null || printf "$count")"
   overflow="$(gnome_placement_ready_field overflow 2>/dev/null || printf '0')"
-  log "REALINHAMENTO: fechamento solicitado para $((managed + overflow)) terminal(is) gerenciado(s); terminais manuais foram preservados."
+
+  [[ "$managed" =~ ^[0-9]+$ && "$missing" =~ ^[0-9]+$ && "$overflow" =~ ^[0-9]+$ ]] || \
+    fail 'o controlador GNOME devolveu um estado inválido para o lote existente de terminals.'
+
+  # Lote completo: apenas reposiciona as MESMAS janelas. Não abre, não fecha e
+  # não reinicia nenhuma aba/processo em execução.
+  if (( managed == count && missing == 0 && overflow == 0 )); then
+    log "REPOSICIONAMENTO: $managed terminal(is) gerenciado(s) já estão abertos; reutilizando sem reiniciar processos."
+    rc=0
+    gnome_placement_prepare terminals reconcile "$fields" || rc=$?
+    case "$rc" in
+      0) ;;
+      75) fail "o controlador GNOME foi atualizado no disco, mas a sessão ainda usa o código antigo. Faça logout/login UMA vez e rode 'terminals' novamente." ;;
+      76) fail "o controlador GNOME carregado não suporta o reposicionamento seguro do lote de terminals. Rode 'desktops --ensure-controller', faça logout/login UMA vez e execute 'terminals' novamente." ;;
+      *) fail "não foi possível reposicionar o lote anterior de terminals${GNOME_PLACEMENT_LAST_ERROR:+: $GNOME_PLACEMENT_LAST_ERROR}." ;;
+    esac
+    if ! gnome_placement_wait_complete terminals "$CAPTURE_TIMEOUT_TENTHS"; then
+      fail 'o GNOME não confirmou o reposicionamento dos terminais já abertos.'
+    fi
+    log "CONCLUÍDO: $managed terminal(is) existente(s) reposicionado(s); nenhuma janela foi aberta ou fechada."
+    return 0
+  fi
+
+  # Se não há nenhum terminal vivo do lote anterior, segue o fluxo normal de
+  # criação. Se o lote está parcial/ambíguo, preservar processos é prioridade:
+  # não fecha nem duplica janelas tentando adivinhar qual projeto está faltando.
+  if (( managed == 0 )); then
+    return 1
+  fi
+
+  fail "lote parcial detectado ($managed/$count gerenciado(s), $missing faltando, $overflow extra(s)); preservei todos os terminais existentes e não abri/fechei nada para evitar duplicação ou perda de processos."
 }
 
 # O reset mantém o protocolo estável para conseguir limpar o lote antigo mesmo
@@ -306,6 +340,14 @@ esac
   fail "TERMINALS_ALLOW_PTYXIS_FALLBACK deve ser 0 ou 1"
 
 acquire_lock
+ensure_workspaces_on_all_monitors
+
+# A segunda chamada é resolvida antes até de escolher/instalar um backend de
+# terminal: se as janelas gerenciadas já existem, só o GNOME as reposiciona.
+if reuse_previous_managed_batch; then
+  exit 0
+fi
+
 if ! ensure_visible_tabs_terminal; then
   if [[ "$ALLOW_PTYXIS_FALLBACK" != 1 ]]; then
     fail "GNOME Terminal não está instalado e não foi possível instalá-lo. O Ptyxis cria abas, mas não mantém a barra clássica visível. Instale uma vez com: sudo apt install -y gnome-terminal"
@@ -314,8 +356,6 @@ if ! ensure_visible_tabs_terminal; then
 fi
 IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
   fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'
-ensure_workspaces_on_all_monitors
-reset_previous_managed_batch
 
 log 'FLUXO ÚNICO: uma janela por projeto/workspace; abas AUTO local e remota no mesmo terminal quando disponíveis.'
 log "Terminal: $terminal_kind -> $terminal"

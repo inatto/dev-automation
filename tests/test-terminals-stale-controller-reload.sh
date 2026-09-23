@@ -66,13 +66,13 @@ for _ in 1 2; do
 done
 
 cmp -s -- "$ROOT/apps/desktops-gnome-extension/extension.js" "$TARGET/extension.js"
-grep -Fq '"version": 15' "$TARGET/metadata.json"
+grep -Fq '"version": 16' "$TARGET/metadata.json"
 [[ -s "$TMP/state/desktops/extension.reload-required" ]]
 
-# Simula o novo processo gnome-shell após logout/login: o controlador v15
+# Simula o novo processo gnome-shell após logout/login: o controlador v16
 # publica as capacidades e remove o marker de recarga pendente.
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=15
+version=16
 controller=1
 floating-label=0
 window-placement=1

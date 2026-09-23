@@ -19,7 +19,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 15\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -29,21 +29,22 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=15
+version=16
 controller=1
 floating-label=0
 window-placement=1
 terminal-direct=1
 terminal-placement-verified=1
 READY
-# Só a presença do batch faz a segunda execução entrar no reset gerenciado.
-printf 'shell=fake\nmanaged=101\nmanaged=102\n' > "$TMP/state/desktops/terminals.batch"
+# A presença do batch representa um lote anterior ainda vivo. O controlador
+# falso confirma que as 4 janelas gerenciadas continuam abertas.
+printf 'shell=fake\nmanaged=101\nmanaged=102\nmanaged=103\nmanaged=104\n' > "$TMP/state/desktops/terminals.batch"
 : > "$TMP/terminal.log"
 : > "$TMP/actions.log"
 
 (
   last=''
-  directs=0
+  handled=0
   deadline=$((SECONDS + 20))
   while (( SECONDS < deadline )); do
     req="$TMP/state/desktops/terminals.request"
@@ -55,37 +56,40 @@ printf 'shell=fake\nmanaged=101\nmanaged=102\n' > "$TMP/state/desktops/terminals
     action="$(tr '\t' '\n' <<<"$line" | sed -n 's/^action=//p' | head -n1)"
     count="$(tr '\t' '\n' <<<"$line" | sed -n 's/^count=//p' | head -n1)"
     printf '%s\n' "$action" >> "$TMP/actions.log"
-    if [[ "$action" == managed-reset ]]; then
-      printf '%s\taction=managed-reset\tcount=%s\tmanaged=2\tmissing=2\tuntracked=1\toverflow=0\tfirst_workspace=2\tmonitor=2\n' "$token" "$count" > "$TMP/state/desktops/terminals.ready"
-      printf '%s\tplaced=2\texpected=2\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
-      rm -f "$TMP/state/desktops/terminals.batch"
-      continue
-    fi
-    [[ "$action" == direct ]]
-    workspace="$(tr '\t' '\n' <<<"$line" | sed -n 's/^workspace=//p' | head -n1)"
-    slot="$(tr '\t' '\n' <<<"$line" | sed -n 's/^slot=//p' | head -n1)"
-    directs=$((directs + 1))
-    printf '%s\taction=direct\tcount=%s\tworkspace=%s\tslot=%s\tmonitor=2\tall_monitors=1\tvalid=1\n' "$token" "$count" "$workspace" "$slot" > "$TMP/state/desktops/terminals.ready"
-    for _ in $(seq 1 100); do
-      (( $(wc -l < "$TMP/terminal.log") >= directs )) && break
-      sleep 0.02
-    done
-    printf '%s\tplaced=1\texpected=1\tcomplete=1\tworkspace=%s\tmonitor=2\n' "$token" "$workspace" > "$TMP/state/desktops/terminals.result"
-    ((directs == count)) && exit 0
+    case "$action" in
+      status)
+        [[ "$count" == 4 ]]
+        printf '%s\taction=status\tcount=4\tmanaged=4\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
+          "$token" > "$TMP/state/desktops/terminals.ready"
+        printf '%s\tplaced=4\texpected=4\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+        handled=$((handled + 1))
+        ;;
+      reconcile)
+        [[ "$count" == 4 ]]
+        printf '%s\taction=reconcile\tcount=4\tmanaged=4\tmissing=0\tuntracked=0\toverflow=0\tfirst_workspace=2\tmonitor=2\n' \
+          "$token" > "$TMP/state/desktops/terminals.ready"
+        printf '%s\tplaced=4\texpected=4\tcomplete=1\n' "$token" > "$TMP/state/desktops/terminals.result"
+        handled=$((handled + 1))
+        (( handled == 2 )) && exit 0
+        ;;
+      *) exit 5 ;;
+    esac
   done
   exit 4
 ) &
 watcher=$!
 
-env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
+out="$(env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
   AUTO_CODE_STATE_DIR="$TMP/state" PROJECTS_FILE="$TMP/projects" CODE_ROOT="$TMP/code" \
   TERMINALS_TEST_LOG="$TMP/terminal.log" TERMINALS_OPEN_INTERVAL_SECONDS=0 \
   TERMINALS_WORKSPACE_SETTLE_SECONDS=0 TERMINALS_AUTO_INSTALL_GNOME_TERMINAL=0 TERMINALS_ALLOW_PTYXIS_FALLBACK=1 \
-  "$ROOT/scripts/terminals.sh" >/dev/null
+  "$ROOT/scripts/terminals.sh")"
 wait "$watcher"
 
-first="$(sed -n '1p' "$TMP/actions.log")"
-[[ "$first" == managed-reset ]] || { echo "FALHOU: primeira ação deveria ser managed-reset; foi $first" >&2; exit 1; }
-[[ "$(grep -c '^direct$' "$TMP/actions.log")" -eq 4 ]]
-[[ "$(wc -l < "$TMP/terminal.log")" -eq 4 ]]
-echo 'OK: nova execução de terminals fecha apenas o lote gerenciado anterior e recria todos conforme a grade atual.'
+[[ "$(cat "$TMP/actions.log")" == $'status\nreconcile' ]]
+[[ ! -s "$TMP/terminal.log" ]]
+grep -Fq 'REPOSICIONAMENTO: 4 terminal(is) gerenciado(s) já estão abertos' <<<"$out"
+grep -Fq 'nenhuma janela foi aberta ou fechada' <<<"$out"
+! grep -Fq '^managed-reset$' "$TMP/actions.log"
+! grep -Fq '^direct$' "$TMP/actions.log"
+echo 'OK: nova execução de terminals reutiliza e reposiciona o lote existente sem fechar nem abrir janelas.'

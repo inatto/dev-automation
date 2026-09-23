@@ -21,7 +21,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 15\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -62,7 +62,7 @@ FAKE
 chmod +x "$TMP/bin/"*
 
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=15
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -125,7 +125,7 @@ grep '^mode=tab ' "$TMP/terminal.log" | \
 ! grep '^mode=tab screen=external ' "$TMP/terminal.log" >/dev/null
 
 grep -Fq 'if path="$(command -v gnome-terminal 2>/dev/null)"' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_WORKSPACE_SETTLE_SECONDS:-1' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_WORKSPACE_SETTLE_SECONDS:-4' "$ROOT/scripts/terminals.sh"
 grep -Fq 'sleep "$WORKSPACE_SETTLE_SECONDS"' "$ROOT/scripts/terminals.sh"
 grep -Fq 'sudo apt-get install -y gnome-terminal' "$ROOT/scripts/terminals.sh"
 

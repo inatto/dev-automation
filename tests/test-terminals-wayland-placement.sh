@@ -28,7 +28,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 15\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -38,7 +38,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=15
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -130,8 +130,8 @@ grep -Fq 'Intervalo entre abas/aberturas: 0 segundo(s).' <<<"$out"
 grep -Fq 'ABA: Orbital App Auto -> orbital-app-auto' <<<"$out"
 grep -Fq 'ABA: Remote Orbital App Auto -> remote-orbital-app-auto' <<<"$out"
 ! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals.sh"
-! grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-2' "$ROOT/scripts/terminals.sh"
+grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
+grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-16' "$ROOT/scripts/terminals.sh"
 grep -Fq 'TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals.sh"
 grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals.sh"
 grep -Fq 'workspaces-only-on-primary false' "$ROOT/scripts/terminals.sh"

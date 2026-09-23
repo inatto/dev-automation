@@ -8,7 +8,7 @@ GNOME_PLACEMENT_STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automa
 GNOME_PLACEMENT_STATE_DIR="$GNOME_PLACEMENT_STATE_ROOT/desktops"
 GNOME_PLACEMENT_TOKEN=''
 GNOME_PLACEMENT_READY_LINE=''
-GNOME_PLACEMENT_CONTROLLER_VERSION=15
+GNOME_PLACEMENT_CONTROLLER_VERSION=16
 GNOME_PLACEMENT_LAST_ERROR=''
 
 _gnome_placement_log() {
@@ -39,6 +39,15 @@ _gnome_placement_ready_is_compatible() {
   local kind="$1" action="$2" line="$3"
   local ready_action workspace slot monitor all_monitors valid
 
+  if [[ "$kind" == chromes && "$action" != default ]]; then
+    [[ "$(_gnome_placement_line_field "$line" action 2>/dev/null || true)" == "$action" ]] || return 1
+    [[ "$(_gnome_placement_line_field "$line" valid 2>/dev/null || true)" =~ ^[01]$ ]] || return 1
+    local key
+    for key in managed missing untracked overflow; do
+      [[ "$(_gnome_placement_line_field "$line" "$key" 2>/dev/null || true)" =~ ^[0-9]+$ ]] || return 1
+    done
+    return 0
+  fi
   [[ "$kind" == terminals ]] || return 0
   ready_action="$(_gnome_placement_line_field "$line" action 2>/dev/null || true)"
   [[ "$ready_action" == "$action" ]] || return 1
@@ -68,7 +77,10 @@ gnome_placement_prepare() {
   export GNOME_PLACEMENT_TOKEN GNOME_PLACEMENT_READY_LINE GNOME_PLACEMENT_LAST_ERROR
   case "$kind" in
     chromes)
-      [[ "$action" == default ]] || { _gnome_placement_fail "ação inválida para chromes: $action"; return 1; }
+      case "$action" in
+        default|status|reconcile|register) ;;
+        *) _gnome_placement_fail "ação inválida para chromes: $action"; return 1 ;;
+      esac
       ;;
     terminals)
       case "$action" in

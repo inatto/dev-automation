@@ -12,13 +12,15 @@ const CLOSE_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'close.result']);
 const CHROMES_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.request']);
 const CHROMES_READY_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.ready']);
 const CHROMES_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.result']);
+const CHROMES_PLAN_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.plan']);
+const CHROMES_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'chromes.batch.json']);
 const TERMINALS_REQUEST_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.request']);
 const TERMINALS_READY_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.ready']);
 const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result']);
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
 const EXTENSION_RELOAD_REQUIRED_PATH = GLib.build_filenamev([STATE_DIR, 'extension.reload-required']);
-const EXTENSION_VERSION = 15;
+const EXTENSION_VERSION = 16;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -120,6 +122,24 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
     }
 
     _prepareChromes(token, fields = {}) {
+        const action = fields.action || 'default';
+        if (action !== 'default') {
+            this._prepareManagedChromes(token, action, fields);
+            return;
+        }
+        this._chromeSession = null;
+        if (fields.project) {
+            const plan = this._readChromePlan();
+            const status = plan ? this._chromeStatus(plan) : null;
+            const target = plan?.find(item => item.project === fields.project);
+            const alreadyOpen = status?.registry.windows.some(record => record.project === fields.project &&
+                this._allChromeWindows().some(window => this._stableSequence(window) === record.sequence));
+            if (!status?.valid || !target || alreadyOpen || status.untracked > 0 ||
+                target.workspaceIndex + 1 !== Number(fields.workspace) || target.expected !== Number(fields.expected)) {
+                this._writeManagedChromeReady(token, action, {valid: false, managed: 0, missing: 0, untracked: 0, overflow: 0});
+                return;
+            }
+        }
         const requestedWorkspace = this._positiveInteger(fields.workspace);
         const workspaceCount = Math.max(1, global.workspace_manager.n_workspaces);
         const workspaceIndex = requestedWorkspace > 0
@@ -140,13 +160,17 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 expiresAt: nowSeconds() + 18,
                 browsers: 0,
                 nautilus: 0,
+                project: fields.project || '',
+                expected: this._positiveInteger(fields.expected),
+                captured: 0,
+                seenSequences: new Set(this._allChromeWindows().map(window => this._stableSequence(window))),
             };
 
             try {
                 GLib.mkdir_with_parents(STATE_DIR, 0o700);
                 GLib.file_set_contents(
                     CHROMES_READY_PATH,
-                    `${token}\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\tmaximize=${maximize ? 1 : 0}\n`
+                    `${token}\taction=default\tvalid=1\tworkspace=${workspaceIndex + 1}\tmonitor=${monitor}\tmaximize=${maximize ? 1 : 0}\n`
                 );
                 this._writeChromeResult();
             } catch (error) {
@@ -205,6 +229,244 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         }
 
         arm();
+    }
+
+    _allChromeWindows() {
+        return global.get_window_actors().map(actor => actor.meta_window)
+            .filter(window => window?.get_window_type?.() === Meta.WindowType.NORMAL && this._isBrowser(window));
+    }
+
+    _chromeShellSession() {
+        // PID sozinho pode ser reutilizado após um reboot. Inclua o boot e o
+        // instante de criação do Shell; suspensão/re-enable não mudam essa chave.
+        try {
+            const [ok, bytes] = GLib.file_get_contents('/proc/self/stat');
+            const [bootOk, bootBytes] = GLib.file_get_contents('/proc/sys/kernel/random/boot_id');
+            if (!ok || !bootOk)
+                return '';
+            const stat = new TextDecoder().decode(bytes);
+            const start = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+            const boot = new TextDecoder().decode(bootBytes).trim();
+            return start && boot ? `${boot}:${stat.split(' ', 1)[0]}:${start}` : '';
+        } catch (_) {
+            return '';
+        }
+    }
+
+    _readChromeRegistry() {
+        const shell = this._chromeShellSession();
+        const empty = {shell, windows: [], valid: Boolean(shell)};
+        if (!GLib.file_test(CHROMES_BATCH_PATH, GLib.FileTest.EXISTS))
+            return empty;
+        try {
+            const [ok, bytes] = GLib.file_get_contents(CHROMES_BATCH_PATH);
+            if (!ok)
+                return {...empty, valid: false};
+            const registry = JSON.parse(new TextDecoder().decode(bytes));
+            if (registry.shell !== shell)
+                return empty;
+            const seen = new Set();
+            if (!Array.isArray(registry.windows) || registry.windows.some(item => {
+                const bad = !Number.isInteger(item?.sequence) || item.sequence <= 0 ||
+                    typeof item?.project !== 'string' || !item.project || seen.has(item.sequence);
+                seen.add(item?.sequence);
+                return bad;
+            }))
+                return {...empty, valid: false};
+            return {shell, windows: registry.windows, valid: Boolean(shell)};
+        } catch (_) {
+            return {...empty, valid: false};
+        }
+    }
+
+    _writeChromeRegistry(windows) {
+        const shell = this._chromeShellSession();
+        if (!shell)
+            return false;
+        try {
+            GLib.mkdir_with_parents(STATE_DIR, 0o700);
+            // GLib substitui o arquivo completo; nenhum estado parcial é lido.
+            GLib.file_set_contents(CHROMES_BATCH_PATH, `${JSON.stringify({shell, windows})}\n`);
+            return true;
+        } catch (error) {
+            console.error(`[workspace-controller] falha ao persistir janelas Chrome: ${error}`);
+            return false;
+        }
+    }
+
+    _readChromePlan(path = CHROMES_PLAN_PATH) {
+        try {
+            const [ok, bytes] = GLib.file_get_contents(path);
+            if (!ok)
+                return null;
+            const rows = new TextDecoder().decode(bytes).trimEnd().split('\n');
+            const keys = new Set();
+            const workspaces = new Set();
+            const plan = [];
+            for (const row of rows) {
+                const fields = row.split('\t');
+                const [project, workspaceText, expectedText] = fields;
+                const workspace = Number(workspaceText);
+                const expected = Number(expectedText);
+                if (fields.length !== 3 || !project || keys.has(project) || workspaces.has(workspace) ||
+                    !Number.isInteger(workspace) || workspace < 2 || workspace > global.workspace_manager.n_workspaces ||
+                    ![1, 2].includes(expected))
+                    return null;
+                keys.add(project);
+                workspaces.add(workspace);
+                plan.push({project, workspaceIndex: workspace - 1, expected});
+            }
+            return plan.length ? plan : null;
+        } catch (_) {
+            return null;
+        }
+    }
+
+    _chromeStatus(plan) {
+        const registry = this._readChromeRegistry();
+        const windows = this._allChromeWindows();
+        const bySequence = new Map(windows.map(window => [this._stableSequence(window), window]));
+        const known = new Set(registry.windows.map(item => item.sequence));
+        const byProject = new Map(plan.map(item => [item.project, item]));
+        const counts = new Map();
+        const assignments = [];
+        for (const record of registry.windows) {
+            const window = bySequence.get(record.sequence);
+            const target = byProject.get(record.project);
+            if (!window || !target)
+                continue;
+            assignments.push({window, workspaceIndex: target.workspaceIndex});
+            counts.set(record.project, (counts.get(record.project) || 0) + 1);
+        }
+        return {
+            valid: registry.valid && this._workspacesOnAllMonitors(),
+            registry,
+            assignments,
+            managed: assignments.length,
+            missing: plan.reduce((sum, item) => sum + Math.max(0, item.expected - (counts.get(item.project) || 0)), 0),
+            overflow: plan.reduce((sum, item) => sum + Math.max(0, (counts.get(item.project) || 0) - item.expected), 0),
+            // Sem nenhuma associação viva, a restauração da sessão pode ter
+            // jogado TODO o lote no LAZER. Não presumir que sejam janelas manuais
+            // para liberar duplicatas. Com um lote conhecido, LAZER é preservado.
+            untracked: windows.filter(window => !known.has(this._stableSequence(window)) &&
+                (assignments.length === 0 || (window.get_workspace?.()?.index?.() ?? -1) >= 1)).length,
+        };
+    }
+
+    _writeManagedChromeReady(token, action, status) {
+        GLib.mkdir_with_parents(STATE_DIR, 0o700);
+        GLib.file_set_contents(CHROMES_READY_PATH,
+            `${token}\taction=${action}\tvalid=${status.valid ? 1 : 0}\tmanaged=${status.managed}\tmissing=${status.missing}\tuntracked=${status.untracked}\toverflow=${status.overflow}\n`);
+    }
+
+    _writeManagedChromeResult(token, placed, expected, complete) {
+        GLib.file_set_contents(CHROMES_RESULT_PATH,
+            `${token}\tplaced=${placed}\texpected=${expected}\tcomplete=${complete ? 1 : 0}\n`);
+    }
+
+    _prepareManagedChromes(token, action, fields) {
+        this._chromeSession = null;
+        const plan = this._readChromePlan(fields.plan || CHROMES_PLAN_PATH);
+        const invalid = {valid: false, managed: 0, missing: 0, untracked: 0, overflow: 0};
+        if (!plan || !['status', 'reconcile', 'register'].includes(action)) {
+            this._writeManagedChromeReady(token, action, invalid);
+            this._writeManagedChromeResult(token, 0, 0, false);
+            return;
+        }
+        let status = this._chromeStatus(plan);
+        if (action === 'register' && status.valid) {
+            // Migração EXPLÍCITA de janelas antigas: só registra se TODOS os
+            // workspaces têm exatamente as quantidades previstas. Não move nada.
+            const windows = this._allChromeWindows();
+            const records = [];
+            const assigned = new Set();
+            for (const target of plan) {
+                const matches = windows.filter(window => !window.is_on_all_workspaces?.() &&
+                    window.get_workspace?.()?.index?.() === target.workspaceIndex);
+                if (matches.length !== target.expected) {
+                    status.valid = false;
+                    break;
+                }
+                for (const window of matches) {
+                    const sequence = this._stableSequence(window);
+                    if (!sequence || assigned.has(sequence)) {
+                        status.valid = false;
+                        break;
+                    }
+                    assigned.add(sequence);
+                    records.push({sequence, project: target.project});
+                }
+            }
+            if (windows.some(window => (window.get_workspace?.()?.index?.() ?? -1) >= 1 &&
+                !assigned.has(this._stableSequence(window))))
+                status.valid = false;
+            if (status.valid) {
+                const retained = status.registry.windows.filter(item => !assigned.has(item.sequence) &&
+                    !plan.some(target => target.project === item.project));
+                status.valid = this._writeChromeRegistry([...retained, ...records]);
+                if (status.valid)
+                    status = this._chromeStatus(plan);
+            }
+        }
+        this._writeManagedChromeReady(token, action, status);
+        if (!status.valid || action !== 'reconcile') {
+            this._writeManagedChromeResult(token, 0, status.managed, action === 'register' && status.valid);
+            return;
+        }
+        this._verifyChromePlacement(status.assignments, token, (placed, complete) => {
+            this._writeManagedChromeResult(token, placed, status.managed, complete);
+        });
+    }
+
+    _verifyChromePlacement(assignments, token, done, attemptsLeft = 40, stableChecks = 0) {
+        if (this._lastChromesRequestToken !== token)
+            return;
+        const live = new Set(this._allChromeWindows());
+        const monitor = this._leftmostMonitor();
+        let placed = 0;
+        for (const {window, workspaceIndex} of assignments) {
+            if (!live.has(window))
+                continue;
+            this._schedulePlacement(window, workspaceIndex, monitor, 0, true);
+            if (window.get_workspace?.()?.index?.() === workspaceIndex &&
+                window.get_monitor?.() === monitor && window.is_maximized?.() &&
+                !window.is_on_all_workspaces?.())
+                placed += 1;
+        }
+        const stable = placed === assignments.length ? stableChecks + 1 : 0;
+        if (stable >= 2 || attemptsLeft <= 0) {
+            done(placed, stable >= 2);
+            return;
+        }
+        const id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+            this._timeouts.delete(id);
+            this._verifyChromePlacement(assignments, token, done, attemptsLeft - 1, stable);
+            return GLib.SOURCE_REMOVE;
+        });
+        this._timeouts.add(id);
+    }
+
+    _captureManagedChrome(window, session) {
+        const sequence = this._stableSequence(window);
+        if (!sequence || session.seenSequences.has(sequence) || session.captured >= session.expected)
+            return;
+        session.seenSequences.add(sequence);
+        session.captured += 1;
+        this._handledWindows.add(window);
+        const registry = this._readChromeRegistry();
+        const live = new Set(this._allChromeWindows().map(item => this._stableSequence(item)));
+        const records = registry.windows.filter(item => live.has(item.sequence));
+        if (!registry.valid || records.some(item => item.sequence === sequence) ||
+            !this._writeChromeRegistry([...records, {sequence, project: session.project}]))
+            return;
+        this._verifyChromePlacement([{window, workspaceIndex: session.workspaceIndex}], session.token, (_placed, complete) => {
+            if (this._chromeSession !== session || !complete)
+                return;
+            session.browsers += 1;
+            this._writeChromeResult();
+            if (session.browsers >= session.expected)
+                this._chromeSession = null; // Não capturar janelas manuais posteriores.
+        });
     }
 
     _prepareTerminals(token, action, fields = {}) {
@@ -458,13 +720,17 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
         const chromeSession = this._chromeSession;
         if (chromeSession && now <= chromeSession.expiresAt) {
             if (this._isBrowser(window)) {
+                if (chromeSession.project) {
+                    this._captureManagedChrome(window, chromeSession);
+                    return;
+                }
                 chromeSession.browsers += 1;
                 this._handledWindows.add(window);
                 this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10, chromeSession.maximize);
                 this._writeChromeResult();
                 return;
             }
-            if (this._isNautilus(window)) {
+            if (!chromeSession.project && this._isNautilus(window)) {
                 chromeSession.nautilus += 1;
                 this._handledWindows.add(window);
                 this._schedulePlacement(window, chromeSession.workspaceIndex, chromeSession.monitor, 10, chromeSession.maximize);

@@ -41,7 +41,7 @@ case "${1:-}" in
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     mkdir -p "$dir"
     cat > "$dir/extension.ready" <<'READY'
-version=15
+version=16
 controller=1
 floating-label=0
 window-placement=1

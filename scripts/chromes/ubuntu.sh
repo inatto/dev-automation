@@ -8,6 +8,7 @@ PLACEMENT_LIB="$PROJECT_ROOT/scripts/gnome-window-placement.sh"
 CONTEXT_LIB="$PROJECT_ROOT/scripts/workspace-project-context.sh"
 [[ -f "$PLACEMENT_LIB" ]] && source "$PLACEMENT_LIB"
 [[ -f "$CONTEXT_LIB" ]] && source "$CONTEXT_LIB"
+source "$PROJECT_ROOT/scripts/chromes-session.sh"
 log(){ printf '[chromes] %s\n' "$*"; }
 fail(){ printf '[chromes] ERRO: %s\n' "$*" >&2; exit 1; }
 
@@ -217,9 +218,9 @@ show_diagnose() {
 run_chrome() {
   local mode="$1" target="$2"; shift 2
   case "$mode" in
-    native) nohup "$target" "$@" >/dev/null 2>&1 & ;;
-    flatpak) nohup flatpak run "$target" "$@" >/dev/null 2>&1 & ;;
-    snap) nohup snap run "$target" "$@" >/dev/null 2>&1 & ;;
+    native) (chromes_session_unlock_child; exec nohup "$target" "$@") >/dev/null 2>&1 & ;;
+    flatpak) (chromes_session_unlock_child; exec nohup flatpak run "$target" "$@") >/dev/null 2>&1 & ;;
+    snap) (chromes_session_unlock_child; exec nohup snap run "$target" "$@") >/dev/null 2>&1 & ;;
   esac
 }
 
@@ -234,6 +235,8 @@ case "${1:-}" in
   "") ;;
   *) fail "opção inválida: $1" ;;
 esac
+
+chromes_session_lock || exit 1
 
 IFS=$'\t' read -r mode chrome < <(chrome_mode) || fail 'Google Chrome/Chromium não encontrado. Rode: chromes --diagnose'
 log "Ubuntu backend: $mode -> $chrome"
@@ -250,7 +253,13 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     [[ "$CHROMES_TARGET_WORKSPACE" =~ ^[1-9][0-9]*$ ]] || fail 'CHROMES_TARGET_WORKSPACE deve ser inteiro positivo.'
     placement_fields="workspace=$CHROMES_TARGET_WORKSPACE"$'\t'"$placement_fields"
   fi
+  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[12]$ ]]; then
+    placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"
+  fi
   gnome_placement_prepare chromes default "$placement_fields" || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
+  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" ]] && [[ "$(gnome_placement_ready_field valid 2>/dev/null || true)" != 1 ]]; then
+    fail 'o controlador não autorizou uma nova janela deste projeto; preservei as janelas existentes.'
+  fi
   placement_active=1
   target_workspace="$(gnome_placement_ready_field workspace 2>/dev/null || printf '?')"
   if [[ -n "${CHROMES_TARGET_WORKSPACE:-}" ]]; then

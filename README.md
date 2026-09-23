@@ -235,11 +235,13 @@ terminals
 ```
 
 O comando ativa o desktop de destino antes de criar cada janela, abre o terminal
-já na pasta correspondente, posiciona-o no monitor direito, maximiza e aguarda
-1 segundo antes de seguir para o próximo desktop. Não existe segunda chamada
-de movimentação ou associação posterior. Uma nova execução abre um novo conjunto;
-para reabrir tudo do zero, use primeiro `terminals-close`. Para fechar o lote e
-limpar terminais extras dos workspaces de projeto:
+já na pasta correspondente, posiciona-o no monitor direito e maximiza. Se o lote
+gerenciado já estiver completamente aberto, uma nova execução de `terminals`
+**não fecha nem recria nada**: apenas reposiciona as mesmas janelas nos desktops e
+no monitor corretos, preservando os processos/abas em execução. Se o lote estiver
+parcial ou ambíguo, o comando preserva o que existe e para antes de duplicar ou
+encerrar processos. Para reabrir tudo deliberadamente do zero, use `terminals-close`.
+Para fechar o lote e limpar terminais extras dos workspaces de projeto:
 
 ```bash
 terminals --reset
@@ -264,15 +266,69 @@ O `pycharms-close` reutiliza o fechamento seguro já existente em
 `pycharms --close`; ele solicita o fechamento das janelas e não mata uma JVM
 genérica por nome.
 
-### `chromes`
+### `chromes` e `chromes-all`
 
-Abre duas janelas do Chrome:
+`chromes` abre o Chrome Daniel/danielmaiax no ChatGPT e, se o projeto tiver URLs
+locais em `services.csv`, o Chrome Sindicatto com essas URLs em abas. Mantém os
+perfis existentes, o monitor esquerdo e as janelas maximizadas no GNOME/Wayland.
 
-- perfil `Default`, somente em `https://chatgpt.com/`;
-- perfil `Profile 2`, em uma nova aba vazia.
+`chromes-all` segue a ordem dos projetos raiz da configuração da máquina
+(workspace 1 = LAZER; projetos a partir do 2). No GNOME/Wayland:
+
+- Sem janelas de projeto abertas: abre o lote e registra cada janela pelo caminho
+  completo do projeto, sem usar seu título ou sua posição atual como identidade.
+- Com janelas registradas: somente reposiciona/maximiza as mesmas janelas no
+  workspace do projeto e no monitor mais à esquerda. Não abre abas, não navega,
+  não fecha Chrome e não reinicia processos.
+- Lote parcial ou janelas desconhecidas: reposiciona apenas as identificadas e
+  informa o problema, sem completar o lote nem criar duplicatas. Janelas manuais
+  no LAZER e janelas de projetos removidos da lista são preservadas. Sem nenhum
+  vínculo vivo, janelas desconhecidas inclusive no LAZER bloqueiam a abertura:
+  podem ser um lote antigo restaurado inteiro no desktop errado.
+- Chamadas simultâneas de `chromes-all`/`chromes` são bloqueadas por um lock comum.
+  A posição é confirmada em duas leituras antes de informar sucesso.
 
 ```bash
-chromes
+cd /home/daniel/Code/bots/dev-automation
+./deploy/local/install-commands.sh
+chromes-all
+```
+
+As associações ficam em
+`~/.local/state/dev-automation/desktops/chromes.batch.json` (junto ao plano
+`chromes.plan`). Sobrevivem à suspensão e à reabilitação da extensão na mesma
+sessão GNOME, inclusive se as janelas mudarem de workspace ou de monitor. A ordem
+pode mudar no arquivo de projetos sem trocar as associações entre projetos.
+
+**Janelas antigas, anteriores ao registro:** não é seguro deduzir o projeto de
+várias janelas com título genérico “ChatGPT”. Organize essas janelas nos workspaces
+corretos uma vez e execute:
+
+```bash
+chromes-all --register-existing
+```
+
+Esse comando só registra: não abre, fecha ou move. Exige a quantidade exata de
+janelas por projeto (uma Daniel/ChatGPT e outra Sindicatto quando houver URL local).
+Confira também os perfis/abas antes do registro; a contagem não identifica o
+conteúdo. Depois, `chromes-all` restaura as posições automaticamente.
+
+Após logout/login, reinício completo do Ubuntu ou recriação das janelas pelo
+Chrome, os IDs antigos não são reutilizados como se ainda fossem as mesmas
+janelas. Janelas restauradas sem vínculo exigem novo registro; o comando as
+preserva e avisa. Janelas abertas pelo próprio `chromes-all` são vinculadas
+automaticamente. O comando avulso `chromes` mantém sua função de abrir janelas.
+
+O controlador GNOME foi atualizado para v16. Se aparecer aviso de código novo
+no disco e código antigo na sessão Wayland, salve o trabalho e faça logout/login
+uma vez. O comando não encerra a sessão nem fecha aplicações por conta própria.
+O comportamento Windows/X11 não foi alterado para oferecer este reposicionamento.
+
+Teste automatizado da correção (Node.js e Python 3; sem abrir Chrome real):
+
+```bash
+cd /home/daniel/Code/bots/dev-automation
+bash tests/test-chromes-rerun-managed.sh
 ```
 
 ### `phpstorm-dev`
