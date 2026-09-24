@@ -34,7 +34,7 @@ bump_dev_automation_build_version() {
   next_revision=$((10#$revision + 1))
   new_version="$(date '+%Y.%m.%d-%H.%M')-v${next_revision}"
 
-  temp_file="$(mktemp "$PROJECT_ROOT/.VERSION-XXXXXX")" || return 1
+  temp_file="$(mktemp "${TMPDIR:-/tmp}/dev-automation-VERSION-XXXXXX")" || return 1
   printf '%s\n' "$new_version" > "$temp_file" || { rm -f -- "$temp_file"; return 1; }
   if [ -e "$version_file" ]; then
     chmod --reference="$version_file" "$temp_file" 2>/dev/null || true

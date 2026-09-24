@@ -206,9 +206,12 @@ handle_watch_event() {
 
   [ -n "$event_path" ] || return 0
 
-  # VERSION do próprio Dev Automation é gerado pela rodada de backup. Ignorar
-  # esse evento impede que o incremento da versão dispare outro backup.
-  [ "$event_path" != "$PROJECT_ROOT/VERSION" ] || return 0
+  # VERSION do próprio Dev Automation é gerado pela rodada de backup. O arquivo
+  # temporário legado .VERSION-* também é ignorado para nunca retroalimentar
+  # a fila de backup com uma alteração criada pelo próprio manager.
+  case "$event_path" in
+    "$PROJECT_ROOT/VERSION"|"$PROJECT_ROOT"/.VERSION-*) return 0 ;;
+  esac
 
   # Compatibilidade WSL apenas. No Linux nativo não existe tratamento especial
   # para Zone.Identifier.
