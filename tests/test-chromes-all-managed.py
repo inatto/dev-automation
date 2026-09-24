@@ -161,23 +161,23 @@ def main() -> None:
                expect_ok=True, expected_actions=["status", "default", "default"])
     check_case("reexecução só faz status e reconcile", (4, 0, 0, 0),
                expect_ok=True, expected_actions=["status", "reconcile"])
-    check_case("lote parcial reposiciona existentes sem completar/duplicar", (3, 1, 0, 0),
-               expect_ok=False, expected_actions=["status", "reconcile"])
-    check_case("Chrome desconhecido em desktop de projeto impede abertura", (0, 4, 1, 0),
-               expect_ok=False, expected_actions=["status"])
-    check_case("janelas extras são preservadas", (5, 0, 0, 1),
-               expect_ok=False, expected_actions=["status", "reconcile"])
+    check_case("lote parcial abre novo conjunto sem exigir registro", (3, 1, 0, 0),
+               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
+    check_case("Chrome desconhecido não bloqueia nova abertura", (0, 4, 1, 0),
+               expect_ok=True, expected_actions=["status", "default", "default"])
+    check_case("janelas extras não bloqueiam nova abertura", (5, 0, 0, 1),
+               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
     check_case("registro explícito não lança navegadores", (4, 0, 0, 0), register=True,
                expect_ok=True, expected_actions=["register"])
-    check_case("registro inválido para sem tocar nas janelas", (0, 4, 4, 0), register=True, invalid=True,
-               expect_ok=False, expected_actions=["register"])
-    check_case("protocolo antigo não autoriza abertura", (4, 0, 0, 0), wrong_protocol=True,
-               expect_ok=False, expected_actions=["status"])
-    check_case("falha de confirmação não vira sucesso nem cria janelas", (4, 0, 0, 0), placement_fails=True,
-               expect_ok=False, expected_actions=["status", "reconcile"])
+    check_case("registro inválido não bloqueia abertura normal", (0, 4, 4, 0), register=True, invalid=True,
+               expect_ok=True, expected_actions=["register", "default", "default"])
+    check_case("protocolo antigo não bloqueia abertura normal", (4, 0, 0, 0), wrong_protocol=True,
+               expect_ok=True, expected_actions=["status", "default", "default"])
+    check_case("falha de confirmação cai para abertura normal", (4, 0, 0, 0), placement_fails=True,
+               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
     check_case("execuções simultâneas e chromes manual respeitam o lock", (0, 4, 0, 0), locked=True,
                expect_ok=False, expected_actions=[])
-    print("10 cenários de integração Chrome aprovados.")
+    print("10 cenários de integração Chrome aprovados, sem dependência de register-existing.")
 
 
 if __name__ == "__main__":

@@ -25,11 +25,11 @@ register_existing=0
 case "${1:-}" in
   --help|-h|help)
     cat <<'HELP'
-Uso: chromes-all | chromes-all --register-existing
+Uso: chromes-all
 
-No GNOME/Wayland, janelas já registradas são apenas reposicionadas por projeto.
-Não fecha/reinicia navegadores nem abre janelas quando há um lote parcial/ambíguo.
-Sem janelas de projeto abertas, executa `chromes` em cada workspace de projeto.
+No GNOME/Wayland, um conjunto completo identificado é apenas reposicionado por projeto.
+Se o conjunto estiver ausente, parcial ou ambíguo, abre um novo conjunto conforme a configuração atual.
+Não exige registro manual de janelas existentes.
 O próprio `chromes` resolve o projeto/URL do workspace e abre:
   - Chrome 1: Daniel/danielmaiax -> Project ChatGPT correspondente em config/chatgpt-projects.urls
     (fallback: https://chatgpt.com/ quando não houver mapeamento)
@@ -37,8 +37,6 @@ O próprio `chromes` resolve o projeto/URL do workspace e abre:
   - Chrome 3: Sindicatto Clientes (Profile 12) -> mesmas URL(s) locais do Chrome 2
   - monitor esquerdo, maximizado
 Intervalo entre desktops na abertura: 1s.
---register-existing: registra janelas antigas já organizadas nos workspaces corretos,
-sem abrir, fechar ou mover. Use somente após conferir a disposição de cada projeto.
 A associação sobrevive à suspensão/reabilitação da extensão na mesma sessão GNOME.
 HELP
     exit 0
@@ -86,35 +84,58 @@ if (( managed_mode )); then
   mv -f -- "$plan_tmp" "$plan"
   action=status
   (( register_existing )) && action=register
-  gnome_placement_prepare chromes "$action" "plan=$plan" || fail 'o controlador GNOME não confirmou a identificação; nenhuma janela foi aberta.'
-  valid="$(gnome_placement_ready_field valid 2>/dev/null || true)"
-  [[ "$valid" == 1 ]] || fail 'não foi possível identificar um lote seguro. Para registrar janelas antigas, organize-as por projeto e use chromes-all --register-existing.'
-  if (( register_existing )); then
+  status_ok=1
+  if ! gnome_placement_prepare chromes "$action" "plan=$plan"; then
+    status_ok=0
+  fi
+  valid=0
+  if (( status_ok )); then
+    valid="$(gnome_placement_ready_field valid 2>/dev/null || true)"
+  fi
+
+  if (( register_existing )) && [[ "$valid" == 1 ]]; then
     log 'Janelas existentes registradas por projeto; nenhuma janela foi aberta, fechada ou movida.'
     exit 0
   fi
-  managed="$(gnome_placement_ready_field managed)"
-  missing="$(gnome_placement_ready_field missing)"
-  untracked="$(gnome_placement_ready_field untracked)"
-  overflow="$(gnome_placement_ready_field overflow)"
+
+  if [[ "$valid" == 1 ]]; then
+    managed="$(gnome_placement_ready_field managed 2>/dev/null || echo 0)"
+    missing="$(gnome_placement_ready_field missing 2>/dev/null || echo 0)"
+    untracked="$(gnome_placement_ready_field untracked 2>/dev/null || echo 0)"
+    overflow="$(gnome_placement_ready_field overflow 2>/dev/null || echo 0)"
+  else
+    managed=0
+    missing=0
+    untracked=0
+    overflow=0
+    log 'Não foi possível identificar com segurança as janelas existentes; vou abrir um novo conjunto conforme a configuração atual.'
+  fi
+
   if (( managed > 0 )); then
     log "Reposicionando $managed janela(s) existente(s), conforme a ordem dos projetos..."
-    gnome_placement_prepare chromes reconcile "plan=$plan" || fail 'não foi possível iniciar o reposicionamento; todas as janelas foram preservadas.'
-    [[ "$(gnome_placement_ready_field valid 2>/dev/null || true)" == 1 ]] || fail 'o lote mudou durante a identificação; nenhuma janela foi aberta ou fechada.'
-    gnome_placement_wait_complete chromes 120 || fail 'o GNOME não confirmou todas as posições; nenhuma janela foi aberta ou fechada.'
-    # Releia os contadores: janelas podem ter sido fechadas manualmente entre pedidos.
-    missing="$(gnome_placement_ready_field missing)"
-    untracked="$(gnome_placement_ready_field untracked)"
-    overflow="$(gnome_placement_ready_field overflow)"
-    log 'Janelas identificadas reposicionadas no monitor esquerdo e maximizadas; nenhuma janela foi aberta ou fechada.'
-    if (( missing > 0 || untracked > 0 || overflow > 0 )); then
-      fail "lote parcial/ambíguo: $missing faltando, $untracked sem vínculo, $overflow extra(s). Preservei tudo e não criei duplicatas."
+    reconcile_ok=1
+    if ! gnome_placement_prepare chromes reconcile "plan=$plan"; then
+      reconcile_ok=0
+    elif [[ "$(gnome_placement_ready_field valid 2>/dev/null || true)" != 1 ]]; then
+      reconcile_ok=0
     fi
-    exit 0
+
+    if (( reconcile_ok )) && gnome_placement_wait_complete chromes 30; then
+      missing="$(gnome_placement_ready_field missing 2>/dev/null || echo 0)"
+      untracked="$(gnome_placement_ready_field untracked 2>/dev/null || echo 0)"
+      overflow="$(gnome_placement_ready_field overflow 2>/dev/null || echo 0)"
+      log 'Janelas identificadas reposicionadas no monitor esquerdo e maximizadas.'
+      if (( missing == 0 && untracked == 0 && overflow == 0 )); then
+        exit 0
+      fi
+      log "Conjunto parcial/ambíguo ($missing faltando, $untracked sem vínculo, $overflow extra(s)); vou abrir um novo conjunto completo sem exigir registro manual."
+    else
+      log 'O GNOME não confirmou o reposicionamento; vou abrir um novo conjunto em vez de abortar.'
+    fi
+  elif (( untracked > 0 || overflow > 0 )); then
+    log "Há janelas sem vínculo seguro ($untracked sem vínculo, $overflow extra(s)); vou abrir um novo conjunto completo sem exigir registro manual."
   fi
-  if (( untracked > 0 || overflow > 0 )); then
-    fail 'há janelas de projeto sem vínculo seguro; preservei tudo e não abri duplicatas. Organize as janelas antigas e use chromes-all --register-existing uma vez.'
-  fi
+
 fi
 
 log "Projetos: ${#WORKSPACE_PROJECTS[@]}; intervalo: 1s; monitor: esquerdo; maximizado: sim."

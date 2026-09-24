@@ -13,6 +13,7 @@ color_code() {
     sql) printf '1;35' ;;      # magenta
     zone) printf '1;33' ;;     # amarelo
     backup) printf '1;32' ;;   # verde
+    zip_file) printf '1;38;5;197' ;; # vermelho-pink forte para arquivo sendo compactado
     wait) printf '2;37' ;;     # cinza
     warning) printf '1;33' ;;  # amarelo forte
     ok) printf '1;32' ;;       # verde forte

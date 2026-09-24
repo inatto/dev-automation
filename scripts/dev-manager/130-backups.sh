@@ -71,7 +71,7 @@ backup_project() {
   final_zip="$(project_archive_path "$project")"
   archive_tree_dir="$temp_dir"
 
-  log "Gerando backup: $project -> $final_zip"
+  LOG_CONTEXT=zip_file log "Gerando backup: $project -> $final_zip"
 
   if target_is_aggregate "$project"; then
     mapfile -t children < <(aggregate_child_targets "$project")
