@@ -30,7 +30,7 @@ case "${1:-}" in
   enable)
     mkdir -p "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     cat > "${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -58,7 +58,7 @@ chmod +x "$TMP/bin/"*
   exit 1
 ) &
 watcher=$!
-out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" AUTO_CODE_STATE_DIR="$TMP/state" DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops.sh" --close)"
+out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" AUTO_CODE_STATE_DIR="$TMP/state" DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops/desktops.sh" --close)"
 wait "$watcher"
 grep -Fq 'LAZER preservado' <<<"$out"
 grep -Fq 'solicitadas=7' <<<"$out"

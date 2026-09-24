@@ -15,7 +15,7 @@ printf 'orgs/sample-app\n' > "$TEST_PROJECT/config/projects/default.projects"
 # Ausente: deve bloquear e não recriar vazio.
 rm -f "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 set +e
-CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$TMP/missing.log" 2>&1
+CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$TMP/missing.log" 2>&1
 status=$?
 set -e
 [[ "$status" -ne 0 ]]
@@ -26,7 +26,7 @@ grep -Fq 'ERRO DE SEGURANÇA: ignore global de ZIP não existe' "$TMP/missing.lo
 # Vazio: também bloqueia.
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 set +e
-CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$TMP/empty.log" 2>&1
+CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$TMP/empty.log" 2>&1
 status=$?
 set -e
 [[ "$status" -ne 0 ]]
@@ -36,7 +36,7 @@ grep -Fq 'ignore global de ZIP está vazio' "$TMP/empty.log"
 # Sem regra crítica: bloqueia.
 printf '.git/\n.venv/\nvenv/\n' > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 set +e
-CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$TMP/invalid.log" 2>&1
+CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$TMP/invalid.log" 2>&1
 status=$?
 set -e
 [[ "$status" -ne 0 ]]
@@ -50,7 +50,7 @@ cat > "$TEST_PROJECT/config/auto-code-manager.ignore-zip" <<'IGNORE'
 venv/
 node_modules/
 IGNORE
-CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$TMP/safe.log" 2>&1
+CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$TMP/safe.log" 2>&1
 [[ -s "$CODE_ROOT/sample-app.zip" ]]
 
 printf 'OK: backup aborta com ignore global ausente, vazio ou sem regras críticas\n'

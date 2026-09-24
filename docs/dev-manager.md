@@ -11,7 +11,7 @@ O instalador principal já cria o comando global:
 
 ```bash
 cd /home/daniel/Code/bots/dev-automation
-chmod +x scripts/*.sh deploy/local/*.sh
+find scripts deploy/local -type f -name '*.sh' -exec chmod +x {} +
 ./deploy/local/install-commands.sh
 source ~/.bashrc
 ```
@@ -44,7 +44,7 @@ Para parar, volte ao terminal em execução e pressione `Ctrl+C`.
 ## Logitech G512 RGB
 
 O auxiliar RGB do Logitech G512 agora pertence ao `dev-automation`, em
-`scripts/g512-rgb.sh`. Ao iniciar, o `dev-manager` garante esse helper de forma
+`scripts/g512/g512-rgb.sh`. Ao iniciar, o `dev-manager` garante esse helper de forma
 independente: uma falha do RGB não derruba nem bloqueia o monitor principal.
 
 Na primeira execução em uma máquina que ainda tenha `g512-rgb.service`, o helper

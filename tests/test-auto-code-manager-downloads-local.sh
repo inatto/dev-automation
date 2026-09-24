@@ -32,7 +32,7 @@ BEEP_MODE=none
 BACKUP_BEEP_ENABLED=false
 TASKBAR_STATUS_ENABLED=false
 EOF
-run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" "$@"; }
+run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" "$M/scripts/dev-manager/auto-code-manager.sh" "$@"; }
 [ "$(run --identify-zip "$D/alpha-app--fix.zip")" = 'orgs/alpha-app' ]
 printf x > "$T/x"; (cd "$T" && zip -q "$D/unknown.zip" x); run --import-downloads-once >/dev/null; [ -f "$D/unknown.zip" ]
 mkdir "$T/pkg"; printf 'new\n' > "$T/pkg/app.txt"; (cd "$T/pkg" && zip -qr "$D/alpha-app--fix.zip" .)
@@ -59,7 +59,7 @@ if run --import-downloads-once >/dev/null 2>&1; then exit 1; fi
 [ -e "$D/alpha-app--unsafe.zip" ]; [ ! -e "$T/escape.txt" ]; rm -f "$D/alpha-app--unsafe.zip"
 printf 'before-live\n' > "$P/app.txt"
 LOG="$T/live.log"
-HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" >"$LOG" 2>&1 & PID=$!
+HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" "$M/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 & PID=$!
 for _ in $(seq 1 100); do grep -Fq 'IDLE event-driven' "$LOG" 2>/dev/null && break; sleep .1; done
 grep -Fq 'IDLE event-driven' "$LOG"
 mkdir "$T/live"; printf 'live\n' > "$T/live/app.txt"; (cd "$T/live" && zip -qr "$T/alpha-app--live.zip" .); mv "$T/alpha-app--live.zip" "$D/"

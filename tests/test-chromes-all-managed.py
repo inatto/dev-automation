@@ -29,11 +29,11 @@ def check_case(name: str, counts: tuple[int, int, int, int], *, expect_ok: bool,
         profile.mkdir(parents=True)
         (profile / "Local State").write_text(
             '{"profile":{"info_cache":{"Default":{"name":"danielmaiax"},"Profile 3":{"name":"Sindicatto"}}}}')
-        for item in ("Default", "Profile 3", "Profile 12"):
+        for item in ("Default", "Profile 3"):
             (profile / item).mkdir()
         scripts = {
             "gnome-shell": "#!/bin/bash\nprintf 'GNOME Shell 50.1\\n'\n",
-            "gnome-extensions": "#!/bin/bash\nprintf '  Version: 17\\n  State: ACTIVE\\n'\n",
+            "gnome-extensions": "#!/bin/bash\nprintf '  Version: 16\\n  State: ACTIVE\\n'\n",
             "fake-desktops": "#!/bin/bash\nexit 0\n",
             "sleep": "#!/bin/bash\ncase \"$1\" in 1|0.1) exec /bin/sleep 0.01 ;; *) exec /bin/sleep \"$@\" ;; esac\n",
             "google-chrome-stable": """#!/bin/bash
@@ -48,7 +48,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
             target.write_text(contents)
             target.chmod(0o755)
         (state / "extension.ready").write_text(
-            "version=17\ncontroller=1\nfloating-label=0\nwindow-placement=1\nterminal-direct=1\nterminal-placement-verified=1\n")
+            "version=16\ncontroller=1\nfloating-label=0\nwindow-placement=1\nterminal-direct=1\nterminal-placement-verified=1\n")
         launch_log = base / "chrome.log"
         launch_log.touch()
         env = {**os.environ, "HOME": str(home), "PATH": f"{binary}:{os.environ['PATH']}",
@@ -86,7 +86,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
                     actions.append(action)
                     if action in ("status", "reconcile", "register"):
                         plan = Path(data["plan"]).read_text()
-                        assert plan == "bots/dev-automation\t2\t1\norgs/orbital-app\t3\t3\n", plan
+                        assert plan == "bots/dev-automation\t2\t1\norgs/orbital-app\t3\t2\n", plan
                         managed, missing, untracked, overflow = counts
                         if wrong_protocol:
                             write("chromes.ready", f"{token}\tworkspace=2\tmonitor=0\n")
@@ -98,8 +98,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
                                   f"\tcomplete={0 if placement_fails else 1}\n")
                     elif action == "default":
                         assert data["project"] in ("bots/dev-automation", "orgs/orbital-app")
-                        assert data["expected"] == ("1" if data["project"] == "bots/dev-automation" else "3")
-                        assert data.get("force") == "1", data
+                        assert data["expected"] == ("1" if data["project"] == "bots/dev-automation" else "2")
                         write("chromes.ready", f"{token}\taction=default\tvalid=1\tworkspace={data['workspace']}\tmonitor=0\tmaximize=1\n")
                         target = launched + int(data["expected"])
                         deadline = time.monotonic() + 4
@@ -122,7 +121,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
         watcher = threading.Thread(target=controller, daemon=True)
         watcher.start()
         try:
-            command = ["bash", str(ROOT / "scripts/chromes-all.sh")]
+            command = ["bash", str(ROOT / "scripts/chromes/chromes-all.sh")]
             if register:
                 command.append("--register-existing")
             completed = subprocess.run(command, env=env, text=True, capture_output=True, timeout=15)
@@ -142,12 +141,11 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
         launches = launch_log.read_text().splitlines()
         assert not any("LOCK_LEAK" in line for line in launches), "navegador herdou o lock"
         if "default" in actions:
-            assert len(launches) == 4, launches
+            assert len(launches) == 3, launches
             assert "bots/dev-automation|2|" in launches[0]
             assert "--profile-directory=Default --new-window https://chatgpt.com/" in launches[0]
             assert "orgs/orbital-app|3|" in launches[1]
             assert "--profile-directory=Profile 3 --new-window https://admin.localhost/" in launches[2]
-            assert "--profile-directory=Profile 12 --new-window https://admin.localhost/" in launches[3]
         else:
             assert not launches, (name, launches)
         if not locked:
@@ -158,29 +156,27 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
 
 
 def main() -> None:
-    check_case("primeira abertura registra o projeto e mantém perfis/URLs", (0, 4, 0, 0),
+    check_case("primeira abertura registra o projeto e mantém perfis/URLs", (0, 3, 0, 0),
                expect_ok=True, expected_actions=["status", "default", "default"])
-    check_case("reexecução só faz status e reconcile", (4, 0, 0, 0),
+    check_case("reexecução só faz status e reconcile", (3, 0, 0, 0),
                expect_ok=True, expected_actions=["status", "reconcile"])
-    check_case("lote completo ignora Chrome extra não gerenciado", (4, 0, 2, 0),
-               expect_ok=True, expected_actions=["status", "reconcile"])
-    check_case("lote parcial abre novo conjunto sem exigir registro", (3, 1, 0, 0),
-               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
-    check_case("Chrome desconhecido não bloqueia nova abertura", (0, 4, 1, 0),
-               expect_ok=True, expected_actions=["status", "default", "default"])
-    check_case("janelas extras não bloqueiam nova abertura", (5, 0, 0, 1),
-               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
-    check_case("registro explícito não lança navegadores", (4, 0, 0, 0), register=True,
+    check_case("lote parcial reposiciona existentes sem completar/duplicar", (2, 1, 0, 0),
+               expect_ok=False, expected_actions=["status", "reconcile"])
+    check_case("Chrome desconhecido em desktop de projeto impede abertura", (0, 3, 1, 0),
+               expect_ok=False, expected_actions=["status"])
+    check_case("janelas extras são preservadas", (4, 0, 0, 1),
+               expect_ok=False, expected_actions=["status", "reconcile"])
+    check_case("registro explícito não lança navegadores", (3, 0, 0, 0), register=True,
                expect_ok=True, expected_actions=["register"])
-    check_case("registro inválido não bloqueia abertura normal", (0, 4, 4, 0), register=True, invalid=True,
-               expect_ok=True, expected_actions=["register", "default", "default"])
-    check_case("protocolo antigo não bloqueia abertura normal", (4, 0, 0, 0), wrong_protocol=True,
-               expect_ok=True, expected_actions=["status", "default", "default"])
-    check_case("falha de confirmação cai para abertura normal", (4, 0, 0, 0), placement_fails=True,
-               expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
-    check_case("execuções simultâneas e chromes manual respeitam o lock", (0, 4, 0, 0), locked=True,
+    check_case("registro inválido para sem tocar nas janelas", (0, 3, 3, 0), register=True, invalid=True,
+               expect_ok=False, expected_actions=["register"])
+    check_case("protocolo antigo não autoriza abertura", (3, 0, 0, 0), wrong_protocol=True,
+               expect_ok=False, expected_actions=["status"])
+    check_case("falha de confirmação não vira sucesso nem cria janelas", (3, 0, 0, 0), placement_fails=True,
+               expect_ok=False, expected_actions=["status", "reconcile"])
+    check_case("execuções simultâneas e chromes manual respeitam o lock", (0, 3, 0, 0), locked=True,
                expect_ok=False, expected_actions=[])
-    print("11 cenários de integração Chrome aprovados, sem dependência de register-existing.")
+    print("10 cenários de integração Chrome aprovados.")
 
 
 if __name__ == "__main__":

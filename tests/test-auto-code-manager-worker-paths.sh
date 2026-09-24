@@ -43,7 +43,7 @@ chmod +x "$FAKE_BIN/powershell.exe"
 
 # 1) Sem override: backup deve ir para $HOME/worker/to, nunca para Code.
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$TMP/backup.log" 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$TMP/backup.log" 2>&1
 [ -s "$WORKER_TO_DIR/sample-app.zip" ]
 [ ! -e "$CODE_ROOT/sample-app.zip" ]
 unzip -tq "$WORKER_TO_DIR/sample-app.zip" >/dev/null
@@ -54,7 +54,7 @@ mkdir -p "$PKG1"
 printf 'NAO IMPORTAR\n' > "$PKG1/value.txt"
 (cd "$PKG1" && zip -q "$DOWNLOADS_DIR/sample-app.zip" value.txt)
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-worker-from-once >"$TMP/from-empty.log" 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --import-worker-from-once >"$TMP/from-empty.log" 2>&1
 [ -e "$DOWNLOADS_DIR/sample-app.zip" ]
 grep -Fxq 'original' "$CODE_ROOT/orgs/sample-app/value.txt"
 
@@ -65,7 +65,7 @@ mkdir -p "$PKG2"
 printf 'IMPORTADO DO FROM\n' > "$PKG2/value.txt"
 (cd "$PKG2" && zip -q "$WORKER_FROM_DIR/sample-app.zip" value.txt)
 HOME="$TEST_HOME" PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-worker-from-once >"$TMP/from.log" 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --import-worker-from-once >"$TMP/from.log" 2>&1
 grep -Fxq 'IMPORTADO DO FROM' "$CODE_ROOT/orgs/sample-app/value.txt"
 [ ! -e "$WORKER_FROM_DIR/sample-app.zip" ]
 [ -f "$WORKER_FROM_DIR/backup/sample-app.zip" ]

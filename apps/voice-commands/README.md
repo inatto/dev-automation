@@ -67,7 +67,7 @@ A ação **Suspender computador** existe no catálogo, mas começa sem palavra v
 
 ## Como vai para um desktop específico
 
-A lista de projetos é lida do mesmo `scripts/desktops.sh --list` usado pelo dev-automation. Comandos nomeados (`jurídico`, `conteúdo`, `rdp1`, etc.) usam **seleção absoluta** do workspace com `wmctrl -s`, inclusive no GNOME/Wayland. Eles nunca mais recuam ao primeiro desktop e avançam um por um. Se `wmctrl` não estiver disponível, o comando falha com uma mensagem clara em vez de ficar pulando telas. `avançar`, `recuar`, `avançar duas telas` e `recuar duas telas` continuam relativos por definição.
+A lista de projetos é lida do mesmo `scripts/desktops/desktops.sh --list` usado pelo dev-automation. Comandos nomeados (`jurídico`, `conteúdo`, `rdp1`, etc.) usam **seleção absoluta** do workspace com `wmctrl -s`, inclusive no GNOME/Wayland. Eles nunca mais recuam ao primeiro desktop e avançam um por um. Se `wmctrl` não estiver disponível, o comando falha com uma mensagem clara em vez de ficar pulando telas. `avançar`, `recuar`, `avançar duas telas` e `recuar duas telas` continuam relativos por definição.
 
 ## Precisão e GPU
 

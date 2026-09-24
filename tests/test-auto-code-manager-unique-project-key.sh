@@ -28,7 +28,7 @@ PROJECTS
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-zip"
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
-if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >"$LOG" 2>&1; then
+if PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >"$LOG" 2>&1; then
   printf 'FALHOU: nomes lógicos duplicados deveriam impedir o dev-manager/backup.\n' >&2
   cat "$LOG" >&2
   exit 1

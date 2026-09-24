@@ -15,11 +15,11 @@ EOF_CLEAR
 chmod +x "$FAKE_BIN/clear"
 
 # Em execução não interativa, não deve limpar nem depender de TERM.
-PATH="$FAKE_BIN:$PATH" TERM= bash "$ROOT/scripts/clear-terminal.sh"
+PATH="$FAKE_BIN:$PATH" TERM= bash "$ROOT/scripts/core/clear-terminal.sh"
 [[ ! -e "$MARKER" ]]
 
 # Em terminal real, limpa uma vez.
-PATH="$FAKE_BIN:$PATH" TERM=xterm script -q -e -c "bash '$ROOT/scripts/clear-terminal.sh'" /dev/null >/dev/null
+PATH="$FAKE_BIN:$PATH" TERM=xterm script -q -e -c "bash '$ROOT/scripts/core/clear-terminal.sh'" /dev/null >/dev/null
 [[ "$(wc -l < "$MARKER")" -eq 1 ]]
 
 # Todo comando de projeto local/remoto passa pelo runner comum e limpa antes de executar.
@@ -31,7 +31,7 @@ printf 'setup-ok\n'
 EOF_SETUP
 chmod +x "$APP/deploy/remote/setup.sh"
 : > "$MARKER"
-PATH="$FAKE_BIN:$PATH" TERM=xterm script -q -e -c "bash '$ROOT/scripts/project-command.sh' remote-sample-app '$APP' remote" /dev/null >/dev/null
+PATH="$FAKE_BIN:$PATH" TERM=xterm script -q -e -c "bash '$ROOT/scripts/project/project-command.sh' remote-sample-app '$APP' remote" /dev/null >/dev/null
 [[ "$(wc -l < "$MARKER")" -eq 1 ]]
 
 # O instalador geral injeta o mesmo helper nos comandos globais fixos.
@@ -50,12 +50,12 @@ printf 'orgs/sample-app\n' > "$PROJECTS_FILE"
 HOME="$HOME_DIR" TARGET_DIR="$TARGET_DIR" CODE_ROOT="$CODE_ROOT" PROJECTS_FILE="$PROJECTS_FILE" \
   "$ROOT/deploy/local/install-commands.sh" >/dev/null
 
-grep -Fq "bash \"$ROOT/scripts/clear-terminal.sh\"" "$TARGET_DIR/auto-code-manager"
-grep -Fq "bash \"$ROOT/scripts/clear-terminal.sh\"" "$TARGET_DIR/dev-manager"
-grep -Fq "bash \"$ROOT/scripts/clear-terminal.sh\"" "$TARGET_DIR/local-nginx"
+grep -Fq "bash \"$ROOT/scripts/core/clear-terminal.sh\"" "$TARGET_DIR/auto-code-manager"
+grep -Fq "bash \"$ROOT/scripts/core/clear-terminal.sh\"" "$TARGET_DIR/dev-manager"
+grep -Fq "bash \"$ROOT/scripts/core/clear-terminal.sh\"" "$TARGET_DIR/local-nginx"
 # Projetos e oracle-monitor limpam via project-command, sem duplicar clear no wrapper.
-grep -Fq "exec \"$ROOT/scripts/project-command.sh\"" "$TARGET_DIR/sample-app"
-grep -Fq "exec \"$ROOT/scripts/project-command.sh\"" "$TARGET_DIR/oracle-monitor"
+grep -Fq "exec \"$ROOT/scripts/project/project-command.sh\"" "$TARGET_DIR/sample-app"
+grep -Fq "exec \"$ROOT/scripts/project/project-command.sh\"" "$TARGET_DIR/oracle-monitor"
 
 # local-all limpa uma vez; os comandos individuais internos preservam o log completo.
 : > "$MARKER"

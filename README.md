@@ -411,7 +411,7 @@ encerrar normalmente com `Ctrl+C`.
 
 ```bash
 cd /home/daniel/Code/bots/dev-automation
-chmod +x scripts/*.sh deploy/local/*.sh
+find scripts deploy/local -type f -name '*.sh' -exec chmod +x {} +
 ./deploy/local/install-commands.sh
 source ~/.bashrc
 ```

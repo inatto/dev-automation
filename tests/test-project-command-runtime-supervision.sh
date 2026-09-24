@@ -43,7 +43,7 @@ chmod +x "$TEMP/fake-auto-manager.sh"
 
 COUNT_FILE="$TEMP/count"
 AUTO_CODE_STATE_DIR="$STATE" TEST_COUNT_FILE="$COUNT_FILE" DEV_AUTOMATION_ERROR_SOUND_ENABLED=0 \
-  "$ROOT/scripts/project-command.sh" sample "$APP" local setup >"$TEMP/run.log" 2>&1 &
+  "$ROOT/scripts/project/project-command.sh" sample "$APP" local setup >"$TEMP/run.log" 2>&1 &
 PID=$!
 
 wait_until() {
@@ -71,7 +71,7 @@ PID=""
 
 auto_status=0
 AUTO_CODE_STATE_DIR="$STATE" TEST_SOUND_LOG="$SOUND_LOG" DEV_AUTOMATION_AUTO_MANAGER="$TEMP/fake-auto-manager.sh" \
-  "$ROOT/scripts/project-command.sh" sample "$APP" local fail >/dev/null 2>&1 || auto_status=$?
+  "$ROOT/scripts/project/project-command.sh" sample "$APP" local fail >/dev/null 2>&1 || auto_status=$?
 [[ "$auto_status" -eq 7 ]]
 grep -Fxq -- '--error-sound' "$SOUND_LOG"
 

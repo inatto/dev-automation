@@ -96,7 +96,7 @@ CONF
 
 : > "$SSH_LOG"
 SSH_LOG="$SSH_LOG" PATH="$FAKE_BIN:$PATH" HOME="$HOME_DIR" DEV_AUTOMATION_SKIP_CLEAR=1 \
-  "$ROOT/scripts/project-ssh.sh" ssh-direct-app "$DIRECT" orgs/direct-app "$CODE_ROOT" > "$TMP/direct.log" 2> "$TMP/direct.err"
+  "$ROOT/scripts/project/project-ssh.sh" ssh-direct-app "$DIRECT" orgs/direct-app "$CODE_ROOT" > "$TMP/direct.log" 2> "$TMP/direct.err"
 
 grep -Fq 'servidor: ec2-user@203.0.113.7' "$TMP/direct.log"
 grep -Fq 'site OK: HTTP 200 em 0.123s | https://sample.example/' "$TMP/direct.log"

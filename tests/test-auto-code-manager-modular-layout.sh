@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-ENTRY="$ROOT/scripts/auto-code-manager.sh"
+ENTRY="$ROOT/scripts/dev-manager/auto-code-manager.sh"
 MOD="$ROOT/scripts/dev-manager"
 
 [ -x "$ENTRY" ]

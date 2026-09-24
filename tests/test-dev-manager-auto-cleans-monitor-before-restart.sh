@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/watch/scripts" "$TMP/state"
+mkdir -p "$TMP/bin" "$TMP/watch/scripts/dev-manager" "$TMP/state"
 
 # Simula o monitor real: o primeiro dev-manager deixa um processo/lock separado.
 cat > "$TMP/bin/dev-manager" <<'EOS'
@@ -23,7 +23,7 @@ wait
 EOS
 chmod +x "$TMP/bin/dev-manager"
 
-cat > "$TMP/watch/scripts/dev-manager.sh" <<'EOS'
+cat > "$TMP/watch/scripts/dev-manager/dev-manager.sh" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "stop" ]]; then
@@ -35,11 +35,11 @@ if [[ "${1:-}" == "stop" ]]; then
   fi
 fi
 EOS
-chmod +x "$TMP/watch/scripts/dev-manager.sh"
+chmod +x "$TMP/watch/scripts/dev-manager/dev-manager.sh"
 
 export PATH="$TMP/bin:$PATH"
 export TEST_LOG="$TMP/log" TEST_LOCK="$TMP/lock" AUTO_CODE_STATE_DIR="$TMP/state"
-bash "$ROOT/scripts/global-command-auto.sh" dev-manager dev-manager "$TMP/watch" 0 >"$TMP/out" 2>&1 &
+bash "$ROOT/scripts/core/global-command-auto.sh" dev-manager dev-manager "$TMP/watch" 0 >"$TMP/out" 2>&1 &
 sup=$!
 for _ in $(seq 1 50); do [[ -f "$TMP/log" ]] && grep -q '^run$' "$TMP/log" && break; sleep .1; done
 [[ "$(grep -c '^run$' "$TMP/log")" -eq 1 ]]

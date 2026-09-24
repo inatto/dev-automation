@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-SCRIPT="$ROOT/scripts/auto-code-manager.sh"
+SCRIPT="$ROOT/scripts/dev-manager/auto-code-manager.sh"
 SOURCES=("$SCRIPT" "$ROOT"/scripts/dev-manager/*.sh)
 
 grep -Fq 'mapfile -t projects < <(backup_order_targets)' "${SOURCES[@]}" || {

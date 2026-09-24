@@ -4,11 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-PLACEMENT_LIB="$PROJECT_ROOT/scripts/gnome-window-placement.sh"
-CONTEXT_LIB="$PROJECT_ROOT/scripts/workspace-project-context.sh"
+PLACEMENT_LIB="$PROJECT_ROOT/scripts/core/gnome-window-placement.sh"
+CONTEXT_LIB="$PROJECT_ROOT/scripts/core/workspace-project-context.sh"
 [[ -f "$PLACEMENT_LIB" ]] && source "$PLACEMENT_LIB"
 [[ -f "$CONTEXT_LIB" ]] && source "$CONTEXT_LIB"
-source "$PROJECT_ROOT/scripts/chromes-session.sh"
+source "$PROJECT_ROOT/scripts/chromes/chromes-session.sh"
 log(){ printf '[chromes] %s\n' "$*"; }
 fail(){ printf '[chromes] ERRO: %s\n' "$*" >&2; exit 1; }
 
@@ -228,7 +228,7 @@ case "${1:-}" in
   --diagnose|diagnose|--diagnose-profiles|diagnose-profiles) show_diagnose; exit 0 ;;
   --help|-h|help)
     printf 'Uso: chromes | chromes --diagnose\n'
-    printf 'Abre o Project ChatGPT correspondente + URL(s) local(is) do projeto do workspace atual; monitor esquerdo e maximizado.\n'
+    printf 'Abre ChatGPT + URL(s) local(is) do projeto do workspace atual; monitor esquerdo e maximizado.\n'
     printf 'Overrides de perfil: CHROMES_USER_DATA_DIR=/caminho CHROMES_DANIEL_PROFILE="Default" CHROMES_SINDICATTO_PROFILE="Profile 1"\n'
     exit 0
     ;;
@@ -243,7 +243,6 @@ log "Ubuntu backend: $mode -> $chrome"
 user_data_dir="$(chrome_user_data_dir "$mode" "$chrome")"
 daniel_profile="$(resolve_daniel_profile "$user_data_dir")"
 sindicatto_profile="$(resolve_sindicatto_profile "$user_data_dir")"
-sindicatto_clientes_profile="${CHROMES_SINDICATTO_CLIENTES_PROFILE:-Profile 12}"
 
 placement_active=0
 target_workspace="${CHROMES_TARGET_WORKSPACE:-}"
@@ -254,10 +253,8 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     [[ "$CHROMES_TARGET_WORKSPACE" =~ ^[1-9][0-9]*$ ]] || fail 'CHROMES_TARGET_WORKSPACE deve ser inteiro positivo.'
     placement_fields="workspace=$CHROMES_TARGET_WORKSPACE"$'\t'"$placement_fields"
   fi
-  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[123]$ ]]; then
-    managed_force="${CHROMES_MANAGED_FORCE:-0}"
-    [[ "$managed_force" =~ ^[01]$ ]] || fail 'CHROMES_MANAGED_FORCE deve ser 0 ou 1.'
-    placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"$'\t'"force=$managed_force"
+  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[12]$ ]]; then
+    placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"
   fi
   gnome_placement_prepare chromes default "$placement_fields" || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
   if [[ -n "${CHROMES_MANAGED_PROJECT:-}" ]] && [[ "$(gnome_placement_ready_field valid 2>/dev/null || true)" != 1 ]]; then
@@ -276,36 +273,23 @@ fi
 
 local_urls=()
 project_entry=''
-chatgpt_url="${CHROMES_CHATGPT_URL:-https://chatgpt.com/}"
-
-if [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_load_projects >/dev/null 2>&1; then
-  if workspace_context_load_projects; then
-    project_entry="$(workspace_context_project_for_workspace "$target_workspace" 2>/dev/null || true)"
-    if [[ -z "${CHROMES_CHATGPT_URL:-}" && -n "$project_entry" ]] && declare -F workspace_context_chatgpt_url_for_project >/dev/null 2>&1; then
-      resolved_chatgpt_url="$(workspace_context_chatgpt_url_for_project "$project_entry" 2>/dev/null || true)"
-      [[ -z "$resolved_chatgpt_url" ]] || chatgpt_url="$resolved_chatgpt_url"
-    fi
-  fi
-fi
-
 if [[ -n "${CHROMES_LOCAL_URLS:-}" ]]; then
   mapfile -t local_urls < <(printf '%s\n' "$CHROMES_LOCAL_URLS" | sed '/^[[:space:]]*$/d')
-elif [[ -n "$project_entry" ]] && declare -F workspace_context_load_services >/dev/null 2>&1; then
-  if workspace_context_load_services; then
-    project_urls="$(workspace_context_urls_for_project "$project_entry" 2>/dev/null || true)"
-    if [[ -n "$project_urls" ]]; then
-      mapfile -t local_urls < <(printf '%s\n' "$project_urls" | sed '/^[[:space:]]*$/d')
+elif [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_load_projects >/dev/null 2>&1; then
+  if workspace_context_load_projects && workspace_context_load_services; then
+    project_entry="$(workspace_context_project_for_workspace "$target_workspace" 2>/dev/null || true)"
+    if [[ -n "$project_entry" ]]; then
+      project_urls="$(workspace_context_urls_for_project "$project_entry" 2>/dev/null || true)"
+      if [[ -n "$project_urls" ]]; then
+        mapfile -t local_urls < <(printf '%s\n' "$project_urls" | sed '/^[[:space:]]*$/d')
+      fi
     fi
   fi
 fi
 
 common=(--no-first-run)
-if [[ -n "$project_entry" && "$chatgpt_url" != 'https://chatgpt.com/' ]]; then
-  log "Abrindo Chrome Daniel ($daniel_profile) -> Project ChatGPT: $(basename -- "$project_entry")..."
-else
-  log "Abrindo Chrome Daniel ($daniel_profile) -> ChatGPT..."
-fi
-run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window "$chatgpt_url"
+log "Abrindo Chrome Daniel ($daniel_profile) -> ChatGPT..."
+run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window 'https://chatgpt.com/'
 expected_browsers=1
 
 skip_second=0
@@ -320,10 +304,7 @@ if (( ! skip_second )); then
   fi
   log "Abrindo Chrome Sindicatto ($sindicatto_profile) -> ${local_urls[*]}"
   run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_profile" --new-window "${local_urls[@]}"
-  sleep 1
-  log "Abrindo Chrome Sindicatto Clientes ($sindicatto_clientes_profile) -> ${local_urls[*]}"
-  run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_clientes_profile" --new-window "${local_urls[@]}"
-  expected_browsers=3
+  expected_browsers=2
 else
   if [[ -n "$project_entry" ]]; then
     log "Chrome Sindicatto ignorado: $(basename -- "$project_entry") não possui URL local configurada."

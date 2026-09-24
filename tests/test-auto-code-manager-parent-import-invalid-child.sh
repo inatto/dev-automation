@@ -9,7 +9,7 @@ CODE_ROOT="$TEMP_ROOT/Code"
 PACKAGE_DIR="$TEMP_ROOT/package"
 CHILD_DIR="$TEMP_ROOT/child"
 PARENT_ZIP="$TEMP_ROOT/orbital.zip"
-MANAGER="$TEST_PROJECT/scripts/auto-code-manager.sh"
+MANAGER="$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh"
 LOG_FILE="$TEMP_ROOT/import-invalid.log"
 
 cleanup() {

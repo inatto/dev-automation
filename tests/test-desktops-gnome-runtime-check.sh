@@ -25,7 +25,7 @@ exit 0
 FAKE
 chmod +x "$TMP/bin/"*
 set +e
-out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" XDG_SESSION_TYPE=wayland DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops.sh" 2>&1)"
+out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" XDG_SESSION_TYPE=wayland DESKTOPS_PLATFORM=gnome PROJECTS_FILE="$TMP/projects" "$ROOT/scripts/desktops/desktops.sh" 2>&1)"
 rc=$?
 set -e
 [[ "$rc" -eq 0 ]]

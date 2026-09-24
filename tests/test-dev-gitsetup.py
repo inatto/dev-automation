@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "dev-gitsetup.py"
+SCRIPT = ROOT / "scripts" / "project-sync" / "dev-gitsetup.py"
 
 
 class DevGitSetupTest(unittest.TestCase):
@@ -126,7 +126,7 @@ orgs/beta|https://github.com/owner/beta.git
     def test_creates_machine_projects_from_default_on_first_real_run(self):
         with tempfile.TemporaryDirectory() as td:
             temp = Path(td)
-            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script = temp / "scripts" / "project-sync" / "dev-gitsetup.py"
             copied_script.parent.mkdir(parents=True)
             copied_script.write_text(SCRIPT.read_text())
             config = temp / "config"
@@ -162,7 +162,7 @@ orgs/beta|https://github.com/owner/beta.git
     def test_dry_run_does_not_create_machine_projects_file(self):
         with tempfile.TemporaryDirectory() as td:
             temp = Path(td)
-            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script = temp / "scripts" / "project-sync" / "dev-gitsetup.py"
             copied_script.parent.mkdir(parents=True)
             copied_script.write_text(SCRIPT.read_text())
             config = temp / "config"
@@ -194,7 +194,7 @@ orgs/beta|https://github.com/owner/beta.git
     def test_existing_machine_projects_is_preserved_and_used(self):
         with tempfile.TemporaryDirectory() as td:
             temp = Path(td)
-            copied_script = temp / "scripts" / "dev-gitsetup.py"
+            copied_script = temp / "scripts" / "project-sync" / "dev-gitsetup.py"
             copied_script.parent.mkdir(parents=True)
             copied_script.write_text(SCRIPT.read_text())
             config = temp / "config"

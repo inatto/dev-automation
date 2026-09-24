@@ -38,7 +38,7 @@ run_pycharms() {
   PYCHARMS_OPEN_PROJECTS_FILE="$OPEN" \
   PYCHARMS_OPEN_DELAY_SECONDS=0 \
   XDG_SESSION_TYPE=x11 \
-  "$ROOT/scripts/pycharms.sh"
+  "$ROOT/scripts/pycharms/pycharms.sh"
 }
 
 out1="$(run_pycharms)"

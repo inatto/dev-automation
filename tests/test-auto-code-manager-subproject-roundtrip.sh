@@ -59,7 +59,7 @@ MANAGER_ENV=(
   "DEV_MANAGER_PROJECTS_FILE=$TEST_PROJECT/config/projects/default.projects"
 )
 
-env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
+env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >/dev/null
 
 PARENT_ZIP="$CODE_ROOT/dev-automation.zip"
 CHILD_ZIP="$CODE_ROOT/dev-automation-amazon-imap-bot.zip"
@@ -98,7 +98,7 @@ ENV
   zip -qr "$INBOX/dev-automation--parent-update.zip" .
 )
 
-env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/auto-code-manager.sh" \
+env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" \
   --import-one "$INBOX/dev-automation--parent-update.zip" > "$LOG"
 
 grep -Fxq 'parent-imported' "$PARENT/root.txt"
@@ -123,7 +123,7 @@ ENV
   zip -qr "$INBOX/dev-automation-amazon-imap-bot.zip" .
 )
 
-env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/auto-code-manager.sh" \
+env "${MANAGER_ENV[@]}" "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" \
   --import-one "$INBOX/dev-automation-amazon-imap-bot.zip" >/dev/null
 
 grep -Fxq 'child-imported' "$CHILD/bot.py"

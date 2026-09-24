@@ -65,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='devauto-download-busy-') as temp:
         return text in log_path.read_text(errors='replace')
 
     with log_path.open('w') as log:
-        proc = subprocess.Popen(['bash', str(manager / 'scripts/auto-code-manager.sh')],
+        proc = subprocess.Popen(['bash', str(manager / 'scripts/dev-manager/auto-code-manager.sh')],
                                 env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         try:
             wait_for(lambda: log_has('IDLE event-driven'), 'monitor não ficou pronto', 120)

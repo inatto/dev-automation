@@ -55,7 +55,7 @@ ENV
 
 HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
   DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/projects/default.projects" \
-  "$MANAGER/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
+  "$MANAGER/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 
 wait_file() {

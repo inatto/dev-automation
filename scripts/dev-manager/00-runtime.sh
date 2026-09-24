@@ -6,7 +6,7 @@ CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 IGNORE_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-zip"
 IGNORE_UNZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.ignore-unzip"
 # shellcheck source=../lib/project-config.sh
-source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+source "$PROJECT_ROOT/scripts/core/project-config.sh"
 PROJECTS_FILE="${DEV_MANAGER_PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 ENV_FILE="$PROJECT_ROOT/config/auto-code-manager.env"
 FOLDER_SQL_ZIP_FILE="$PROJECT_ROOT/config/auto-code-manager.folder-sql-zip"
@@ -47,7 +47,7 @@ BACKUP_BEEP_WAVE_FILE="$PROJECT_ROOT/assets/sounds/backup-complete.wav"
 BACKUP_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\ding.wav"
 ERROR_WINDOWS_WAVE_FILE="C:\\Windows\\Media\\Windows Critical Stop.wav"
 TASKBAR_STATUS_ENABLED=true
-DEV_STATUS_SCRIPT="$PROJECT_ROOT/scripts/dev-status.sh"
+DEV_STATUS_SCRIPT="$PROJECT_ROOT/scripts/dev-status/dev-status.sh"
 PAUSE_CONTROL_ACTIVE=false
 WATCH_PID=""
 WATCH_FIFO=""

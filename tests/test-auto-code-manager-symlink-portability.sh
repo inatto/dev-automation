@@ -32,7 +32,7 @@ BEEP_MODE=none
 BACKUP_BEEP_ENABLED=false
 TASKBAR_STATUS_ENABLED=false
 EOF_ENV
-run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" "$@"; }
+run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/dev-manager/auto-code-manager.sh" "$@"; }
 
 run --backup-once >/dev/null
 Z="$C/alpha-app.zip"

@@ -17,7 +17,7 @@ orgs/orbital.zip
 orgs/orbital/orbital-app
 PROJECTS
 
-output="$(PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" --list)"
+output="$(PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops/desktops.sh" --list)"
 expected=$'1\tLAZER (preservado)\n2\tdev-automation\n3\tamazon-infra\n4\torbital-app\n5\tlrdp1\n6\tlrdp2'
 
 [[ "$output" == "$expected" ]] || {
@@ -60,12 +60,12 @@ FAKEWSL
 chmod +x "$FAKE_BIN/powershell.exe" "$FAKE_BIN/wslpath"
 
 for _ in 1 2 3; do
-  PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" >/dev/null
+  PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops/desktops.sh" >/dev/null
 done
 
 printf 'OK: desktops simples roda repetidamente sem wslpath nem temporários Windows\n'
 
-if PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops.sh" --apps >/dev/null 2>&1; then
+if PATH="$FAKE_BIN:$PATH" DESKTOPS_PLATFORM=windows PROJECTS_FILE="$PROJECTS_FILE" "$PROJECT_ROOT/scripts/desktops/desktops.sh" --apps >/dev/null 2>&1; then
   printf 'FALHOU: --apps ainda foi aceito\n' >&2
   exit 1
 fi

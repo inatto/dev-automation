@@ -38,8 +38,8 @@ Após importar o pacote e aguardar a conclusão da importação atual, reinicie 
 
 ```bash
 cd /home/daniel/Code/bots/dev-automation
-bash scripts/dev-manager.sh stop
-bash scripts/dev-manager.sh
+bash scripts/dev-manager/dev-manager.sh stop
+bash scripts/dev-manager/dev-manager.sh
 ```
 
 O comando de início já atualiza os comandos globais pelo instalador existente.

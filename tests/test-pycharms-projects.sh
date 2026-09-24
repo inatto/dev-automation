@@ -27,7 +27,7 @@ orgs/orbital/orbital-app
 orgs/orbital/orbital-events
 PROJECTS
 
-actual="$(CODE_ROOT="$CODE_ROOT" PYCHARMS_PROJECTS_FILE="$PROJECTS_FILE" "$ROOT/scripts/pycharms.sh" --list)"
+actual="$(CODE_ROOT="$CODE_ROOT" PYCHARMS_PROJECTS_FILE="$PROJECTS_FILE" "$ROOT/scripts/pycharms/pycharms.sh" --list)"
 expected="$(cat <<EXPECTED
 $CODE_ROOT/bots/dev-automation
 $CODE_ROOT/infra/amazon-infra

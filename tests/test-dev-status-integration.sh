@@ -3,10 +3,10 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 APP="$ROOT/apps/dev-status"
-MANAGER="$ROOT/scripts/dev-manager.sh"
-SOURCES=("$ROOT/scripts/auto-code-manager.sh" "$ROOT"/scripts/dev-manager/*.sh)
+MANAGER="$ROOT/scripts/dev-manager/dev-manager.sh"
+SOURCES=("$ROOT/scripts/dev-manager/auto-code-manager.sh" "$ROOT"/scripts/dev-manager/*.sh)
 
-for file in "$ROOT/scripts/dev-status.sh" "$APP/src/main.cpp" "$APP/CMakeLists.txt"; do
+for file in "$ROOT/scripts/dev-status/dev-status.sh" "$APP/src/main.cpp" "$APP/CMakeLists.txt"; do
   [ -f "$file" ] || { echo "FALHOU: ausente: $file" >&2; exit 1; }
 done
 

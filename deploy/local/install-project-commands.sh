@@ -5,13 +5,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-# shellcheck source=../../scripts/lib/project-config.sh
-source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+# shellcheck source=../../scripts/core/project-config.sh
+source "$PROJECT_ROOT/scripts/core/project-config.sh"
 PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
-COMMAND_RUNNER="${COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-command.sh}"
-SSH_COMMAND_RUNNER="${SSH_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-ssh.sh}"
-ALL_COMMAND_RUNNER="${ALL_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project-all-command.sh}"
-PROJECT_NAMES_LIB="${PROJECT_NAMES_LIB:-$PROJECT_ROOT/scripts/project-names.sh}"
+COMMAND_RUNNER="${COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project/project-command.sh}"
+SSH_COMMAND_RUNNER="${SSH_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project/project-ssh.sh}"
+ALL_COMMAND_RUNNER="${ALL_COMMAND_RUNNER:-$PROJECT_ROOT/scripts/project/project-all-command.sh}"
+PROJECT_NAMES_LIB="${PROJECT_NAMES_LIB:-$PROJECT_ROOT/scripts/core/project-names.sh}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 TARGET_DIR="${TARGET_DIR:-$HOME/.local/bin}"
 MANIFEST_FILE="$TARGET_DIR/.dev-automation-project-commands"
@@ -25,7 +25,7 @@ fail() { printf '[project-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 [[ -f "$ALL_COMMAND_RUNNER" ]] || fail "executor geral não encontrado: $ALL_COMMAND_RUNNER"
 [[ -f "$PROJECT_NAMES_LIB" ]] || fail "biblioteca de nomes não encontrada: $PROJECT_NAMES_LIB"
 
-# shellcheck source=../../scripts/project-names.sh
+# shellcheck source=../../scripts/core/project-names.sh
 source "$PROJECT_NAMES_LIB"
 validate_project_global_names "$PROJECTS_FILE" || fail "corrija nomes duplicados/ambíguos em $PROJECTS_FILE antes de instalar comandos"
 

@@ -32,7 +32,7 @@ IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >/dev/null
 
 for zip_file in "$CODE_ROOT/sample-app.zip" "$CODE_ROOT/apps.zip"; do
   unzip -Z1 "$zip_file" | grep -Fxq 'skills.md'

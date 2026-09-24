@@ -53,7 +53,7 @@ G512_USER_UNIT_DIR="$UNIT_DIR" \
 G512_STATE_DIR="$STATE_DIR" \
 G512_APP_DIR="$APP_DIR" \
 G512_SKIP_HARDWARE_CHECK=1 \
-  "$PROJECT_ROOT/scripts/g512-rgb.sh" ensure
+  "$PROJECT_ROOT/scripts/g512/g512-rgb.sh" ensure
 
 [ -f "$APP_DIR/keyboard_rgb.py" ]
 [ -f "$APP_DIR/helper.py" ]

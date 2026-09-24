@@ -20,8 +20,6 @@ import_one_zip() {
     return 0
   fi
 
-  local LOG_PROJECT="$project"
-
   if [ "$skip_stable" != "true" ] && ! stable_file "$zip_file"; then
     log "ZIP ainda está sendo gravado: $zip_name"
     return 0

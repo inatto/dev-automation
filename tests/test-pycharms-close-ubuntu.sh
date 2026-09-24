@@ -27,7 +27,7 @@ chmod +x "$TMP/bin/"*
   exit 1
 ) &
 watcher=$!
-out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" AUTO_CODE_STATE_DIR="$TMP/state" XDG_SESSION_TYPE=wayland PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms.sh" --close)"
+out="$(PATH="$TMP/bin:$PATH" HOME="$TMP/home" AUTO_CODE_STATE_DIR="$TMP/state" XDG_SESSION_TYPE=wayland PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms/pycharms.sh" --close)"
 wait "$watcher"
 grep -Fq 'fechamento solicitado para todas as janelas PyCharm' <<<"$out"
 grep -Fq 'solicitadas=3' <<<"$out"

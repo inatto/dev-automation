@@ -56,7 +56,7 @@ printf 'v1\n' > "$PROJECT/app.txt"
 )
 
 HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 
 wait_until() {

@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d /tmp/chromes-targeted-test-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Profile 7" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/home/.config/google-chrome/Profile 12" "$TMP/state/desktops"
+mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Profile 7" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/state/desktops"
 cat > "$TMP/home/.config/google-chrome/Local State" <<'JSON'
 {
   "profile": {
@@ -42,7 +42,7 @@ esac
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -60,8 +60,8 @@ READY
       IFS=$'\t' read -r token _ <<< "$request"
       printf '%s\tworkspace=3\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
       for _ in $(seq 1 160); do
-        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 3 ]]; then
-          printf '%s\tbrowsers=3\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
+        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]]; then
+          printf '%s\tbrowsers=2\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
           exit 0
         fi
         sleep 0.05
@@ -91,7 +91,6 @@ wait "$watcher"
 grep -Fq $'action=default\tworkspace=3\tmaximize=1' "$TMP/request.log"
 grep -Fq -- '--profile-directory=Profile 7 --new-window https://chatgpt.com/' "$TMP/chrome.log"
 grep -Fq -- '--profile-directory=Profile 3 --new-window https://anpprev.admin.localhost/ https://sinproprev.admin.localhost/ https://asaclub.admin.localhost/' "$TMP/chrome.log"
-grep -Fq -- '--profile-directory=Profile 12 --new-window https://anpprev.admin.localhost/ https://sinproprev.admin.localhost/ https://asaclub.admin.localhost/' "$TMP/chrome.log"
 grep -Fq 'Destino: workspace 3, monitor mais à esquerda, maximizado.' <<< "$out"
 grep -Fq 'Projeto: orbital-app -> https://anpprev.admin.localhost/ https://sinproprev.admin.localhost/ https://asaclub.admin.localhost/' <<< "$out"
 grep -Fq 'Chrome confirmado no workspace 3 / monitor esquerdo / maximizado.' <<< "$out"

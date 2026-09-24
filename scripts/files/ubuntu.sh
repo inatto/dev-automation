@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
-PLACEMENT_LIB="$PROJECT_ROOT/scripts/gnome-window-placement.sh"
+PLACEMENT_LIB="$PROJECT_ROOT/scripts/core/gnome-window-placement.sh"
 [[ -f "$PLACEMENT_LIB" ]] && source "$PLACEMENT_LIB"
 
 log(){ printf '[files] %s\n' "$*"; }

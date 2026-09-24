@@ -73,7 +73,7 @@ ENV
 
 DOWNLOADS_DIR="$DOWNLOADS" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$TEMP/state" \
   DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 
 wait_for_file() {

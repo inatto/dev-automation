@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-PY="$ROOT/scripts/dev-manager-tui.py"
+PY="$ROOT/scripts/dev-manager/dev-manager-tui.py"
 TMP="$(mktemp -d /tmp/dev-manager-ncurses-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 

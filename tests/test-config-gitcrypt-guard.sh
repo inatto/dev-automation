@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-GUARD="$ROOT/scripts/config-gitcrypt-guard.sh"
+GUARD="$ROOT/scripts/gitcrypt/config-gitcrypt-guard.sh"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 CODE="$TMP/Code"; REPO="$CODE/orgs/demo"; BIN="$TMP/bin"; KEY="$TMP/key"
 mkdir -p "$REPO/config" "$BIN"

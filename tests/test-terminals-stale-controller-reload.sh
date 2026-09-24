@@ -55,7 +55,7 @@ common_env=(
 
 for _ in 1 2; do
   set +e
-  out="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh" 2>&1)"
+  out="$(env "${common_env[@]}" "$ROOT/scripts/terminals/terminals.sh" 2>&1)"
   rc=$?
   set -e
   [[ "$rc" -ne 0 ]]
@@ -66,13 +66,13 @@ for _ in 1 2; do
 done
 
 cmp -s -- "$ROOT/apps/desktops-gnome-extension/extension.js" "$TARGET/extension.js"
-grep -Fq '"version": 17' "$TARGET/metadata.json"
+grep -Fq '"version": 16' "$TARGET/metadata.json"
 [[ -s "$TMP/state/desktops/extension.reload-required" ]]
 
-# Simula o novo processo gnome-shell após logout/login: o controlador v17
+# Simula o novo processo gnome-shell após logout/login: o controlador v16
 # publica as capacidades e remove o marker de recarga pendente.
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -107,7 +107,7 @@ rm -f -- "$TMP/state/desktops/extension.reload-required"
   exit 5
 ) &
 watcher=$!
-env "${common_env[@]}" "$ROOT/scripts/terminals.sh" >/dev/null
+env "${common_env[@]}" "$ROOT/scripts/terminals/terminals.sh" >/dev/null
 wait "$watcher"
 [[ "$(wc -l < "$TMP/terminal.log")" -eq 3 ]]
 

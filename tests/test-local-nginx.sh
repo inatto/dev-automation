@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT="$PROJECT_ROOT/scripts/local-nginx.sh"
+SCRIPT="$PROJECT_ROOT/scripts/nginx/local-nginx.sh"
 SERVICES="$PROJECT_ROOT/config/services.csv"
 STATIC_LOCATIONS="$PROJECT_ROOT/config/static-locations.csv"
 TEMP_ROOT="$(mktemp -d /tmp/local-nginx-test-XXXXXX)"

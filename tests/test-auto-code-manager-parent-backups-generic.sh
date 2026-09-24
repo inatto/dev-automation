@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 TEMP_ROOT="$(mktemp -d /tmp/auto-code-parent-generic-test-XXXXXX)"
 TEST_PROJECT="$TEMP_ROOT/dev-automation"
 CODE_ROOT="$TEMP_ROOT/Code"
-MANAGER="$TEST_PROJECT/scripts/auto-code-manager.sh"
+MANAGER="$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh"
 FAKE_BIN="$TEMP_ROOT/fake-bin"
 
 cleanup() {

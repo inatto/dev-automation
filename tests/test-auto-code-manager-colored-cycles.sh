@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT="$PROJECT_ROOT/scripts/auto-code-manager.sh"
+SCRIPT="$PROJECT_ROOT/scripts/dev-manager/auto-code-manager.sh"
 SOURCES=("$SCRIPT" "$PROJECT_ROOT"/scripts/dev-manager/*.sh)
 
 grep -Fq 'if is_wsl_runtime; then' "${SOURCES[@]}"

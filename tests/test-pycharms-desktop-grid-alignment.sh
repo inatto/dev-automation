@@ -17,7 +17,7 @@ orgs/after-child
 infra/last-project
 PROJECTS
 
-MAP="$(CODE_ROOT="$CODE" AUTO_CODE_STATE_DIR="$STATE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms.sh" --workspace-map 2>/dev/null)"
+MAP="$(CODE_ROOT="$CODE" AUTO_CODE_STATE_DIR="$STATE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms/pycharms.sh" --workspace-map 2>/dev/null)"
 EXPECTED=$(printf '2\tdev-automation\t%s\n3\tafter-child\t%s\n4\tlast-project\t%s' \
   "$CODE/bots/dev-automation" "$CODE/orgs/after-child" "$CODE/infra/last-project")
 [[ "$MAP" == "$EXPECTED" ]] || {

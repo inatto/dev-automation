@@ -21,7 +21,7 @@ expected=$(printf '%s\n' \
   "$CODE/infra/standalone/apps/child")
 
 for platform in ubuntu windows; do
-  out="$(CODE_ROOT="$CODE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM="$platform" "$ROOT/scripts/pycharms.sh" --list 2>/dev/null)"
+  out="$(CODE_ROOT="$CODE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM="$platform" "$ROOT/scripts/pycharms/pycharms.sh" --list 2>/dev/null)"
   [[ "$out" == "$expected" ]] || {
     printf 'FALHOU backend %s\nEsperado:\n%s\nRecebido:\n%s\n' "$platform" "$expected" "$out" >&2
     exit 1

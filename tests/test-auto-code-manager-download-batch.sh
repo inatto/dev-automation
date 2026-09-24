@@ -71,7 +71,7 @@ ENV
 PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
 WORKER_FROM_DIR="$WORKER_FROM_DIR" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
 
 grep -Fxq 'alpha novo' "$CODE_ROOT/orgs/alpha-app/value.txt"
 grep -Fxq 'beta novo' "$CODE_ROOT/orgs/beta-app/value.txt"
@@ -93,7 +93,7 @@ printf 'isto nao e um zip\n' > "$WORKER_FROM_DIR/alpha-app-corrompido.zip"
 if PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
 WORKER_FROM_DIR="$WORKER_FROM_DIR" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once >> "$LOG_FILE" 2>&1; then
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once >> "$LOG_FILE" 2>&1; then
   echo 'ERRO: lote com ZIP corrompido deveria retornar falha' >&2
   exit 1
 fi

@@ -218,28 +218,4 @@ test('nova requisição cancela reposicionamento pendente do pedido anterior', (
     const before = e.state.moves.length; e.drain();
     assert.equal(e.state.moves.length, before);
 });
-
-test('três Chromes por projeto são aceitos e force substitui vínculo antigo sem fechar janelas', () => {
-    const e = environment(), c = e.controller();
-    e.put('chromes.plan', 'bots/a\t2\t1\norgs/b\t3\t3\n');
-    const oldA = e.window(1001, 1), oldB1 = e.window(1002, 2), oldB2 = e.window(1003, 2), oldB3 = e.window(1004, 2);
-    assert.equal(e.request(c, 'register').valid, '1');
-    assert.equal(e.request(c, 'status').managed, '4');
-
-    // Sem force, duplicar o projeto continua proibido.
-    assert.equal(e.request(c, 'default', {project: 'orgs/b', expected: '3', workspace: '3'}).valid, '0');
-
-    // chromes-all pode deliberadamente substituir o lote deste projeto.
-    assert.equal(e.request(c, 'default', {project: 'orgs/b', expected: '3', workspace: '3', force: '1', maximize: '1'}).valid, '1');
-    const n1 = e.window(1011, 4), n2 = e.window(1012, 4), n3 = e.window(1013, 4);
-    c._inspectNewWindow(n1, 0); c._inspectNewWindow(n2, 0); c._inspectNewWindow(n3, 0); e.drain();
-    assert.equal(e.result().browsers, '3');
-    const status = e.request(c, 'status');
-    assert.equal(status.managed, '4');
-    assert.equal(status.missing, '0');
-    assert.equal(status.overflow, '0');
-    assert.equal(status.untracked, '3');
-    assert.ok([oldA, oldB1, oldB2, oldB3, n1, n2, n3].every(w => e.state.windows.includes(w)), 'force não fecha janelas antigas');
-});
-
 console.log(`${tests} cenários do controlador Chrome aprovados.`);

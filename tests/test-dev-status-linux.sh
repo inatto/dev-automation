@@ -3,11 +3,11 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 LINUX_APP="$ROOT/apps/dev-status/linux"
-DISPATCHER="$ROOT/scripts/dev-status.sh"
+DISPATCHER="$ROOT/scripts/dev-status/dev-status.sh"
 LINUX_WRAPPER="$ROOT/scripts/dev-status/linux.sh"
 WINDOWS_WRAPPER="$ROOT/scripts/dev-status/windows.sh"
 AUTO_RUNTIME="$ROOT/scripts/dev-manager/20-status-logging.sh"
-MANAGER="$ROOT/scripts/dev-manager.sh"
+MANAGER="$ROOT/scripts/dev-manager/dev-manager.sh"
 
 for file in \
   "$LINUX_APP/src/main.cpp" \
@@ -32,8 +32,8 @@ grep -Fq 'dev-status-linux.sock' "$LINUX_APP/src/main.cpp"
 grep -Fq 'APP_INDICATOR_STATUS_ACTIVE' "$LINUX_APP/src/main.cpp"
 grep -Fq 'pkg_check_modules(APPINDICATOR REQUIRED IMPORTED_TARGET ayatana-appindicator3-0.1)' "$LINUX_APP/CMakeLists.txt"
 grep -Fq 'libayatana-appindicator3-dev' "$LINUX_APP/build.sh"
-grep -Fq 'exec "$SCRIPT_DIR/dev-status/linux.sh" "$@"' "$DISPATCHER"
-grep -Fq 'exec "$SCRIPT_DIR/dev-status/windows.sh" "$@"' "$DISPATCHER"
+grep -Fq 'exec "$SCRIPT_DIR/linux.sh" "$@"' "$DISPATCHER"
+grep -Fq 'exec "$SCRIPT_DIR/windows.sh" "$@"' "$DISPATCHER"
 grep -Fq '"$DEV_STATUS_SCRIPT" "$state" --pause-file "$PAUSE_FILE" --detail "$detail"' "$AUTO_RUNTIME"
 grep -Fq 'apps/dev-status/linux/bin/dev-status-linux' "$MANAGER"
 grep -Fq 'apps/dev-status/linux/bin/' "$ROOT/config/auto-code-manager.ignore-zip"

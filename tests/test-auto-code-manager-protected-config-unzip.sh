@@ -78,7 +78,7 @@ PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
 WORKER_FROM_DIR="$WORKER_FROM_DIR" \
 AUTO_CODE_STATE_DIR="$STATE_DIR" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >/dev/null 2>&1
 
 BASELINE="$STATE_DIR/protected-config-baselines/sample-app"
 grep -Fxq 'DB_PASSWORD=********' "$BASELINE/apps/api/config/local/database.env"
@@ -130,7 +130,7 @@ PATH="$FAKE_BIN:$PATH" \
 CODE_ROOT="$CODE_ROOT" \
 WORKER_FROM_DIR="$WORKER_FROM_DIR" \
 AUTO_CODE_STATE_DIR="$STATE_DIR" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once > "$LOG_FILE" 2>&1
 
 # Config alterado com par local é reconciliado de volta no arquivo real:
 # aceita PORT novo, preserva a senha real e remove o .external transitório.

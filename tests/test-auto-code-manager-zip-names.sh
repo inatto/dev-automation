@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-MANAGER="$PROJECT_ROOT/scripts/auto-code-manager.sh"
+MANAGER="$PROJECT_ROOT/scripts/dev-manager/auto-code-manager.sh"
 TEMP="$(mktemp -d /tmp/auto-code-zip-names-XXXXXX)"
 CODE_ROOT="$TEMP/Code"
 PROJECTS_FILE="$TEMP/projects"

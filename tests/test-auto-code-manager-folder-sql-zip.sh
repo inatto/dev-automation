@@ -12,7 +12,7 @@ printf 'select 1 from dual;\n' > "$TMP/code/one/qualquer-nome.sql"
 printf 'create table x (id number);\n' > "$TMP/code/one/outro.SQL"
 printf 'select 2 from dual;\n' > "$TMP/code/two/ddl-solto.sql"
 
-CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/auto-code-manager.sh" --sql-zip-once
+CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/dev-manager/auto-code-manager.sh" --sql-zip-once
 
 for folder in one two; do
   test "$(find "$TMP/code/$folder" -maxdepth 1 -type f -iname '*.sql' | wc -l)" -eq 0
@@ -26,7 +26,7 @@ unzip -Z1 "$zip_one" | grep -Fx 'qualquer-nome.sql' >/dev/null
 unzip -Z1 "$zip_one" | grep -Fx 'outro.SQL' >/dev/null
 
 printf 'alter table x add name varchar2(10);\n' > "$TMP/code/one/mais-um.sql"
-CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/auto-code-manager.sh" --sql-zip-once
+CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/dev-manager/auto-code-manager.sh" --sql-zip-once
 
 test ! -e "$TMP/code/one/mais-um.sql"
 test "$(find "$TMP/code/one" -maxdepth 1 -type f -name '????????-????.zip' | wc -l)" -eq 1

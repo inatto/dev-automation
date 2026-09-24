@@ -54,7 +54,7 @@ CHROMES_ALL_TEST_LOG="$TMP/chromes.log" \
 CHROMES_ALL_DESKTOPS_LOG="$TMP/desktops.log" \
 CHROMES_ALL_SLEEP_LOG="$TMP/sleep.log" \
 XDG_SESSION_TYPE=x11 \
-  "$ROOT/scripts/chromes-all.sh" >/dev/null
+  "$ROOT/scripts/chromes/chromes-all.sh" >/dev/null
 
 [[ "$(grep -c '^workspace=' "$TMP/chromes.log")" -eq 4 ]]
 grep -Fqx 'workspace=2' "$TMP/chromes.log"

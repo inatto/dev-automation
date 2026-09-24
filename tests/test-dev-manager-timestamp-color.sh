@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TUI="$ROOT/scripts/dev-manager-tui.py"
+TUI="$ROOT/scripts/dev-manager/dev-manager-tui.py"
 LEGACY="$ROOT/scripts/dev-manager/10-tui-legacy.sh"
 LOGGING="$ROOT/scripts/dev-manager/20-status-logging.sh"
 

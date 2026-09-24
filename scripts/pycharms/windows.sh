@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
 # shellcheck source=../lib/project-config.sh
-source "$PROJECT_ROOT/scripts/lib/project-config.sh"
+source "$PROJECT_ROOT/scripts/core/project-config.sh"
 CONFIG_FILE="${PYCHARMS_PROJECTS_FILE:-$(dev_projects_file "$PROJECT_ROOT")}"
 CODE_ROOT="${CODE_ROOT:-/home/daniel/Code}"
 OPEN_DELAY_SECONDS="${PYCHARMS_OPEN_DELAY_SECONDS:-5}"

@@ -21,7 +21,7 @@ chmod +x "$TMP/terminal.sh"
 export TEST_RESULT="$TMP/result"
 export AUTO_CODE_STATE_DIR="$TMP/state"
 
-script -q -e -c "timeout 3 bash '$ROOT/scripts/global-command-auto.sh' amazon-imap-bot '$TMP/terminal.sh' '$TMP/watch' 0" /dev/null >/dev/null 2>&1 || true
+script -q -e -c "timeout 3 bash '$ROOT/scripts/core/global-command-auto.sh' amazon-imap-bot '$TMP/terminal.sh' '$TMP/watch' 0" /dev/null >/dev/null 2>&1 || true
 
 [[ -f "$TMP/result" ]]
 grep -Fxq 'TTY_OK' "$TMP/result"

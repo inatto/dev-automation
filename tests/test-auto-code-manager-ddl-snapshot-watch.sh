@@ -27,7 +27,7 @@ ENV
 
 run_snapshot_once() {
   HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE_DIR" AUTO_CODE_TUI=off \
-    "$MANAGER/scripts/auto-code-manager.sh" --sql-snapshot-once >>"$LOG" 2>&1
+    "$MANAGER/scripts/dev-manager/auto-code-manager.sh" --sql-snapshot-once >>"$LOG" 2>&1
 }
 
 snapshot_count_local() {

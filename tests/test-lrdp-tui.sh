@@ -99,7 +99,7 @@ cat > "$TMP/lrdp-mock" <<'EOT'
 printf 'LRDP-MOCK %s\n' "$*"
 EOT
 chmod +x "$TMP/lrdp-mock"
-dm_output="$(DEV_MANAGER_LRDP_SCRIPT="$TMP/lrdp-mock" bash "$ROOT/scripts/dev-manager.sh" lrdp --probe)"
+dm_output="$(DEV_MANAGER_LRDP_SCRIPT="$TMP/lrdp-mock" bash "$ROOT/scripts/dev-manager/dev-manager.sh" lrdp --probe)"
 [[ "$dm_output" == 'LRDP-MOCK --probe' ]]
 
 printf 'OK: LRDP TUI descobre perfis, protege senhas, desenha topologia e conecta com estado salvo\n'

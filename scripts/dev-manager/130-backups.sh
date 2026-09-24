@@ -34,7 +34,7 @@ bump_dev_automation_build_version() {
   next_revision=$((10#$revision + 1))
   new_version="$(date '+%Y.%m.%d-%H.%M')-v${next_revision}"
 
-  temp_file="$(mktemp "${TMPDIR:-/tmp}/dev-automation-VERSION-XXXXXX")" || return 1
+  temp_file="$(mktemp "$PROJECT_ROOT/.VERSION-XXXXXX")" || return 1
   printf '%s\n' "$new_version" > "$temp_file" || { rm -f -- "$temp_file"; return 1; }
   if [ -e "$version_file" ]; then
     chmod --reference="$version_file" "$temp_file" 2>/dev/null || true
@@ -47,7 +47,6 @@ bump_dev_automation_build_version() {
 
 backup_project() {
   local project="$1"
-  local LOG_PROJECT="$project"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
   local archive_tree_dir content_prefix parent_config_rel parent_config_path
   local child child_name child_zip child_count
@@ -72,7 +71,7 @@ backup_project() {
   final_zip="$(project_archive_path "$project")"
   archive_tree_dir="$temp_dir"
 
-  LOG_CONTEXT=zip_file log "Gerando backup: $project -> $final_zip"
+  log "Gerando backup: $project -> $final_zip"
 
   if target_is_aggregate "$project"; then
     mapfile -t children < <(aggregate_child_targets "$project")

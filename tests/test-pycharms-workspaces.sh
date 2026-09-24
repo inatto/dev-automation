@@ -19,7 +19,7 @@ PROJECTS
 
 # Criar apps/monitor-app cria fisicamente o pai amazon-infra; como o pai está
 # cadastrado e existe, ele é o projeto efetivo e o filho não duplica a IDE.
-MAP="$(CODE_ROOT="$CODE" AUTO_CODE_STATE_DIR="$STATE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms.sh" --workspace-map 2>/dev/null)"
+MAP="$(CODE_ROOT="$CODE" AUTO_CODE_STATE_DIR="$STATE" PYCHARMS_PROJECTS_FILE="$CFG" PYCHARMS_PLATFORM=ubuntu "$ROOT/scripts/pycharms/pycharms.sh" --workspace-map 2>/dev/null)"
 EXPECTED=$(cat <<EOF_EXPECTED
 2	dev-automation	$CODE/bots/dev-automation
 4	orbital-app	$CODE/orgs/orbital/orbital-app

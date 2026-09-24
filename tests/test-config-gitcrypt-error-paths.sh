@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-GUARD="$ROOT/scripts/config-gitcrypt-guard.sh"
+GUARD="$ROOT/scripts/gitcrypt/config-gitcrypt-guard.sh"
 TMP="$(mktemp -d /tmp/gitcrypt-error-paths-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
 BIN="$TMP/bin"

@@ -10,7 +10,7 @@ echo run >> "$TEST_LOG"
 sleep 30
 EOS
 chmod +x "$TMP/cmd.sh"
-TEST_LOG="$TMP/log" AUTO_CODE_STATE_DIR="$TMP/state" bash "$ROOT/scripts/global-command-auto.sh" demo "$TMP/cmd.sh" "$TMP/watch" 0 >"$TMP/out" 2>&1 &
+TEST_LOG="$TMP/log" AUTO_CODE_STATE_DIR="$TMP/state" bash "$ROOT/scripts/core/global-command-auto.sh" demo "$TMP/cmd.sh" "$TMP/watch" 0 >"$TMP/out" 2>&1 &
 pid=$!
 for _ in $(seq 1 50); do [[ -f "$TMP/log" ]] && break; sleep .1; done
 [[ -f "$TMP/log" ]]

@@ -8,7 +8,7 @@ TEST_PROJECT="$TEMP_ROOT/dev-automation"
 CODE_ROOT="$TEMP_ROOT/Code"
 PACKAGE_DIR="$TEMP_ROOT/package"
 PARENT_ZIP="$TEMP_ROOT/orbital(7).zip"
-MANAGER="$TEST_PROJECT/scripts/auto-code-manager.sh"
+MANAGER="$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh"
 LOG_FILE="$TEMP_ROOT/import.log"
 MODULES=(orbital-app orbital-assets orbital-fin orbital-mail orbital-reports)
 

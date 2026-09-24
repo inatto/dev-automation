@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
-SCRIPT="$PROJECT_ROOT/scripts/local-nginx.sh"
+SCRIPT="$PROJECT_ROOT/scripts/nginx/local-nginx.sh"
 TEMP_ROOT="$(mktemp -d /tmp/local-nginx-upload-limit-test-XXXXXX)"
 trap 'rm -rf "$TEMP_ROOT"' EXIT
 

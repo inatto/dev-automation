@@ -5,7 +5,7 @@ MODULE="$ROOT/scripts/dev-manager/190-config-gitcrypt-guard.sh"
 MAIN="$ROOT/scripts/dev-manager/900-main.sh"
 BACKUPS="$ROOT/scripts/dev-manager/130-backups.sh"
 ATTRS="$ROOT/.gitattributes"
-WRAPPER="$ROOT/scripts/dev-manager.sh"
+WRAPPER="$ROOT/scripts/dev-manager/dev-manager.sh"
 
 # O suporte manual continua disponível.
 grep -Fq 'args=(--unlock' "$MODULE"

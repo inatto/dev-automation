@@ -30,7 +30,7 @@ BEEP_MODE=none
 BACKUP_BEEP_ENABLED=false
 TASKBAR_STATUS_ENABLED=false
 CFG
-run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/auto-code-manager.sh" "$@"; }
+run(){ HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off "$M/scripts/dev-manager/auto-code-manager.sh" "$@"; }
 
 mkdir -p "$T/pkg/server_backup/etc/nginx/sites-enabled"
 ln -s /etc/nginx/sites-available/default "$T/pkg/server_backup/etc/nginx/sites-enabled/default"

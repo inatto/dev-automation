@@ -48,7 +48,7 @@ chmod 755 "$PKG/deploy/local/new-task.sh"
 )
 
 HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
-  "$M/scripts/auto-code-manager.sh" --import-downloads-once >/dev/null
+  "$M/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once >/dev/null
 
 [ "$(cat "$P/deploy/local/setup.sh")" = new ]
 [ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 755 ]
@@ -66,7 +66,7 @@ chmod 644 "$PKG/deploy/local/setup.sh"
 )
 
 HOME="$H" DOWNLOADS_DIR="$D" CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
-  "$M/scripts/auto-code-manager.sh" --import-downloads-once >/dev/null
+  "$M/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once >/dev/null
 
 [ "$(cat "$P/deploy/local/setup.sh")" = mode-from-zip ]
 [ "$(stat -c '%a' "$P/deploy/local/setup.sh")" = 644 ]

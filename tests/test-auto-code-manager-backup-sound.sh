@@ -16,7 +16,7 @@ chmod +x "$FAKE_BIN/powershell.exe"
 
 PATH="$FAKE_BIN:$PATH" \
 FAKE_PS_LOG="$FAKE_LOG" \
-  "$PROJECT_ROOT/scripts/auto-code-manager.sh" --test-backup-sound
+  "$PROJECT_ROOT/scripts/dev-manager/auto-code-manager.sh" --test-backup-sound
 
 grep -Fq 'C:\Windows\Media\ding.wav' "$FAKE_LOG"
 grep -Fq 'System.Media.SoundPlayer' "$FAKE_LOG"

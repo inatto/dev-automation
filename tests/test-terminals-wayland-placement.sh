@@ -28,7 +28,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 17\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
@@ -38,7 +38,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -109,7 +109,7 @@ common_env=(
   TERMINALS_ALLOW_PTYXIS_FALLBACK=1
 )
 
-out="$(env "${common_env[@]}" "$ROOT/scripts/terminals.sh")"
+out="$(env "${common_env[@]}" "$ROOT/scripts/terminals/terminals.sh")"
 wait "$watcher"
 
 [[ "$(wc -l < "$TMP/terminal.log")" -eq 6 ]]
@@ -131,20 +131,20 @@ grep -Fq 'Intervalo entre abas: 0 segundo(s).' <<<"$out"
 grep -Fq 'Intervalo após terminal com comando: 0 segundo(s).' <<<"$out"
 grep -Fq 'ABA: Orbital App Auto -> orbital-app-auto' <<<"$out"
 grep -Fq 'ABA: Remote Orbital App Auto -> remote-orbital-app-auto' <<<"$out"
-! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals.sh"
-grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-16' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals.sh"
-grep -Fq 'TERMINALS_COMMAND_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals.sh"
-grep -Fq 'sleep "$COMMAND_INTERVAL_SECONDS"' "$ROOT/scripts/terminals.sh"
-grep -Fq 'sleep "$OPEN_INTERVAL_SECONDS"' "$ROOT/scripts/terminals.sh"
-grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals.sh"
-grep -Fq 'workspaces-only-on-primary false' "$ROOT/scripts/terminals.sh"
+! grep -Fq 'FASE: MOVIMENTAÇÃO' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'gnome_placement_prepare terminals reconcile' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'TERMINALS_OPEN_INTERVAL_SECONDS:-16' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'TERMINALS_COMMAND_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'sleep "$COMMAND_INTERVAL_SECONDS"' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'sleep "$OPEN_INTERVAL_SECONDS"' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'gnome_placement_prepare terminals direct' "$ROOT/scripts/terminals/terminals.sh"
+grep -Fq 'workspaces-only-on-primary false' "$ROOT/scripts/terminals/terminals.sh"
 grep -Fq "action === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq 'workspace.activate(global.get_current_time())' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq "terminalSession.mode === 'direct'" "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq '_confirmDirectTerminalPlacement(' "$ROOT/apps/desktops-gnome-extension/extension.js"
-grep -Fq 'status|open|direct|reconcile|reset|managed-reset' "$ROOT/scripts/gnome-window-placement.sh"
+grep -Fq 'status|open|direct|reconcile|reset|managed-reset' "$ROOT/scripts/core/gnome-window-placement.sh"
 
 : > "$TMP/reset.log"
 (
@@ -165,7 +165,7 @@ grep -Fq 'status|open|direct|reconcile|reset|managed-reset' "$ROOT/scripts/gnome
   exit 6
 ) &
 reset_watcher=$!
-env "${common_env[@]}" "$ROOT/scripts/terminals.sh" --reset >/dev/null
+env "${common_env[@]}" "$ROOT/scripts/terminals/terminals.sh" --reset >/dev/null
 wait "$reset_watcher"
 grep -Fxq reset "$TMP/reset.log"
 

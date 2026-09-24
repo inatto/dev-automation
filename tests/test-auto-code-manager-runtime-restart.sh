@@ -81,7 +81,7 @@ SCRIPT
 chmod +x "$APP/deploy/local/setup.sh"
 
 API_COUNT_FILE="$TEMP/api.count" WEB_COUNT_FILE="$TEMP/web.count" AUTO_CODE_STATE_DIR="$STATE" DEV_AUTOMATION_ERROR_SOUND_ENABLED=0 \
-  "$MANAGER/scripts/project-command.sh" alpha-app-auto "$APP" local >"$TEMP/app.log" 2>&1 &
+  "$MANAGER/scripts/project/project-command.sh" alpha-app-auto "$APP" local >"$TEMP/app.log" 2>&1 &
 APP_PID=$!
 
 wait_count() {
@@ -115,7 +115,7 @@ make_zip() {
 import_zip() {
   HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
     DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/projects/default.projects" AUTO_CODE_TUI=off \
-    "$MANAGER/scripts/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
+    "$MANAGER/scripts/dev-manager/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
   [[ ! -e "$TEMP/alpha-app.zip" ]]
 }
 

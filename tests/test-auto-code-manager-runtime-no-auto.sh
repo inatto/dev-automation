@@ -50,7 +50,7 @@ SCRIPT
 chmod +x "$APP/deploy/local/setup.sh"
 
 COUNT_FILE="$TEMP/count" AUTO_CODE_STATE_DIR="$STATE" DEV_AUTOMATION_ERROR_SOUND_ENABLED=0 \
-  "$MANAGER/scripts/project-command.sh" alpha-app "$APP" local setup >"$TEMP/app.log" 2>&1 &
+  "$MANAGER/scripts/project/project-command.sh" alpha-app "$APP" local setup >"$TEMP/app.log" 2>&1 &
 APP_PID=$!
 
 wait_count() {
@@ -71,7 +71,7 @@ printf 'novo\n' > "$TEMP/pkg/apps/api/main.py"
 (cd "$TEMP/pkg" && zip -qr "$TEMP/alpha-app.zip" .)
 HOME="$HOME_DIR" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$STATE" \
   DEV_MANAGER_PROJECTS_FILE="$MANAGER/config/projects/default.projects" AUTO_CODE_TUI=off \
-  "$MANAGER/scripts/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
+  "$MANAGER/scripts/dev-manager/auto-code-manager.sh" --import-one "$TEMP/alpha-app.zip" >"$TEMP/import.log" 2>&1
 
 sleep 0.4
 [[ "$(cat "$TEMP/count")" == "1" ]]

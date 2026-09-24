@@ -7,7 +7,7 @@ FILTERS="$ROOT/scripts/dev-manager/80-backup-filters.sh"
 FILES="$ROOT/scripts/dev-manager/40-files-safety.sh"
 MAIN="$ROOT/scripts/dev-manager/900-main.sh"
 EVENTS="$ROOT/scripts/dev-manager/170-inotify-runtime.sh"
-CLEANER="$ROOT/scripts/auto-clean-root.sh"
+CLEANER="$ROOT/scripts/maintenance/auto-clean-root.sh"
 
 # Compatibilidade foi preservada, mas só roda em WSL/Windows.
 grep -Fq 'is_wsl_runtime()' "$RUNTIME"

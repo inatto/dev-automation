@@ -32,6 +32,6 @@ grep -Fq 'ExecStart=/usr/bin/ydotoold --socket-path=/run/ydotool-dm.sock' "$MANA
 grep -Fq 'WantedBy=multi-user.target' "$MANAGER"
 grep -Fq 'exec bash "$DIGITAR_DATA_HORA" "$@"' "$MANAGER"
 
-grep -A20 -F 'start|run)' "$ROOT/scripts/dev-manager.sh" | grep -Fq 'refresh_global_commands'
+grep -A20 -F 'start|run)' "$ROOT/scripts/dev-manager/dev-manager.sh" | grep -Fq 'refresh_global_commands'
 
 printf 'OK: Global-Shortcuts centraliza registro/restauração e despacho dos atalhos\n'

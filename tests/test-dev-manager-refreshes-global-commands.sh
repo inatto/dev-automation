@@ -61,7 +61,7 @@ DEV_MANAGER_DEV_STATUS_EXE="$FAKE_STATUS_EXE" \
 DEV_MANAGER_DEV_STATUS_SOURCE="$FAKE_STATUS_SOURCE" \
 DEV_MANAGER_DEV_STATUS_BUILD_PS1="$FAKE_STATUS_BUILD" \
 DEV_MANAGER_G512_RGB_SCRIPT="$FAKE_G512" \
-  "$PROJECT_ROOT/scripts/dev-manager.sh" start --probe
+  "$PROJECT_ROOT/scripts/dev-manager/dev-manager.sh" start --probe
 
 mapfile -t lines < "$LOG_FILE"
 [ "${#lines[@]}" -eq 4 ]

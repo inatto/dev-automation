@@ -17,7 +17,7 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 17\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
   enable) exit 0 ;;
 esac
 FAKE
@@ -27,7 +27,7 @@ printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -67,7 +67,7 @@ out="$(env \
   TERMINALS_WORKSPACE_SETTLE_SECONDS=0 \
   TERMINALS_AUTO_INSTALL_GNOME_TERMINAL=0 \
   TERMINALS_ALLOW_PTYXIS_FALLBACK=1 \
-  "$ROOT/scripts/terminals.sh" 2>&1)"
+  "$ROOT/scripts/terminals/terminals.sh" 2>&1)"
 rc=$?
 set -e
 wait "$watcher"

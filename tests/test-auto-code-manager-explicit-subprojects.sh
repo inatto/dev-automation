@@ -36,7 +36,7 @@ SAFE_IGNORE
 : > "$TEST_PROJECT/config/auto-code-manager.ignore-unzip"
 
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >/dev/null
 
 [ -s "$CODE_ROOT/dev-automation.zip" ]
 [ -s "$CODE_ROOT/dev-automation-exec-agent.zip" ]
@@ -55,7 +55,7 @@ bots/dev-automation/apps.zip
 Code.zip
 PROJECTS
 PATH="$FAKE_BIN:$PATH" CODE_ROOT="$CODE_ROOT" DEV_MANAGER_PROJECTS_FILE="$TEST_PROJECT/config/projects/default.projects" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" --backup-once >/dev/null
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" --backup-once >/dev/null
 
 [ "$(unzip -Z1 "$CODE_ROOT/apps.zip" | sort)" = $'dev-automation-exec-agent.zip\nskills.md' ]
 code_entries="$(unzip -Z1 "$CODE_ROOT/Code.zip" | sort)"

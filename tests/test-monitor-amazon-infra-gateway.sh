@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 CONFIG="$ROOT/config/services.csv"
 PROJECTS="$ROOT/config/projects/default.projects"
-NGINX="$ROOT/scripts/local-nginx.sh"
+NGINX="$ROOT/scripts/nginx/local-nginx.sh"
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 
@@ -42,8 +42,8 @@ grep -Fq 'location / {' "$block"
 grep -Fq 'proxy_pass http://127.0.0.1:4005;' "$block"
 
 # Namespace global do subprojeto respeita o pai.
-# shellcheck source=../scripts/project-names.sh
-source "$ROOT/scripts/project-names.sh"
+# shellcheck source=../scripts/core/project-names.sh
+source "$ROOT/scripts/core/project-names.sh"
 [[ "$(project_global_command_base "$expected_project" "$PROJECTS")" == 'amazon-infra--monitor-app' ]]
 
 # Instalação simulada: certificado inclui o novo .localhost e é idempotente.

@@ -19,7 +19,7 @@ export TEST_RESULT="$TMP/result"
 export PATH="$TMP/bin:$PATH"
 export AUTO_CODE_STATE_DIR="$TMP/state"
 # `script` fornece um pseudo-terminal real para validar o contrato da TUI.
-script -q -e -c "timeout 3 bash '$ROOT/scripts/global-command-auto.sh' dev-manager dev-manager '$TMP/watch' 0" /dev/null >/dev/null 2>&1 || true
+script -q -e -c "timeout 3 bash '$ROOT/scripts/core/global-command-auto.sh' dev-manager dev-manager '$TMP/watch' 0" /dev/null >/dev/null 2>&1 || true
 [[ -f "$TMP/result" ]]
 grep -Fxq 'TTY_OK' "$TMP/result"
 printf 'OK dev-manager-auto preserva stdin TTY\n'

@@ -51,7 +51,7 @@ CFG
 run(){
   HOME="$H" WSL_DISTRO_NAME=Ubuntu DOWNLOADS_DIR="$DL" WINDOWS_DOWNLOADS_DIR="$DW" \
     CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" AUTO_CODE_TUI=off \
-    "$M/scripts/auto-code-manager.sh" "$@"
+    "$M/scripts/dev-manager/auto-code-manager.sh" "$@"
 }
 
 # Resíduos Zone.Identifier nas caixas conhecidas devem ser removidos também em
@@ -81,7 +81,7 @@ run --import-downloads-once >/dev/null
 LOG="$T/live.log"
 HOME="$H" WSL_DISTRO_NAME=Ubuntu DOWNLOADS_DIR="$DL" WINDOWS_DOWNLOADS_DIR="$DW" \
   CODE_ROOT="$C" AUTO_CODE_STATE_DIR="$S" DEV_MANAGER_PROJECTS_FILE="$M/config/projects/default.projects" AUTO_CODE_TUI=off \
-  "$M/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
+  "$M/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 for _ in $(seq 1 150); do
   grep -Fq 'IDLE event-driven' "$LOG" 2>/dev/null && break

@@ -24,7 +24,7 @@ FAKE
 chmod +x "$TMP/fake-files" "$TMP/fake-desktops" "$TMP/bin/sleep"
 : > "$TMP/files.log"
 : > "$TMP/sleep.log"
-PATH="$TMP/bin:$PATH" PROJECTS_FILE="$TMP/projects" FILES_COMMAND="$TMP/fake-files" DESKTOPS_COMMAND="$TMP/fake-desktops" FILES_ALL_TEST_LOG="$TMP/files.log" FILES_ALL_SLEEP_LOG="$TMP/sleep.log" XDG_SESSION_TYPE=x11 "$ROOT/scripts/files-all.sh" >/dev/null
+PATH="$TMP/bin:$PATH" PROJECTS_FILE="$TMP/projects" FILES_COMMAND="$TMP/fake-files" DESKTOPS_COMMAND="$TMP/fake-desktops" FILES_ALL_TEST_LOG="$TMP/files.log" FILES_ALL_SLEEP_LOG="$TMP/sleep.log" XDG_SESSION_TYPE=x11 "$ROOT/scripts/files/files-all.sh" >/dev/null
 [[ "$(cat "$TMP/files.log")" == $'workspace=2\nworkspace=3\nworkspace=4' ]]
 [[ "$(cat "$TMP/sleep.log")" == $'sleep=2\nsleep=2' ]]
 echo 'OK: files-all chama files em cada workspace e espera exatamente 2s entre desktops.'

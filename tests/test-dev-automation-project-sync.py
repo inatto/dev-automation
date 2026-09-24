@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "dev-automation.py"
+SCRIPT = ROOT / "scripts" / "project-sync" / "dev-automation.py"
 
 
 class DevAutomationSyncTest(unittest.TestCase):

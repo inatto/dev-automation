@@ -53,7 +53,7 @@ ENV
 
 HOME="$H" TERM=xterm DOWNLOADS_DIR="$D" CODE_ROOT="$C" \
 DEV_MANAGER_PROJECTS_FILE="$PF" AUTO_CODE_STATE_DIR="$S" AUTO_CODE_TUI=off \
-  "$M/scripts/auto-code-manager.sh" --import-downloads-once > "$LOG" 2>&1
+  "$M/scripts/dev-manager/auto-code-manager.sh" --import-downloads-once > "$LOG" 2>&1
 
 [ "$(cat "$P/app.txt")" = UPDATED ]
 grep -Fxq 'DATABASE_PASSWORD=' "$P/apps/api/config/production/services.env"

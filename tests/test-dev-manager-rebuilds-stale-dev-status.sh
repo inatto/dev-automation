@@ -45,7 +45,7 @@ DEV_MANAGER_DEV_STATUS_SCRIPT="$FAKE_STATUS" \
 DEV_MANAGER_DEV_STATUS_EXE="$FAKE_EXE" \
 DEV_MANAGER_DEV_STATUS_SOURCE="$FAKE_SOURCE" \
 DEV_MANAGER_DEV_STATUS_BUILD_PS1="$FAKE_BUILD" \
-  "$PROJECT_ROOT/scripts/dev-manager.sh" start
+  "$PROJECT_ROOT/scripts/dev-manager/dev-manager.sh" start
 
 mapfile -t lines < "$LOG_FILE"
 [ "${#lines[@]}" -eq 3 ]

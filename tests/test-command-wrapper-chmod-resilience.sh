@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 # dev-manager deve autorreparar/reinstalar os comandos antes de iniciar.
-grep -A8 -F 'start|run)' "$ROOT/scripts/dev-manager.sh" | grep -Fq 'refresh_global_commands'
+grep -A8 -F 'start|run)' "$ROOT/scripts/dev-manager/dev-manager.sh" | grep -Fq 'refresh_global_commands'
 
 # Wrappers shell não podem depender do bit +x dos scripts internos.
 grep -Fq 'exec bash "$source_file"' "$ROOT/deploy/local/install-commands.sh"

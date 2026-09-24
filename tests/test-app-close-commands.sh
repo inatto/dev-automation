@@ -3,25 +3,31 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 INSTALLER="$ROOT/deploy/local/install-commands.sh"
 
-for script in session-app-close files-close chromes-close pycharms-close; do
-  bash -n "$ROOT/scripts/$script.sh"
+scripts=(
+  "$ROOT/scripts/core/session-app-close.sh"
+  "$ROOT/scripts/files/files-close.sh"
+  "$ROOT/scripts/chromes/chromes-close.sh"
+  "$ROOT/scripts/pycharms/pycharms-close.sh"
+)
+for script in "${scripts[@]}"; do
+  bash -n "$script"
 done
 bash -n "$INSTALLER"
 
-grep -Fq 'CHROMES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/chromes-close.sh"' "$INSTALLER"
-grep -Fq 'FILES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/files-close.sh"' "$INSTALLER"
-grep -Fq 'PYCHARMS_CLOSE_SOURCE="$PROJECT_ROOT/scripts/pycharms-close.sh"' "$INSTALLER"
+grep -Fq 'CHROMES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/chromes/chromes-close.sh"' "$INSTALLER"
+grep -Fq 'FILES_CLOSE_SOURCE="$PROJECT_ROOT/scripts/files/files-close.sh"' "$INSTALLER"
+grep -Fq 'PYCHARMS_CLOSE_SOURCE="$PROJECT_ROOT/scripts/pycharms/pycharms-close.sh"' "$INSTALLER"
 grep -Fq 'chromes chromes-all chromes-close files files-all files-close terminals terminals-close' "$INSTALLER"
 grep -Fq 'pycharms pycharms-close phpstorm-dev' "$INSTALLER"
 
-grep -Fq -- '--type=*' "$ROOT/scripts/session-app-close.sh"
-grep -Fq 'WAYLAND_DISPLAY' "$ROOT/scripts/session-app-close.sh"
-grep -Fq 'XDG_SESSION_ID' "$ROOT/scripts/session-app-close.sh"
-grep -Fq 'exec bash "$SCRIPT_DIR/pycharms.sh" --close' "$ROOT/scripts/pycharms-close.sh"
+grep -Fq -- '--type=*' "$ROOT/scripts/core/session-app-close.sh"
+grep -Fq 'WAYLAND_DISPLAY' "$ROOT/scripts/core/session-app-close.sh"
+grep -Fq 'XDG_SESSION_ID' "$ROOT/scripts/core/session-app-close.sh"
+grep -Fq 'exec bash "$SCRIPT_DIR/pycharms.sh" --close' "$ROOT/scripts/pycharms/pycharms-close.sh"
 
-[[ "$(bash "$ROOT/scripts/files-close.sh" --help | head -n1)" == 'Uso: files-close' ]]
-[[ "$(bash "$ROOT/scripts/chromes-close.sh" --help | head -n1)" == 'Uso: chromes-close' ]]
-[[ "$(bash "$ROOT/scripts/pycharms-close.sh" --help | head -n1)" == 'Uso: pycharms-close' ]]
+[[ "$(bash "$ROOT/scripts/files/files-close.sh" --help | head -n1)" == 'Uso: files-close' ]]
+[[ "$(bash "$ROOT/scripts/chromes/chromes-close.sh" --help | head -n1)" == 'Uso: chromes-close' ]]
+[[ "$(bash "$ROOT/scripts/pycharms/pycharms-close.sh" --help | head -n1)" == 'Uso: pycharms-close' ]]
 
 printf 'ok: comandos files-close, chromes-close e pycharms-close instaláveis e seguros\n'
 
@@ -81,13 +87,13 @@ wait_dead() {
 
 WAYLAND_DISPLAY=wayland-test XDG_SESSION_ID=test-session \
 APP_CLOSE_PROC_ROOT="$TMP/proc" APP_CLOSE_WAIT_ATTEMPTS=0 \
-  bash "$ROOT/scripts/chromes-close.sh" >/dev/null 2>&1
+  bash "$ROOT/scripts/chromes/chromes-close.sh" >/dev/null 2>&1
 wait_dead "$main_pid"
 kill -0 "$renderer_pid" 2>/dev/null
 
 WAYLAND_DISPLAY=wayland-test XDG_SESSION_ID=test-session \
 APP_CLOSE_PROC_ROOT="$TMP/proc" APP_CLOSE_WAIT_ATTEMPTS=0 \
-  bash "$ROOT/scripts/files-close.sh" >/dev/null 2>&1
+  bash "$ROOT/scripts/files/files-close.sh" >/dev/null 2>&1
 wait_dead "$files_pid"
 kill -0 "$renderer_pid" 2>/dev/null
 

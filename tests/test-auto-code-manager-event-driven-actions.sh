@@ -56,7 +56,7 @@ AUTO_CODE_MONITOR_MODE=inotify
 ENV
 
 HOME="$TEST_HOME" CODE_ROOT="$CODE_ROOT" AUTO_CODE_STATE_DIR="$TEMP/state" \
-  "$TEST_PROJECT/scripts/auto-code-manager.sh" >"$LOG" 2>&1 &
+  "$TEST_PROJECT/scripts/dev-manager/auto-code-manager.sh" >"$LOG" 2>&1 &
 PID=$!
 
 wait_until() {

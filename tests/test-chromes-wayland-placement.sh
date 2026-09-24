@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d /tmp/chromes-wayland-test-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Default" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/home/.config/google-chrome/Profile 12" "$TMP/state/desktops"
+mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Default" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/state/desktops"
 printf 'bots/dev-automation\n' > "$TMP/projects"
 cat > "$TMP/home/.config/google-chrome/Local State" <<'JSON'
 {
@@ -11,8 +11,7 @@ cat > "$TMP/home/.config/google-chrome/Local State" <<'JSON'
     "last_used": "Profile 3",
     "info_cache": {
       "Default": {"name": "Daniel"},
-      "Profile 3": {"name": "Sindicatto"},
-      "Profile 12": {"name": "Sindicatto Clientes"}
+      "Profile 3": {"name": "Sindicatto"}
     }
   }
 }
@@ -42,7 +41,7 @@ case "${1:-}" in
     dir="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}/desktops"
     mkdir -p "$dir"
     cat > "$dir/extension.ready" <<'READY'
-version=17
+version=16
 controller=1
 floating-label=0
 window-placement=1
@@ -70,8 +69,8 @@ chmod +x "$TMP/bin/"*
       IFS=$'\t' read -r token _ <<< "$request"
       printf '%s\tworkspace=7\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
       for _ in $(seq 1 160); do
-        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 3 ]]; then
-          printf '%s\tbrowsers=3\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
+        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]]; then
+          printf '%s\tbrowsers=2\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
           exit 0
         fi
         sleep 0.05
@@ -99,10 +98,9 @@ wait "$watcher"
 
 grep -Fq 'Destino: workspace atual 7, monitor mais à esquerda, maximizado.' <<<"$out"
 grep -Fq 'Chrome confirmado no workspace atual / monitor esquerdo / maximizado.' <<<"$out"
-[[ "$(wc -l < "$TMP/chrome.log")" -eq 3 ]]
+[[ "$(wc -l < "$TMP/chrome.log")" -eq 2 ]]
 grep -Fq -- '--profile-directory=Default' "$TMP/chrome.log"
 grep -Fq -- '--profile-directory=Profile 3' "$TMP/chrome.log"
-grep -Fq -- '--profile-directory=Profile 12' "$TMP/chrome.log"
-echo 'OK: chromes usa o workspace atual e abre as três janelas maximizadas no monitor esquerdo.'
+echo 'OK: chromes usa o workspace atual e abre as janelas maximizadas no monitor esquerdo.'
 grep -Fq 'workspace=' "$ROOT/apps/desktops-gnome-extension/extension.js"
 grep -Fq 'maximize' "$ROOT/apps/desktops-gnome-extension/extension.js"

@@ -22,9 +22,9 @@ chmod +x "$FAKE_BIN/powershell.exe"
 touch "$STATE_DIR/dev-manager.sound-disabled"
 
 PATH="$FAKE_BIN:$PATH" TEST_SOUND_LOG="$SOUND_LOG" AUTO_CODE_STATE_DIR="$STATE_DIR" \
-  "$PROJECT_ROOT/scripts/auto-code-manager.sh" --test-sound
+  "$PROJECT_ROOT/scripts/dev-manager/auto-code-manager.sh" --test-sound
 PATH="$FAKE_BIN:$PATH" TEST_SOUND_LOG="$SOUND_LOG" AUTO_CODE_STATE_DIR="$STATE_DIR" \
-  "$PROJECT_ROOT/scripts/auto-code-manager.sh" --test-backup-sound
+  "$PROJECT_ROOT/scripts/dev-manager/auto-code-manager.sh" --test-backup-sound
 
 if [[ -s "$SOUND_LOG" ]]; then
   printf 'FALHOU: som desativado ainda chamou powershell.exe.\n' >&2
