@@ -228,7 +228,7 @@ case "${1:-}" in
   --diagnose|diagnose|--diagnose-profiles|diagnose-profiles) show_diagnose; exit 0 ;;
   --help|-h|help)
     printf 'Uso: chromes | chromes --diagnose\n'
-    printf 'Abre ChatGPT + URL(s) local(is) do projeto do workspace atual; monitor esquerdo e maximizado.\n'
+    printf 'Abre o Project ChatGPT correspondente + URL(s) local(is) do projeto do workspace atual; monitor esquerdo e maximizado.\n'
     printf 'Overrides de perfil: CHROMES_USER_DATA_DIR=/caminho CHROMES_DANIEL_PROFILE="Default" CHROMES_SINDICATTO_PROFILE="Profile 1"\n'
     exit 0
     ;;
@@ -273,23 +273,36 @@ fi
 
 local_urls=()
 project_entry=''
+chatgpt_url="${CHROMES_CHATGPT_URL:-https://chatgpt.com/}"
+
+if [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_load_projects >/dev/null 2>&1; then
+  if workspace_context_load_projects; then
+    project_entry="$(workspace_context_project_for_workspace "$target_workspace" 2>/dev/null || true)"
+    if [[ -z "${CHROMES_CHATGPT_URL:-}" && -n "$project_entry" ]] && declare -F workspace_context_chatgpt_url_for_project >/dev/null 2>&1; then
+      resolved_chatgpt_url="$(workspace_context_chatgpt_url_for_project "$project_entry" 2>/dev/null || true)"
+      [[ -z "$resolved_chatgpt_url" ]] || chatgpt_url="$resolved_chatgpt_url"
+    fi
+  fi
+fi
+
 if [[ -n "${CHROMES_LOCAL_URLS:-}" ]]; then
   mapfile -t local_urls < <(printf '%s\n' "$CHROMES_LOCAL_URLS" | sed '/^[[:space:]]*$/d')
-elif [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_load_projects >/dev/null 2>&1; then
-  if workspace_context_load_projects && workspace_context_load_services; then
-    project_entry="$(workspace_context_project_for_workspace "$target_workspace" 2>/dev/null || true)"
-    if [[ -n "$project_entry" ]]; then
-      project_urls="$(workspace_context_urls_for_project "$project_entry" 2>/dev/null || true)"
-      if [[ -n "$project_urls" ]]; then
-        mapfile -t local_urls < <(printf '%s\n' "$project_urls" | sed '/^[[:space:]]*$/d')
-      fi
+elif [[ -n "$project_entry" ]] && declare -F workspace_context_load_services >/dev/null 2>&1; then
+  if workspace_context_load_services; then
+    project_urls="$(workspace_context_urls_for_project "$project_entry" 2>/dev/null || true)"
+    if [[ -n "$project_urls" ]]; then
+      mapfile -t local_urls < <(printf '%s\n' "$project_urls" | sed '/^[[:space:]]*$/d')
     fi
   fi
 fi
 
 common=(--no-first-run)
-log "Abrindo Chrome Daniel ($daniel_profile) -> ChatGPT..."
-run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window 'https://chatgpt.com/'
+if [[ -n "$project_entry" && "$chatgpt_url" != 'https://chatgpt.com/' ]]; then
+  log "Abrindo Chrome Daniel ($daniel_profile) -> Project ChatGPT: $(basename -- "$project_entry")..."
+else
+  log "Abrindo Chrome Daniel ($daniel_profile) -> ChatGPT..."
+fi
+run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window "$chatgpt_url"
 expected_browsers=1
 
 skip_second=0

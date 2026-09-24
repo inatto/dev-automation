@@ -8,6 +8,7 @@ WORKSPACE_CONTEXT_ROOT="$(cd -- "$WORKSPACE_CONTEXT_DIR/.." && pwd -P)"
 source "$WORKSPACE_CONTEXT_ROOT/scripts/lib/project-config.sh"
 PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$WORKSPACE_CONTEXT_ROOT")}"
 SERVICES_FILE="${SERVICES_FILE:-$WORKSPACE_CONTEXT_ROOT/config/services.csv}"
+CHATGPT_PROJECTS_FILE="${CHATGPT_PROJECTS_FILE:-$WORKSPACE_CONTEXT_ROOT/config/chatgpt-projects.urls}"
 
 declare -ag WORKSPACE_PROJECTS=()
 declare -Ag WORKSPACE_SERVICE_URLS=()
@@ -84,3 +85,46 @@ workspace_context_urls_for_workspace() {
   entry="$(workspace_context_project_for_workspace "$workspace")" || return 1
   workspace_context_urls_for_project "$entry"
 }
+
+workspace_context_normalize_project_name() {
+  local value="$1"
+  value="${value##*/}"
+  value="${value,,}"
+  value="${value//_/ }"
+  value="${value//-/ }"
+  while [[ "$value" == *"  "* ]]; do value="${value//  / }"; done
+  value="${value# }"
+  value="${value% }"
+  printf '%s\n' "$value"
+}
+
+workspace_context_chatgpt_url_for_project() {
+  local entry="$1" raw line key url normalized_entry normalized_key
+  [[ -f "$CHATGPT_PROJECTS_FILE" ]] || return 1
+  normalized_entry="$(workspace_context_normalize_project_name "$entry")"
+
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    raw="${raw%$'\r'}"
+    line="${raw%%#*}"
+    [[ "$line" == *'|'* ]] || continue
+    key="${line%%|*}"
+    url="${line#*|}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    url="${url#"${url%%[![:space:]]*}"}"
+    url="${url%"${url##*[![:space:]]}"}"
+    [[ -n "$key" && "$url" == https://chatgpt.com/g/* ]] || continue
+
+    if [[ "${key,,}" == "${entry,,}" ]]; then
+      printf '%s\n' "$url"
+      return 0
+    fi
+    normalized_key="$(workspace_context_normalize_project_name "$key")"
+    if [[ -n "$normalized_key" && "$normalized_key" == "$normalized_entry" ]]; then
+      printf '%s\n' "$url"
+      return 0
+    fi
+  done < "$CHATGPT_PROJECTS_FILE"
+  return 1
+}
+

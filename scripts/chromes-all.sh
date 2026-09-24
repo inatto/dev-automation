@@ -31,7 +31,8 @@ No GNOME/Wayland, janelas já registradas são apenas reposicionadas por projeto
 Não fecha/reinicia navegadores nem abre janelas quando há um lote parcial/ambíguo.
 Sem janelas de projeto abertas, executa `chromes` em cada workspace de projeto.
 O próprio `chromes` resolve o projeto/URL do workspace e abre:
-  - Chrome 1: Daniel/danielmaiax -> https://chatgpt.com/
+  - Chrome 1: Daniel/danielmaiax -> Project ChatGPT correspondente em config/chatgpt-projects.urls
+    (fallback: https://chatgpt.com/ quando não houver mapeamento)
   - Chrome 2: Sindicatto -> URL(s) local(is), somente quando existirem
   - monitor esquerdo, maximizado
 Intervalo entre desktops na abertura: 1s.
