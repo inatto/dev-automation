@@ -360,71 +360,169 @@ import_one_zip() {
   line
 }
 
+# A posição é fixada ao entrar na fila e sobrevive às tentativas deste processo.
+# Novas chegadas vão ao fim, mesmo quando o arquivo preserva um mtime antigo.
+declare -a DOWNLOAD_QUEUE_PENDING=()
+declare -A DOWNLOAD_QUEUE_KNOWN=()
+
+download_queue_shift() {
+  local file="${DOWNLOAD_QUEUE_PENDING[0]:-}"
+  [ -n "$file" ] || return 0
+  DOWNLOAD_QUEUE_PENDING=("${DOWNLOAD_QUEUE_PENDING[@]:1}")
+  unset 'DOWNLOAD_QUEUE_KNOWN[$file]'
+}
+
+# Uma única ordenação para as caixas Linux/Windows. mtime representa a última
+# gravação do download; ctime desempata cópias com mtime preservado. O nome só
+# desempata horários idênticos. NUL preserva espaços e caracteres no caminho.
+download_queue_files() {
+  [ "$#" -gt 0 ] || return 0
+  find "$@" -maxdepth 1 -type f -iname '*.zip' \
+    -printf '%T@ %C@ %p\0' 2>/dev/null |
+    LC_ALL=C sort -z -k1,1n -k2,2n |
+    cut -z -d ' ' -f3-
+}
+
 import_downloads() {
-  local zip_file selected_zip
+  local zip_file selected_zip known_signature="" inbox in_scope
   local imported=0 failed=0 processed=0
   local -a downloads=()
   local -A attempted=()
 
+  refresh_verified_project_lookup || return 1
+  DOWNLOAD_RETRY_PENDING=false
+  DOWNLOAD_FAILED_PATH=""
+  DOWNLOAD_FAILED_SIGNATURE=""
   clean_download_zone_identifiers
   mapfile -t downloads < <(download_inbox_existing_dirs)
-
   if [ "${#downloads[@]}" -eq 0 ]; then
     log "Downloads não encontrado."
     return 0
   fi
-
   log "Verificando Downloads: $(download_inbox_summary)"
 
-  # As duas caixas de entrada formam uma única fila drenável no WSL:
-  # ~/Downloads + /mnt/c/Users/daniel/Downloads. Depois de cada ZIP processado,
-  # ambas são varridas novamente, então um download que terminar no outro lado
-  # durante uma importação entra no mesmo ciclo.
-  #
-  # ZIP desconhecido continua invisível. ZIP que falhar é tentado apenas uma vez
-  # nesta drenagem e permanece no diretório de origem para inspeção/correção.
+  # Um ZIP de cada vez, do mais antigo ao mais novo. Revarre somente as caixas
+  # de entrada entre importações, incluindo chegadas ocorridas durante A sem
+  # reconstruir a hierarquia dos projetos para B/C/D.
   while true; do
-    selected_zip=""
-
+    refresh_verified_project_lookup || return 1
+    if [ "$known_signature" != "$PROJECT_LOOKUP_SIGNATURE" ]; then
+      attempted=()
+      known_signature="$PROJECT_LOOKUP_SIGNATURE"
+    fi
     while IFS= read -r -d '' zip_file; do
-      download_zip_is_configured "$zip_file" || continue
+      [ -z "${DOWNLOAD_QUEUE_KNOWN[$zip_file]+x}" ] || continue
+      # ZIP desconhecido não é reidentificado para cada item desta drenagem.
       [ -z "${attempted[$zip_file]+x}" ] || continue
-      selected_zip="$zip_file"
-      break
-    done < <(
-      find "${downloads[@]}" \
-        -maxdepth 1 \
-        -type f \
-        -iname "*.zip" \
-        -print0 2>/dev/null | sort -z
-    )
+      if ! download_zip_is_configured "$zip_file"; then
+        attempted["$zip_file"]=1
+        continue
+      fi
+      DOWNLOAD_QUEUE_PENDING+=("$zip_file")
+      DOWNLOAD_QUEUE_KNOWN["$zip_file"]=1
+    done < <(download_queue_files "${downloads[@]}")
 
+    selected_zip="${DOWNLOAD_QUEUE_PENDING[0]:-}"
     [ -n "$selected_zip" ] || break
-
-    attempted["$selected_zip"]=1
-    processed=$((processed + 1))
     wait_if_paused
+    in_scope=false
+    for inbox in "${downloads[@]}"; do
+      [ "${selected_zip%/*}" != "$inbox" ] || in_scope=true
+    done
+    if [ "$in_scope" != true ] || [ ! -f "$selected_zip" ] || ! download_zip_is_configured "$selected_zip"; then
+      download_queue_shift
+      continue
+    fi
 
-    log "FILA DE DOWNLOADS [$processed]: $(basename -- "$selected_zip")"
-
-    if ! download_zip_has_purpose "$(basename -- "$selected_zip")"; then
+    # Não ultrapassa a cabeça da fila enquanto ela estiver sendo gravada.
+    # O timer de Downloads tentará de novo, mesmo sem novo evento inotify.
+    if ! stable_file "$selected_zip"; then
+      DOWNLOAD_RETRY_PENDING=true
+      log "FILA DE DOWNLOADS AGUARDANDO GRAVAÇÃO: ${selected_zip##*/}"
+      break
+    fi
+    processed=$((processed + 1))
+    log "FILA DE DOWNLOADS [$processed]: ${selected_zip##*/}"
+    if ! download_zip_has_purpose "${selected_zip##*/}"; then
       log "AVISO PADRÃO DE NOME: use <projeto>--<o-que-faz>.zip; pacote atual não descreve a finalidade."
     fi
 
-    if import_one_zip "$selected_zip"; then
+    # A estabilidade já foi confirmada acima; não repete o mesmo sleep.
+    if import_one_zip "$selected_zip" true; then
       imported=$((imported + 1))
+      download_queue_shift
     else
       failed=$((failed + 1))
-      log "ERRO: falha ao importar: $(basename -- "$selected_zip")"
+      DOWNLOAD_FAILED_PATH="$selected_zip"
+      DOWNLOAD_FAILED_SIGNATURE="$(download_file_signature "$selected_zip" || true)"
+      log "ERRO: falha ao importar: ${selected_zip##*/}"
       log "ZIP COM FALHA MANTIDO EM DOWNLOADS: $selected_zip"
+      log "FILA DE DOWNLOADS PAUSADA: os ZIPs mais novos aguardam. Corrija/substitua/remova o ZIP com falha ou reinicie o monitor para tentar novamente."
+      break
     fi
   done
 
   if [ "$processed" -eq 0 ]; then
-    log "Nenhum ZIP de projeto existente/configurado encontrado em Downloads nesta rodada."
+    if [ "$DOWNLOAD_RETRY_PENDING" != true ]; then
+      log "Nenhum ZIP de projeto existente/configurado encontrado em Downloads nesta rodada."
+    fi
     return 0
   fi
-
-  LOG_CONTEXT=download_done log "FILA DE DOWNLOADS DRENADA: $imported sucesso(s), $failed falha(s), $processed processado(s)."
+  if [ "$failed" -eq 0 ] && [ "$DOWNLOAD_RETRY_PENDING" != true ]; then
+    LOG_CONTEXT=download_done log "FILA DE DOWNLOADS DRENADA: $imported sucesso(s), $failed falha(s), $processed processado(s)."
+  else
+    log "FILA DE DOWNLOADS PENDENTE: $imported sucesso(s), $failed falha(s), $processed processado(s)."
+  fi
   [ "$failed" -eq 0 ]
+}
+
+# Chamado antes de tratar eventos/backup e entre projetos. Continua no mesmo
+# processo: não permite extrações paralelas nem interrompe uma cópia em curso.
+downloads_priority_tick() {
+  local force="${1:-false}" signature failed_signature project
+  local -a downloads=()
+  [ "${DOWNLOAD_PRIORITY_BUSY:-false}" != true ] || return 0
+  if [ "$force" != true ] && [ "$SECONDS" -lt "${DOWNLOAD_NEXT_CHECK:-0}" ]; then
+    return 0
+  fi
+  DOWNLOAD_NEXT_CHECK=$((SECONDS + ${DOWNLOAD_SCAN_INTERVAL:-1}))
+
+  clean_windows_download_zone_identifiers
+  refresh_verified_project_lookup || return 1
+  mapfile -t downloads < <(download_inbox_existing_dirs)
+  [ "${#downloads[@]}" -gt 0 ] || return 0
+  signature="$(stat -Lc '%n:%d:%i:%y:%z' -- "${downloads[@]}" 2>/dev/null || true)|$PROJECT_LOOKUP_KEY|$PROJECT_LOOKUP_SIGNATURE"
+  # Um clone que acabou de aparecer pode tornar um ZIP antigo reconhecível.
+  # Só testa as raízes cadastradas (-d), sem varrer seus arquivos.
+  for project in "${PROJECT_LOOKUP_TARGETS[@]}"; do
+    if [ -d "${PROJECT_LOOKUP_PATHS[$project]}" ]; then
+      signature+="|1"
+    else
+      signature+="|0"
+    fi
+  done
+
+  # Falha não vira um loop de unzip/backup a cada segundo. O arquivo continua
+  # visível para correção; versões mais novas não podem passar à sua frente.
+  if [ -n "${DOWNLOAD_FAILED_PATH:-}" ]; then
+    failed_signature="$(download_file_signature "$DOWNLOAD_FAILED_PATH" || true)"
+    if [ -n "$failed_signature" ] && [ "$failed_signature" = "$DOWNLOAD_FAILED_SIGNATURE" ]; then
+      return 0
+    fi
+    DOWNLOAD_FAILED_PATH=""
+    DOWNLOAD_FAILED_SIGNATURE=""
+    DOWNLOAD_RETRY_PENDING=true
+  fi
+  if [ "$force" != true ] && [ "${DOWNLOAD_RETRY_PENDING:-false}" != true ] && [ "$signature" = "${DOWNLOAD_DIRECTORY_SIGNATURE:-}" ]; then
+    return 0
+  fi
+  DOWNLOAD_DIRECTORY_SIGNATURE="$signature"
+  DOWNLOAD_RETRY_PENDING=false
+  if configured_download_zip_exists; then
+    DOWNLOAD_PRIORITY_BUSY=true
+    if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "Fila cronológica de Downloads: valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
+      LOG_CONTEXT=error log "ERRO: fila de Downloads pausada; ZIP com falha preservado e ZIPs mais novos aguardando."
+    fi
+    DOWNLOAD_PRIORITY_BUSY=false
+  fi
 }

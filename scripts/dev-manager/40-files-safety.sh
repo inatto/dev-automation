@@ -106,22 +106,20 @@ ensure_archive_output_dir() {
   fi
 }
 
+download_file_signature() {
+  # Identidade + tamanho + tempos com nanossegundos: uma regravação do mesmo
+  # tamanho também precisa aguardar; %s isolado não a detectava.
+  stat -Lc '%d:%i:%s:%y:%z' -- "$1" 2>/dev/null
+}
+
 stable_file() {
-  local file="$1"
-  local size_before
-  local size_after
-
-  [ -f "$file" ] || return 1
-
-  size_before="$(stat -c %s "$file" 2>/dev/null || echo 0)"
+  local file="$1" before after
+  [ -f "$file" ] && [ -s "$file" ] || return 1
+  before="$(download_file_signature "$file")" || return 1
   sleep "$STABLE_WAIT"
-
-  [ -f "$file" ] || return 1
-
-  size_after="$(stat -c %s "$file" 2>/dev/null || echo 0)"
-
-  [ "$size_before" = "$size_after" ] &&
-    [ "$size_before" -gt 0 ]
+  [ -f "$file" ] && [ -s "$file" ] || return 1
+  after="$(download_file_signature "$file")" || return 1
+  [ "$before" = "$after" ]
 }
 
 clean_file() {

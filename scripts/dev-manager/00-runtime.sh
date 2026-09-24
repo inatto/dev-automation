@@ -25,6 +25,14 @@ WINDOWS_DOWNLOADS_DIR="${WINDOWS_DOWNLOADS_DIR:-/mnt/c/Users/daniel/Downloads}"
 # apenas 1 segundo de debounce para agrupar a gravação atômica do editor.
 BACKUP_EVERY=1
 LIGHT_SCAN_INTERVAL=2
+# Reconciliação rasa de Downloads; nunca percorre os projetos neste timer.
+DOWNLOAD_SCAN_INTERVAL=1
+DOWNLOAD_NEXT_CHECK=0
+DOWNLOAD_DIRECTORY_SIGNATURE=""
+DOWNLOAD_RETRY_PENDING=false
+DOWNLOAD_PRIORITY_BUSY=false
+DOWNLOAD_FAILED_PATH=""
+DOWNLOAD_FAILED_SIGNATURE=""
 AUTO_CODE_MONITOR_MODE="${AUTO_CODE_MONITOR_MODE:-inotify}"
 STABLE_WAIT=1
 BEEP_REPEATS=2
@@ -117,6 +125,7 @@ validate_timers() {
   validate_positive_integer BACKUP_EVERY
   validate_positive_integer STABLE_WAIT
   validate_positive_integer LIGHT_SCAN_INTERVAL
+  validate_positive_integer DOWNLOAD_SCAN_INTERVAL
   validate_positive_integer BEEP_REPEATS
   validate_positive_integer BEEP_GAP_MS
 

@@ -474,3 +474,8 @@ Para auditar e proteger todas as pastas `.config` dos projetos habilitados, use 
 - Nenhum `.external` é persistido no projeto.
 - `.env`/`.env.*` fora das pastas de config continuam fora do fluxo por padrão.
 - Git-crypt não roda automaticamente; quando necessário, use `dev-manager git-crypt` de forma explícita.
+
+
+## Fila de Downloads
+
+Downloads usam fila cronológica sequencial, com posição fixada ao entrar: mais antigo primeiro; novas chegadas vão ao final, sem ultrapassar um ZIP em gravação ou com erro. O catálogo de projetos é reutilizado em memória e a reconciliação rasa de Downloads (padrão `DOWNLOAD_SCAN_INTERVAL=1`) tem prioridade entre eventos/backups, mantendo backup pré-importação e todas as verificações. Configuração, recuperação de falhas e testes: [docs/downloads-fifo.md](docs/downloads-fifo.md).

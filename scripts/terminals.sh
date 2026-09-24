@@ -16,6 +16,7 @@ STATE_ROOT="${AUTO_CODE_STATE_DIR:-$HOME/.local/state/dev-automation}"
 STATE_DIR="$STATE_ROOT/desktops"
 OPEN_INTERVAL_SECONDS="${TERMINALS_OPEN_INTERVAL_SECONDS:-16}"
 TAB_INTERVAL_SECONDS="${TERMINALS_TAB_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS}"
+COMMAND_INTERVAL_SECONDS="${TERMINALS_COMMAND_INTERVAL_SECONDS:-$OPEN_INTERVAL_SECONDS}"
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
 WORKSPACE_SETTLE_SECONDS="${TERMINALS_WORKSPACE_SETTLE_SECONDS:-4}"
 AUTO_INSTALL_GNOME_TERMINAL="${TERMINALS_AUTO_INSTALL_GNOME_TERMINAL:-1}"
@@ -285,7 +286,9 @@ show_diagnose() {
   printf '=== TERMINALS / GNOME ===\n'
   printf 'Sessão: %s / %s\n' "${XDG_CURRENT_DESKTOP:-?}" "${XDG_SESSION_TYPE:-?}"
   printf 'Destinos: %s (projetos + lrdp1/lrdp2; workspaces 2..%s; LAZER excluído)\n' "$count" "$((count + 1))"
-  printf 'Intervalo: %s segundo(s) entre abas/aberturas\n' "$TAB_INTERVAL_SECONDS"
+  printf 'Intervalo entre terminais simples: %s segundo(s)\n' "$OPEN_INTERVAL_SECONDS"
+  printf 'Intervalo entre abas: %s segundo(s)\n' "$TAB_INTERVAL_SECONDS"
+  printf 'Intervalo após terminal com comando: %s segundo(s)\n' "$COMMAND_INTERVAL_SECONDS"
   printf 'Estabilização GNOME: %s segundo(s) antes de cada janela\n' "$WORKSPACE_SETTLE_SECONDS"
   printf 'Terminal: '; terminal_backend || printf 'nenhum terminal compatível encontrado\n'
   printf 'Monitores:\n'
@@ -317,7 +320,7 @@ case "${1:-}" in
   --help|-h|help)
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
     printf 'Fluxo único: ativa cada workspace e abre uma janela por projeto. Projetos com deploy local/remoto recebem abas AUTO no mesmo terminal.\n'
-    printf 'Aba local: <Projeto> Auto. Aba remota: Remote <Projeto> Auto. O intervalo padrão entre abas/aberturas é 2 segundos.\n'
+    printf 'Aba local: <Projeto> Auto. Aba remota: Remote <Projeto> Auto. Os tempos podem ser separados para terminal simples, aba e terminal com comando.\n'
     printf 'No Ubuntu 26, o fluxo prefere GNOME Terminal porque o Ptyxis não mantém a barra clássica de abas visível.\n'
     printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos terminais simples.\n'
     exit 0
@@ -330,6 +333,8 @@ esac
   fail "intervalo de abertura inválido: $OPEN_INTERVAL_SECONDS"
 [[ "$TAB_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
   fail "intervalo entre abas inválido: $TAB_INTERVAL_SECONDS"
+[[ "$COMMAND_INTERVAL_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
+  fail "intervalo após terminal com comando inválido: $COMMAND_INTERVAL_SECONDS"
 [[ "$CAPTURE_TIMEOUT_TENTHS" =~ ^[0-9]+$ ]] || \
   fail "timeout inválido: $CAPTURE_TIMEOUT_TENTHS"
 [[ "$WORKSPACE_SETTLE_SECONDS" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -359,7 +364,9 @@ IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
 
 log 'FLUXO ÚNICO: uma janela por projeto/workspace; abas AUTO local e remota no mesmo terminal quando disponíveis.'
 log "Terminal: $terminal_kind -> $terminal"
-log "Intervalo entre abas/aberturas: $TAB_INTERVAL_SECONDS segundo(s)."
+log "Intervalo entre terminais simples: $OPEN_INTERVAL_SECONDS segundo(s)."
+log "Intervalo entre abas: $TAB_INTERVAL_SECONDS segundo(s)."
+log "Intervalo após terminal com comando: $COMMAND_INTERVAL_SECONDS segundo(s)."
 log "Estabilização após troca de desktop/monitor: $WORKSPACE_SETTLE_SECONDS segundo(s)."
 
 for ((project_index=0; project_index<count; project_index++)); do
@@ -462,7 +469,11 @@ for ((project_index=0; project_index<count; project_index++)); do
   fi
 
   if (( project_index + 1 < count )); then
-    sleep "$TAB_INTERVAL_SECONDS"
+    if [[ -n "$first_command" ]]; then
+      sleep "$COMMAND_INTERVAL_SECONDS"
+    else
+      sleep "$OPEN_INTERVAL_SECONDS"
+    fi
   fi
 done
 

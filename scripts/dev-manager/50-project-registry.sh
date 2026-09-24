@@ -1,6 +1,98 @@
 #!/usr/bin/env bash
 # Contexto: alvos, projetos, agregadores, nomes e validação do catálogo
 
+
+# Índice compartilhado de nomes/caminhos. A construção usa apenas a lista
+# .projects; nunca percorre os arquivos dos projetos. A assinatura invalida o
+# índice inclusive quando o editor substitui o .projects por rename atômico.
+PROJECT_LOOKUP_KEY=""
+PROJECT_LOOKUP_SIGNATURE=""
+PROJECT_LOOKUP_VALIDATED_KEY=""
+declare -a PROJECT_LOOKUP_TARGETS=()
+declare -A PROJECT_LOOKUP_PATHS=()
+declare -A PROJECT_LOOKUP_PARENTS=()
+declare -A PROJECT_LOOKUP_ARCHIVES=()
+declare -A PROJECT_LOOKUP_ALIASES=()
+declare -A PROJECT_LOOKUP_PREFIXES=()
+declare -A PROJECT_LOOKUP_CONFIG_RELS=()
+declare -A PROJECT_LOOKUP_CONFIG_PATHS=()
+
+refresh_project_lookup_cache() {
+  local key="$PROJECTS_FILE|$CODE_ROOT" signature project rel candidate parent logical canonical legacy aliases config_rel
+  local -A seen=()
+
+  signature="$(stat -Lc '%d:%i:%s:%y:%z' -- "$PROJECTS_FILE" 2>/dev/null)" || {
+    PROJECT_LOOKUP_KEY=""
+    return 1
+  }
+  if [ "$PROJECT_LOOKUP_KEY" = "$key" ] && [ "$PROJECT_LOOKUP_SIGNATURE" = "$signature" ]; then
+    return 0
+  fi
+
+  PROJECT_LOOKUP_KEY=""
+  PROJECT_LOOKUP_TARGETS=()
+  PROJECT_LOOKUP_PATHS=()
+  PROJECT_LOOKUP_PARENTS=()
+  PROJECT_LOOKUP_ARCHIVES=()
+  PROJECT_LOOKUP_ALIASES=()
+  PROJECT_LOOKUP_PREFIXES=()
+  PROJECT_LOOKUP_CONFIG_RELS=()
+  PROJECT_LOOKUP_CONFIG_PATHS=()
+
+  while IFS= read -r project || [ -n "$project" ]; do
+    project="${project%$'\r'}"
+    project="${project#./}"
+    project="${project%/}"
+    [ -n "$project" ] || continue
+    [ -z "${seen[$project]+x}" ] || continue
+    seen["$project"]=1
+    PROJECT_LOOKUP_TARGETS+=("$project")
+    rel="$project"
+    [[ "${rel,,}" != *.zip ]] || rel="${rel:0:${#rel}-4}"
+    if [[ "$project" != */* && "${project,,}" = code.zip ]]; then
+      PROJECT_LOOKUP_PATHS["$project"]="$CODE_ROOT"
+    else
+      PROJECT_LOOKUP_PATHS["$project"]="$CODE_ROOT/$rel"
+    fi
+  done < <(configured_projects)
+
+  for project in "${PROJECT_LOOKUP_TARGETS[@]}"; do
+    parent=""
+    rel="$project"
+    if [[ "${project,,}" = *.zip ]]; then
+      rel="${project:0:${#project}-4}"
+    else
+      for candidate in "${PROJECT_LOOKUP_TARGETS[@]}"; do
+        [[ "${candidate,,}" != *.zip && "$project" = "$candidate/"* ]] || continue
+        if [ "${#candidate}" -gt "${#parent}" ]; then
+          parent="$candidate"
+        fi
+      done
+    fi
+    logical="${rel##*/}"
+    canonical="$logical"
+    aliases="$logical"
+    PROJECT_LOOKUP_PREFIXES["$project"]=""
+    config_rel=""
+    PROJECT_LOOKUP_CONFIG_PATHS["$project"]=""
+    if [ -n "$parent" ]; then
+      canonical="${parent##*/}-$logical"
+      legacy="${parent##*/}--$logical"
+      aliases="$canonical"$'\n'"$legacy"$'\n'"$logical"
+      PROJECT_LOOKUP_PREFIXES["$project"]="${project#"$parent/"}"
+      config_rel=".config/$logical"
+      PROJECT_LOOKUP_CONFIG_PATHS["$project"]="${PROJECT_LOOKUP_PATHS[$parent]}/$config_rel"
+    fi
+    PROJECT_LOOKUP_PARENTS["$project"]="$parent"
+    PROJECT_LOOKUP_ARCHIVES["$project"]="$canonical"
+    PROJECT_LOOKUP_ALIASES["$project"]="$aliases"
+    PROJECT_LOOKUP_CONFIG_RELS["$project"]="$config_rel"
+  done
+
+  PROJECT_LOOKUP_SIGNATURE="$signature"
+  PROJECT_LOOKUP_KEY="$key"
+}
+
 normalize_target() {
   local target="$1"
   # Arquivos de configuração podem vir do Windows. CRLF nunca pode virar
@@ -37,6 +129,10 @@ target_source_rel() {
 }
 
 project_path() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_PATHS[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_PATHS[$1]}"
+    return 0
+  fi
   local project="$1"
   local source_rel
   source_rel="$(target_source_rel "$project")"
@@ -58,6 +154,10 @@ project_logical_name() {
 }
 
 registered_parent_project() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_PARENTS[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_PARENTS[$1]}"
+    return 0
+  fi
   local project="$1"
   local project_rel candidate candidate_rel
   local best=""
@@ -83,6 +183,10 @@ registered_parent_project() {
 }
 
 project_archive_name() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_ARCHIVES[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_ARCHIVES[$1]}"
+    return 0
+  fi
   local project="$1"
   local normalized logical_name parent parent_name
 
@@ -104,6 +208,10 @@ project_archive_name() {
 }
 
 project_import_names() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_ALIASES[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_ALIASES[$1]}"
+    return 0
+  fi
   local project="$1"
   local canonical logical parent parent_name legacy
 
@@ -137,6 +245,10 @@ project_archive_path() {
 }
 
 project_archive_content_prefix() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_PREFIXES[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_PREFIXES[$1]}"
+    return 0
+  fi
   local project="$1"
   local normalized parent project_rel parent_rel
 
@@ -155,6 +267,10 @@ project_archive_content_prefix() {
 # convenção .config/<nome-do-subprojeto>/. Essa árvore pertence ao ZIP do
 # subprojeto (não ao ZIP do pai), embora fisicamente esteja ao lado de apps/.
 project_parent_config_relpath() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_CONFIG_RELS[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_CONFIG_RELS[$1]}"
+    return 0
+  fi
   local project="$1" parent logical
 
   target_is_aggregate "$project" && return 0
@@ -166,6 +282,10 @@ project_parent_config_relpath() {
 }
 
 project_parent_config_path() {
+  if [ -n "${1:-}" ] && [ "${PROJECT_LOOKUP_KEY:-}" = "$PROJECTS_FILE|$CODE_ROOT" ] && [ -n "${PROJECT_LOOKUP_CONFIG_PATHS[$1]+x}" ]; then
+    printf '%s\n' "${PROJECT_LOOKUP_CONFIG_PATHS[$1]}"
+    return 0
+  fi
   local project="$1" parent rel
 
   parent="$(registered_parent_project "$project")"
@@ -384,6 +504,7 @@ backup_order_targets() {
 }
 
 validate_projects() {
+  refresh_project_lookup_cache || return 1
   local project project_dir archive_name source_rel logical_name alias alias_key owner
   local failed=0
   local -a aggregate_children=()
@@ -447,6 +568,11 @@ validate_projects() {
     done < <(project_import_names "$project")
   done < <(backup_targets)
 
-  [ "$failed" -eq 0 ]
+  [ "$failed" -eq 0 ] || return 1
+  PROJECT_LOOKUP_VALIDATED_KEY="$PROJECT_LOOKUP_KEY|$PROJECT_LOOKUP_SIGNATURE"
 }
 
+refresh_verified_project_lookup() {
+  refresh_project_lookup_cache || return 1
+  [ "$PROJECT_LOOKUP_VALIDATED_KEY" = "$PROJECT_LOOKUP_KEY|$PROJECT_LOOKUP_SIGNATURE" ] || validate_projects
+}

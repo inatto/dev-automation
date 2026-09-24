@@ -2,34 +2,25 @@
 # Contexto: proprietário de evento, debounce e backups inteligentes pendentes
 
 event_owner_project() {
-  local event_path="$1"
-  local project project_dir parent_config_dir
-  local best=""
-  local best_len=-1
+  local event_path="$1" project project_dir parent_config_dir
+  local best="" best_len=-1
 
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
-    target_is_aggregate "$project" && continue
-    project_dir="$(project_path "$project")"
-
-    if [ "$event_path" = "$project_dir" ] || [[ "$event_path" == "$project_dir/"* ]]; then
-      if [ "${#project_dir}" -gt "$best_len" ]; then
-        best="$project"
-        best_len="${#project_dir}"
-      fi
+  refresh_project_lookup_cache || { printf '\n'; return 0; }
+  for project in "${PROJECT_LOOKUP_TARGETS[@]}"; do
+    [[ "${project,,}" != *.zip ]] || continue
+    project_dir="${PROJECT_LOOKUP_PATHS[$project]}"
+    if { [ "$event_path" = "$project_dir" ] || [[ "$event_path" = "$project_dir/"* ]]; } && [ "${#project_dir}" -gt "$best_len" ]; then
+      best="$project"
+      best_len="${#project_dir}"
     fi
 
-    # .config/<filho>/ fica fisicamente dentro do pai, mas é propriedade do
-    # subprojeto. O prefixo é mais específico que a raiz do pai e portanto vence.
-    parent_config_dir="$(project_parent_config_path "$project")"
-    if [ -n "$parent_config_dir" ] && { [ "$event_path" = "$parent_config_dir" ] || [[ "$event_path" == "$parent_config_dir/"* ]]; }; then
-      if [ "${#parent_config_dir}" -gt "$best_len" ]; then
-        best="$project"
-        best_len="${#parent_config_dir}"
-      fi
+    # A .config irmã pertence ao filho, não ao projeto-pai.
+    parent_config_dir="${PROJECT_LOOKUP_CONFIG_PATHS[$project]}"
+    if [ -n "$parent_config_dir" ] && { [ "$event_path" = "$parent_config_dir" ] || [[ "$event_path" = "$parent_config_dir/"* ]]; } && [ "${#parent_config_dir}" -gt "$best_len" ]; then
+      best="$project"
+      best_len="${#parent_config_dir}"
     fi
-  done < <(backup_targets)
-
+  done
   printf '%s\n' "$best"
 }
 
@@ -104,6 +95,9 @@ backup_dirty_targets() {
   }
 
   for project in "${dirty_projects[@]}"; do
+    if [ -n "${ACTIVE_MONITOR_MODE:-}" ]; then
+      downloads_priority_tick
+    fi
     wait_if_paused
     if [ "$(project_path "$project")" = "$PROJECT_ROOT" ]; then
       if ! bump_dev_automation_build_version; then
@@ -138,6 +132,9 @@ backup_dirty_targets() {
   for target in "${ordered[@]}"; do
     target_is_aggregate "$target" || continue
     [ -n "${selected_aggregates[$target]+x}" ] || continue
+    if [ -n "${ACTIVE_MONITOR_MODE:-}" ]; then
+      downloads_priority_tick
+    fi
     wait_if_paused
     if ! backup_project "$target"; then
       failed=1

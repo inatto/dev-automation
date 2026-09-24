@@ -2,62 +2,35 @@
 # Contexto: identificação de ZIP, escopo de atualização e sinalização de runtime
 
 project_for_zip() {
-  local zip_name="$1"
-  local zip_name_lower zip_stem zip_stem_lower
-  local project alias alias_lower suffix first_suffix_char
-  local best=""
-  local best_name=""
+  local zip_name="$1" zip_stem project alias suffix first_suffix_char
+  local best="" best_len=0
 
-  zip_name_lower="${zip_name,,}"
-  [[ "$zip_name_lower" == *.zip ]] || {
-    echo ""
-    return 0
-  }
-
-  # Retira apenas a extensão final. Para projetos aninhados, aceita tanto o
-  # nome lógico curto (exec-agent.zip) quanto o backup qualificado gerado pelo
-  # manager (dev-automation-exec-agent.zip). O formato antigo com "--" também
-  # continua reconhecido. O nome lógico é globalmente único.
+  [[ "${zip_name,,}" = *.zip ]] || { printf '\n'; return 0; }
+  refresh_project_lookup_cache || { printf '\n'; return 0; }
   zip_stem="${zip_name:0:${#zip_name}-4}"
-  zip_stem_lower="${zip_stem,,}"
+  zip_stem="${zip_stem,,}"
 
-  while IFS= read -r project || [ -n "$project" ]; do
-    [ -n "$project" ] || continue
-    # Downloads só atualiza projeto que já existe localmente. Cadastro sem clone
-    # continua válido para backup futuro, mas não autoriza criar projeto por ZIP.
-    if ! target_is_code_aggregate "$project" && [ ! -d "$(project_path "$project")" ]; then
+  for project in "${PROJECT_LOOKUP_TARGETS[@]}"; do
+    # A existência é conferida ao vivo: adicionar/remover um clone local não
+    # exige reconstruir o índice e nunca autoriza criar um projeto por ZIP.
+    if [[ "$project" = */* || "${project,,}" != code.zip ]] && [ ! -d "${PROJECT_LOOKUP_PATHS[$project]}" ]; then
       continue
     fi
-
     while IFS= read -r alias || [ -n "$alias" ]; do
       [ -n "$alias" ] || continue
-      alias_lower="${alias,,}"
-
-      # Aceita o nome exato ou sufixo iniciado por separador não alfanumérico,
-      # preservando nomes de arquivos gerados pelo navegador/chat, por exemplo:
-      #   exec-agent.zip
-      #   exec-agent-incremental.zip
-      #   dev-automation-exec-agent.zip
-      #   dev-automation-exec-agent(2).zip
-      #   dev-automation--exec-agent.zip
-      if [[ "$zip_stem_lower" == "$alias_lower" ]]; then
-        suffix=""
-      elif [[ "$zip_stem_lower" == "$alias_lower"* ]]; then
-        suffix="${zip_stem:${#alias}}"
-        first_suffix_char="${suffix:0:1}"
-        [[ -n "$first_suffix_char" && ! "$first_suffix_char" =~ [[:alnum:]] ]] || continue
-      else
+      alias="${alias,,}"
+      [ "${#alias}" -gt "$best_len" ] || continue
+      [[ "$zip_stem" = "$alias"* ]] || continue
+      suffix="${zip_stem:${#alias}}"
+      first_suffix_char="${suffix:0:1}"
+      if [ -n "$first_suffix_char" ] && [[ "$first_suffix_char" =~ [[:alnum:]] ]]; then
         continue
       fi
-
-      if [ "${#alias}" -gt "${#best_name}" ]; then
-        best="$project"
-        best_name="$alias"
-      fi
-    done < <(project_import_names "$project")
-  done < <(backup_targets)
-
-  echo "$best"
+      best="$project"
+      best_len="${#alias}"
+    done <<< "${PROJECT_LOOKUP_ALIASES[$project]}"
+  done
+  printf '%s\n' "$best"
 }
 
 download_zip_is_configured() {
@@ -65,7 +38,7 @@ download_zip_is_configured() {
   local zip_name project
 
   [ -n "$zip_file" ] || return 1
-  zip_name="$(basename -- "$zip_file")"
+  zip_name="${zip_file##*/}"
   project="$(project_for_zip "$zip_name")"
   [ -n "$project" ]
 }

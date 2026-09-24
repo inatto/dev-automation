@@ -9,6 +9,7 @@ ensure_files
 load_env
 ensure_download_inbox
 validate_timers
+refresh_project_lookup_cache || exit 1
 
 if [ "${1:-}" = "--test-sound" ]; then
   soft_beep
@@ -189,8 +190,12 @@ if ! start_change_monitor; then
   exit 1
 fi
 
-# Reconciliação única por inicialização. Nada abaixo vira polling: serve apenas
-# para capturar trabalho que apareceu enquanto o manager estava desligado.
+# Downloads já pendentes não esperam o backup de todos os projetos. Cada
+# importação mantém seu próprio backup prévio e todas as validações.
+run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
+
+# Reconciliação única dos backups por inicialização. Projetos continuam por
+# eventos; somente a caixa de Downloads tem verificação rasa de segurança.
 taskbar_status backup "Baseline inicial"
 stage backup start "BACKUP BASELINE — INÍCIO" "Sincroniza os ZIPs uma única vez ao iniciar; depois somente eventos do filesystem disparam trabalho."
 LOG_CONTEXT=backup clean_unmanaged_backup_zips
@@ -207,7 +212,6 @@ fi
 if is_wsl_runtime; then
   run_stage zone "LIMPEZA ZONE.IDENTIFIER INICIAL" "Compatibilidade WSL: remove resíduos antigos uma única vez; novos sidecars são apagados por evento no Linux ou polling no Downloads do Windows." clean_zone || true
 fi
-run_stage downloads "DOWNLOADS INICIAIS" "Processa uma vez ZIPs reconhecidos que chegaram enquanto o manager estava desligado; depois novas chegadas entram por inotify." import_downloads || true
 run_stage backup "DDL SNAPSHOT INICIAL" "Reconcilia os DDLs por arquivo: SQL novo vira baseline sem ZIP; alteração posterior gera 1 ZIP com 1 SQL; na raiz Code fica somente o snapshot mais recente." reconcile_configured_sql_snapshots || true
 
 taskbar_status idle "Aguardando eventos"
@@ -223,18 +227,13 @@ while true; do
   event_path=""
 
   wait_if_paused
+  downloads_priority_tick
 
   if [ "$ACTIVE_MONITOR_MODE" = "light" ]; then
     if ! light_scan_cycle; then
       taskbar_status error "Monitor leve falhou"
       LOG_CONTEXT=error log "ERRO: monitor leve falhou."
       exit 1
-    fi
-
-    if configured_download_zip_exists; then
-      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
-        LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
-      fi
     fi
 
     if pending_change_work && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
@@ -257,8 +256,7 @@ while true; do
     continue
   fi
 
-  # Se existe backup pendente, read -t funciona como debounce bloqueante. Sem
-  # backup pendente, o read fica bloqueado indefinidamente até chegar um evento.
+  # read -t respeita o debounce dos backups e o intervalo raso de Downloads.
   if pending_change_work && [ "$LAST_SOURCE_CHANGE" -gt 0 ]; then
     now="$(date +%s)"
     remaining=$((BACKUP_EVERY - (now - LAST_SOURCE_CHANGE)))
@@ -278,14 +276,11 @@ while true; do
     local_timeout="$remaining"
   fi
 
-  # WSL2 pode não emitir inotify quando o Chrome/Explorer do Windows grava em
-  # /mnt/c. Mantemos o loop bloqueante, mas acordamos no máximo a cada 1s apenas
-  # para uma varredura rasa do Downloads do Windows: remove Zone.Identifier e
-  # verifica se chegou algum ZIP configurado.
-  if windows_download_polling_enabled; then
-    if [ -z "$local_timeout" ] || [ "$local_timeout" -gt 1 ]; then
-      local_timeout=1
-    fi
+  # Acorda também para conferir somente os metadados de Downloads. Nada de
+  # percorrer 20+ projetos num timer. Isso cobre evento perdido/atrasado tanto
+  # no Ubuntu quanto no Downloads Windows do WSL.
+  if [ -z "$local_timeout" ] || [ "$local_timeout" -gt "$DOWNLOAD_SCAN_INTERVAL" ]; then
+    local_timeout="$DOWNLOAD_SCAN_INTERVAL"
   fi
 
   if [ -n "$local_timeout" ]; then
@@ -301,12 +296,7 @@ while true; do
           exit 1
         fi
       else
-        clean_windows_download_zone_identifiers
-        if windows_configured_download_zip_exists; then
-          if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido no Downloads do Windows; drena as caixas Linux/Windows, valida, faz backup pré-importação, aplica e remove somente após confirmação." import_downloads; then
-            LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
-          fi
-        fi
+        downloads_priority_tick
       fi
     fi
   else

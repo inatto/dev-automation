@@ -250,6 +250,9 @@ backup_all() {
       continue
     fi
 
+    if [ -n "${ACTIVE_MONITOR_MODE:-}" ]; then
+      downloads_priority_tick
+    fi
     wait_if_paused
     backup_project "$project" || failed=1
   done

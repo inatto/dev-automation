@@ -9,9 +9,9 @@ A ordem de carregamento é explícita no entrypoint; não carregamos `*.sh` auto
 - `20-status-logging.sh`: logs/status/lock/pausa
 - `30-sounds.sh`: sons
 - `40-files-safety.sh`: saída local dos ZIPs e segurança
-- `50-project-registry.sh`: catálogo de projetos/agregadores
+- `50-project-registry.sh`: catálogo de projetos/agregadores e índice em memória de aliases, caminhos e hierarquia
 - `60-project-runtime.sh`: helpers de importação/ZIP
-- `70-imports.sh`: importação local de Downloads; no WSL drena `~/Downloads` e `/mnt/c/Users/daniel/Downloads` como uma única fila
+- `70-imports.sh`: importação local de Downloads com FIFO cronológica, posição fixa e prioridade; no WSL combina `~/Downloads` e `/mnt/c/Users/daniel/Downloads` na mesma fila
 - `80-backup-filters.sh`: filtros rsync
 - `90-sql-zip.sh`: ZIP SQL manual legado + snapshots DDL automáticos não destrutivos e espelhados em `CODE_ROOT`
 - `110-removal-markers.sh`: validação/aplicação de `.remover`

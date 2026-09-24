@@ -62,6 +62,7 @@ start_backup_watcher() {
     return 1
   }
 
+  refresh_project_lookup_cache || return 1
   mapfile -t roots < <(watch_root_projects)
   if [ "${#roots[@]}" -eq 0 ]; then
     log "ERRO: nenhum projeto normal configurado para monitorar."
@@ -233,18 +234,10 @@ handle_watch_event() {
     fi
   fi
 
-  # Um evento de ZIP em Downloads é somente o GATILHO. A unidade de trabalho
-  # é a fila inteira: import_downloads revarre Downloads após cada importação e
-  # só devolve o controle ao inotify quando não resta ZIP reconhecido sem tentar.
-  # Isso evita perder B/C/D quando eles terminam enquanto A ainda está sendo
-  # validado/aplicado.
+  # O evento acorda a fila; Downloads também é reconciliado pelo timer raso
+  # para não ficar preso atrás de milhares de eventos dos projetos.
   if event_finished_write "$events" && path_is_download_zip "$event_path" && [ -f "$event_path" ]; then
-    if download_zip_is_configured "$event_path"; then
-      if ! run_stage downloads "DOWNLOAD / IMPORTAÇÃO" "ZIP reconhecido em Downloads; drena toda a fila, valida, faz backup pré-importação, aplica e remove somente após confirmação." \
-        import_downloads; then
-        LOG_CONTEXT=error log "ERRO: uma ou mais importações falharam; ZIP(s) com falha mantido(s) em Downloads."
-      fi
-    fi
+    downloads_priority_tick true
     return 0
   fi
 
