@@ -243,6 +243,7 @@ log "Ubuntu backend: $mode -> $chrome"
 user_data_dir="$(chrome_user_data_dir "$mode" "$chrome")"
 daniel_profile="$(resolve_daniel_profile "$user_data_dir")"
 sindicatto_profile="$(resolve_sindicatto_profile "$user_data_dir")"
+sindicatto_clientes_profile="${CHROMES_SINDICATTO_CLIENTES_PROFILE:-Profile 12}"
 
 placement_active=0
 target_workspace="${CHROMES_TARGET_WORKSPACE:-}"
@@ -253,7 +254,7 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     [[ "$CHROMES_TARGET_WORKSPACE" =~ ^[1-9][0-9]*$ ]] || fail 'CHROMES_TARGET_WORKSPACE deve ser inteiro positivo.'
     placement_fields="workspace=$CHROMES_TARGET_WORKSPACE"$'\t'"$placement_fields"
   fi
-  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[12]$ ]]; then
+  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[123]$ ]]; then
     placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"
   fi
   gnome_placement_prepare chromes default "$placement_fields" || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
@@ -317,7 +318,10 @@ if (( ! skip_second )); then
   fi
   log "Abrindo Chrome Sindicatto ($sindicatto_profile) -> ${local_urls[*]}"
   run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_profile" --new-window "${local_urls[@]}"
-  expected_browsers=2
+  sleep 1
+  log "Abrindo Chrome Sindicatto Clientes ($sindicatto_clientes_profile) -> ${local_urls[*]}"
+  run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_clientes_profile" --new-window "${local_urls[@]}"
+  expected_browsers=3
 else
   if [[ -n "$project_entry" ]]; then
     log "Chrome Sindicatto ignorado: $(basename -- "$project_entry") não possui URL local configurada."

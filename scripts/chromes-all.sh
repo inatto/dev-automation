@@ -34,6 +34,7 @@ O próprio `chromes` resolve o projeto/URL do workspace e abre:
   - Chrome 1: Daniel/danielmaiax -> Project ChatGPT correspondente em config/chatgpt-projects.urls
     (fallback: https://chatgpt.com/ quando não houver mapeamento)
   - Chrome 2: Sindicatto -> URL(s) local(is), somente quando existirem
+  - Chrome 3: Sindicatto Clientes (Profile 12) -> mesmas URL(s) locais do Chrome 2
   - monitor esquerdo, maximizado
 Intervalo entre desktops na abertura: 1s.
 --register-existing: registra janelas antigas já organizadas nos workspaces corretos,
@@ -77,7 +78,7 @@ if (( managed_mode )); then
     urls="${CHROMES_LOCAL_URLS:-$(workspace_context_urls_for_project "$entry" 2>/dev/null || true)}"
     expected=1
     if [[ "${CHROMES_SKIP_SECOND:-}" != 1 ]] && grep -q '[^[:space:]]' <<<"$urls"; then
-      expected=2
+      expected=3
     fi
     expected_counts+=("$expected")
     printf '%s\t%s\t%s\n' "$entry" "$((i + 2))" "$expected" >> "$plan_tmp"
