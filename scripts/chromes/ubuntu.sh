@@ -255,7 +255,9 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     placement_fields="workspace=$CHROMES_TARGET_WORKSPACE"$'\t'"$placement_fields"
   fi
   if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[123]$ ]]; then
-    placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"
+    managed_force="${CHROMES_MANAGED_FORCE:-0}"
+    [[ "$managed_force" =~ ^[01]$ ]] || fail 'CHROMES_MANAGED_FORCE deve ser 0 ou 1.'
+    placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"$'\t'"force=$managed_force"
   fi
   gnome_placement_prepare chromes default "$placement_fields" || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
   if [[ -n "${CHROMES_MANAGED_PROJECT:-}" ]] && [[ "$(gnome_placement_ready_field valid 2>/dev/null || true)" != 1 ]]; then

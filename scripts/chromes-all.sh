@@ -51,6 +51,7 @@ workspace_context_load_projects || fail "arquivo de projetos não encontrado: $P
 ((${#WORKSPACE_PROJECTS[@]} > 0)) || fail 'nenhum projeto ativo configurado.'
 
 managed_mode=0
+force_new_set=0
 if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null 2>&1; then
   chromes_session_lock || exit 1
   log 'Sincronizando workspaces antes de conferir as janelas...'
@@ -108,6 +109,7 @@ if (( managed_mode )); then
     missing=0
     untracked=0
     overflow=0
+    force_new_set=1
     log 'Não foi possível identificar com segurança as janelas existentes; vou abrir um novo conjunto conforme a configuração atual.'
   fi
 
@@ -125,18 +127,28 @@ if (( managed_mode )); then
       untracked="$(gnome_placement_ready_field untracked 2>/dev/null || echo 0)"
       overflow="$(gnome_placement_ready_field overflow 2>/dev/null || echo 0)"
       log 'Janelas identificadas reposicionadas no monitor esquerdo e maximizadas.'
-      if (( missing == 0 && untracked == 0 && overflow == 0 )); then
+      if (( missing == 0 && overflow == 0 )); then
+        if (( untracked > 0 )); then
+          log "Conjunto gerenciado completo; ignorando $untracked janela(s) Chrome sem vínculo."
+        fi
         exit 0
       fi
+      force_new_set=1
       log "Conjunto parcial/ambíguo ($missing faltando, $untracked sem vínculo, $overflow extra(s)); vou abrir um novo conjunto completo sem exigir registro manual."
     else
+      force_new_set=1
       log 'O GNOME não confirmou o reposicionamento; vou abrir um novo conjunto em vez de abortar.'
     fi
   elif (( untracked > 0 || overflow > 0 )); then
+    force_new_set=1
     log "Há janelas sem vínculo seguro ($untracked sem vínculo, $overflow extra(s)); vou abrir um novo conjunto completo sem exigir registro manual."
   fi
 
 fi
+
+# Chegou à fase de abertura: o chromes-all é o dono desta decisão. O backend
+# individual não deve vetar o novo lote por janelas antigas/desconhecidas.
+force_new_set=1
 
 log "Projetos: ${#WORKSPACE_PROJECTS[@]}; intervalo: 1s; monitor: esquerdo; maximizado: sim."
 for ((i=0; i<${#WORKSPACE_PROJECTS[@]}; i++)); do
@@ -149,6 +161,7 @@ for ((i=0; i<${#WORKSPACE_PROJECTS[@]}; i++)); do
   CHROMES_TARGET_WORKSPACE="$workspace" \
   CHROMES_MANAGED_PROJECT="${entry}" \
   CHROMES_MANAGED_EXPECTED="${expected_counts[$i]:-0}" \
+  CHROMES_MANAGED_FORCE="$force_new_set" \
     "$CHROMES_COMMAND"
   if (( i + 1 < ${#WORKSPACE_PROJECTS[@]} )); then
     sleep "$DESKTOP_DELAY_SECONDS"

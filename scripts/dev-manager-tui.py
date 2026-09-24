@@ -391,6 +391,7 @@ class Dashboard:
                 ok = self.color_number(118, curses.COLOR_GREEN)
                 error = self.color_number(196, curses.COLOR_RED)
                 zip_file = self.color_number(197, curses.COLOR_RED)
+                subproject = self.color_number(169, curses.COLOR_MAGENTA)
                 sql = self.color_number(48, curses.COLOR_CYAN)
                 muted = self.color_number(22, curses.COLOR_GREEN)
                 download = self.color_number(51, curses.COLOR_CYAN)
@@ -408,6 +409,7 @@ class Dashboard:
                 ok = self.color_number(84, curses.COLOR_GREEN)
                 error = self.color_number(203, curses.COLOR_RED)
                 zip_file = self.color_number(204, curses.COLOR_RED)
+                subproject = self.color_number(169, curses.COLOR_MAGENTA)
                 sql = self.color_number(213, curses.COLOR_MAGENTA)
                 muted = self.color_number(110, curses.COLOR_CYAN)
                 download = self.color_number(117, curses.COLOR_CYAN)
@@ -432,6 +434,7 @@ class Dashboard:
                 (12, metric_disk, bg),
                 (13, metric_network, bg),
                 (14, zip_file, bg),
+                (15, subproject, bg),
             )
             for pair, fg, bg_color in pairs:
                 try:
@@ -454,6 +457,7 @@ class Dashboard:
             "metric_disk": curses.color_pair(12) | curses.A_BOLD,
             "metric_network": curses.color_pair(13) | curses.A_BOLD,
             "zip_file": curses.color_pair(14) | curses.A_BOLD,
+            "subproject": curses.color_pair(15) | curses.A_BOLD,
         }
         self.stdscr.bkgd(" ", self.colors["base"])
         for win in self.windows.values():
@@ -973,6 +977,7 @@ class Dashboard:
                 "warning": self.colors["warning"],
                 "backup": self.colors["ok"],
                 "zip_file": self.colors["zip_file"],
+                "subproject": self.colors["subproject"],
                 "downloads": self.colors["download"],
                 "download_done": self.colors["download"],
                 "cycle": self.colors["highlight"],

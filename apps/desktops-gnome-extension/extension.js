@@ -20,7 +20,7 @@ const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
 const EXTENSION_RELOAD_REQUIRED_PATH = GLib.build_filenamev([STATE_DIR, 'extension.reload-required']);
-const EXTENSION_VERSION = 16;
+const EXTENSION_VERSION = 17;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -132,10 +132,31 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             const plan = this._readChromePlan();
             const status = plan ? this._chromeStatus(plan) : null;
             const target = plan?.find(item => item.project === fields.project);
+            const force = String(fields.force ?? '0') === '1';
             const alreadyOpen = status?.registry.windows.some(record => record.project === fields.project &&
                 this._allChromeWindows().some(window => this._stableSequence(window) === record.sequence));
-            if (!status?.valid || !target || alreadyOpen || status.untracked > 0 ||
-                target.workspaceIndex + 1 !== Number(fields.workspace) || target.expected !== Number(fields.expected)) {
+            const targetMatches = Boolean(target) &&
+                target.workspaceIndex + 1 === Number(fields.workspace) &&
+                target.expected === Number(fields.expected);
+
+            if (!plan || !targetMatches || !this._workspacesOnAllMonitors()) {
+                this._writeManagedChromeReady(token, action, {valid: false, managed: 0, missing: 0, untracked: 0, overflow: 0});
+                return;
+            }
+
+            if (force) {
+                // chromes-all já decidiu conscientemente abrir um lote substituto.
+                // Esquece apenas o vínculo anterior deste projeto; as janelas antigas
+                // permanecem abertas e entram em seenSequences, portanto nunca são
+                // adotadas por engano como parte do novo lote.
+                const live = new Set(this._allChromeWindows().map(window => this._stableSequence(window)));
+                const retained = (status?.registry.windows ?? []).filter(record =>
+                    record.project !== fields.project && live.has(record.sequence));
+                if (!this._writeChromeRegistry(retained)) {
+                    this._writeManagedChromeReady(token, action, {valid: false, managed: 0, missing: 0, untracked: 0, overflow: 0});
+                    return;
+                }
+            } else if (!status?.valid || alreadyOpen || status.untracked > 0) {
                 this._writeManagedChromeReady(token, action, {valid: false, managed: 0, missing: 0, untracked: 0, overflow: 0});
                 return;
             }
@@ -310,7 +331,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 const expected = Number(expectedText);
                 if (fields.length !== 3 || !project || keys.has(project) || workspaces.has(workspace) ||
                     !Number.isInteger(workspace) || workspace < 2 || workspace > global.workspace_manager.n_workspaces ||
-                    ![1, 2].includes(expected))
+                    ![1, 2, 3].includes(expected))
                     return null;
                 keys.add(project);
                 workspaces.add(workspace);

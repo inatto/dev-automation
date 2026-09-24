@@ -223,6 +223,7 @@ tui_log_line() {
   case "$context" in
     error) color='44;91;1' ;;
     backup) color='44;92;1' ;;
+    subproject) color='44;38;5;169;1' ;;
     downloads|cycle) color='44;96;1' ;;
     sql) color='44;95;1' ;;
     zone) color='44;93;1' ;;

@@ -47,6 +47,7 @@ bump_dev_automation_build_version() {
 
 backup_project() {
   local project="$1"
+  local LOG_PROJECT="$project"
   local project_dir archive_name temp_dir temp_zip final_zip filter_file=""
   local archive_tree_dir content_prefix parent_config_rel parent_config_path
   local child child_name child_zip child_count

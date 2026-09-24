@@ -33,7 +33,7 @@ def check_case(name: str, counts: tuple[int, int, int, int], *, expect_ok: bool,
             (profile / item).mkdir()
         scripts = {
             "gnome-shell": "#!/bin/bash\nprintf 'GNOME Shell 50.1\\n'\n",
-            "gnome-extensions": "#!/bin/bash\nprintf '  Version: 16\\n  State: ACTIVE\\n'\n",
+            "gnome-extensions": "#!/bin/bash\nprintf '  Version: 17\\n  State: ACTIVE\\n'\n",
             "fake-desktops": "#!/bin/bash\nexit 0\n",
             "sleep": "#!/bin/bash\ncase \"$1\" in 1|0.1) exec /bin/sleep 0.01 ;; *) exec /bin/sleep \"$@\" ;; esac\n",
             "google-chrome-stable": """#!/bin/bash
@@ -48,7 +48,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
             target.write_text(contents)
             target.chmod(0o755)
         (state / "extension.ready").write_text(
-            "version=16\ncontroller=1\nfloating-label=0\nwindow-placement=1\nterminal-direct=1\nterminal-placement-verified=1\n")
+            "version=17\ncontroller=1\nfloating-label=0\nwindow-placement=1\nterminal-direct=1\nterminal-placement-verified=1\n")
         launch_log = base / "chrome.log"
         launch_log.touch()
         env = {**os.environ, "HOME": str(home), "PATH": f"{binary}:{os.environ['PATH']}",
@@ -99,6 +99,7 @@ printf '%s|%s|%s\\n' "${CHROMES_MANAGED_PROJECT:-}" "${CHROMES_TARGET_WORKSPACE:
                     elif action == "default":
                         assert data["project"] in ("bots/dev-automation", "orgs/orbital-app")
                         assert data["expected"] == ("1" if data["project"] == "bots/dev-automation" else "3")
+                        assert data.get("force") == "1", data
                         write("chromes.ready", f"{token}\taction=default\tvalid=1\tworkspace={data['workspace']}\tmonitor=0\tmaximize=1\n")
                         target = launched + int(data["expected"])
                         deadline = time.monotonic() + 4
@@ -161,6 +162,8 @@ def main() -> None:
                expect_ok=True, expected_actions=["status", "default", "default"])
     check_case("reexecução só faz status e reconcile", (4, 0, 0, 0),
                expect_ok=True, expected_actions=["status", "reconcile"])
+    check_case("lote completo ignora Chrome extra não gerenciado", (4, 0, 2, 0),
+               expect_ok=True, expected_actions=["status", "reconcile"])
     check_case("lote parcial abre novo conjunto sem exigir registro", (3, 1, 0, 0),
                expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
     check_case("Chrome desconhecido não bloqueia nova abertura", (0, 4, 1, 0),
@@ -177,7 +180,7 @@ def main() -> None:
                expect_ok=True, expected_actions=["status", "reconcile", "default", "default"])
     check_case("execuções simultâneas e chromes manual respeitam o lock", (0, 4, 0, 0), locked=True,
                expect_ok=False, expected_actions=[])
-    print("10 cenários de integração Chrome aprovados, sem dependência de register-existing.")
+    print("11 cenários de integração Chrome aprovados, sem dependência de register-existing.")
 
 
 if __name__ == "__main__":

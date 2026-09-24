@@ -14,6 +14,7 @@ color_code() {
     zone) printf '1;33' ;;     # amarelo
     backup) printf '1;32' ;;   # verde
     zip_file) printf '1;38;5;197' ;; # vermelho-pink forte para arquivo sendo compactado
+    subproject) printf '1;38;5;169' ;; # violeta neon/malva quente para tudo do subprojeto
     wait) printf '2;37' ;;     # cinza
     warning) printf '1;33' ;;  # amarelo forte
     ok) printf '1;32' ;;       # verde forte
@@ -37,13 +38,16 @@ log() {
   local context="${LOG_CONTEXT:-}"
   local stamp
 
-  # Semântica explícita: erro/aviso ganham prioridade. O restante respeita o
-  # contexto fornecido pela operação (backup/download/sql/etc.). Nada de inferir
+  # Semântica explícita: erro/aviso ganham prioridade. Quando uma operação
+  # declara LOG_PROJECT e esse alvo é um subprojeto cadastrado, toda a operação
+  # usa a cor própria de subprojeto (inclusive backup/import/ZIP). Nada de inferir
   # cor por palavras encontradas em caminhos de arquivo.
   if [[ "$message" == ERRO:* ]]; then
     context="error"
   elif [[ "$message" == AVISO:* || "$message" == ATENÇÃO:* || "$message" == ATENCAO:* ]]; then
     context="warning"
+  elif [ -n "${LOG_PROJECT:-}" ] && declare -F registered_parent_project >/dev/null 2>&1 && [ -n "$(registered_parent_project "$LOG_PROJECT")" ]; then
+    context="subproject"
   elif [ -z "$context" ] && [[ "$message" == OK\ * || "$message" == CONFIRMADO\ * || "$message" == CONCLUÍDO* || "$message" == CONCLUIDO* || "$message" == SUCESSO* ]]; then
     context="ok"
   fi
@@ -88,6 +92,7 @@ tray_state_for_context() {
     sql) printf 'zip' ;;
     zone) printf 'clean' ;;
     backup) printf 'backup' ;;
+    subproject) printf 'backup' ;;
     wait) printf 'idle' ;;
     error) printf 'error' ;;
     *) printf 'idle' ;;

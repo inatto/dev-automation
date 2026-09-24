@@ -27,6 +27,7 @@ event_owner_project() {
 mark_backup_dirty() {
   local project="$1"
   local event_path="${2:-}"
+  local LOG_PROJECT="$project"
 
   [ -n "$project" ] || return 0
   if ! target_is_code_aggregate "$project" && [ ! -d "$(project_path "$project")" ]; then
