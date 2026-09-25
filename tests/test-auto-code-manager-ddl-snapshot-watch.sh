@@ -30,18 +30,6 @@ run_snapshot_once() {
     "$MANAGER/scripts/dev-manager/auto-code-manager.sh" --sql-snapshot-once >>"$LOG" 2>&1
 }
 
-snapshot_count_local() {
-  find "$DDL" -maxdepth 1 -type f -name '*.zip' | sed -nE '/\/[0-9]{8}-[0-9]{4}\.zip$/p' | wc -l | tr -d ' '
-}
-
-snapshot_count_root() {
-  find "$CODE_ROOT" -maxdepth 1 -type f -name '*.zip' | sed -nE '/\/[0-9]{8}-[0-9]{4}\.zip$/p' | wc -l | tr -d ' '
-}
-
-latest_local_zip() {
-  find "$DDL" -maxdepth 1 -type f -name '*.zip' -printf '%T@\t%p\n' | sort -nr | cut -f2- | grep -E '/[0-9]{8}-[0-9]{4}\.zip$' | head -n1
-}
-
 assert_one_sql_zip() {
   local zip_file="$1"
   local expected_entry="$2"
@@ -53,52 +41,54 @@ assert_one_sql_zip() {
   printf '%s\n' "$entries" | grep -Fx "$expected_entry" >/dev/null
 }
 
-# 1) SQL novo e preenchido: compacta imediatamente.
+# 1) O nome do SQL define o nome do ZIP; só aquele SQL entra no arquivo.
 printf 'create table a (id number);\n' > "$DDL/a.sql"
 run_snapshot_once
-[ "$(snapshot_count_local)" -eq 1 ]
-[ "$(snapshot_count_root)" -eq 1 ]
-zip_a="$(latest_local_zip)"
-root_a="$CODE_ROOT/$(basename -- "$zip_a")"
-[[ "$(basename -- "$zip_a")" =~ ^[0-9]{8}-[0-9]{4}\.zip$ ]]
-assert_one_sql_zip "$zip_a" 'a.sql'
-cmp -s -- "$zip_a" "$root_a"
-grep -Fq "$DDL/a.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
+[ -f "$DDL/a.sql" ]
+[ -f "$DDL/a.zip" ]
+assert_one_sql_zip "$DDL/a.zip" 'a.sql'
+unzip -p "$DDL/a.zip" a.sql | grep -Fq 'create table a (id number);'
+[ -f "$CODE_ROOT/a.zip" ]
+cmp -s -- "$DDL/a.zip" "$CODE_ROOT/a.zip"
 
-# 2) Alteração posterior também compacta. Se ocorrer no mesmo minuto, atualiza
-# exatamente o mesmo YYYYMMDD-HHMM.zip em vez de inventar sufixo.
+# 2) Se a.zip já existe, alterar a.sql não recria nem sobrescreve o ZIP.
+checksum_before="$(sha256sum "$DDL/a.zip" | awk '{print $1}')"
 printf 'create table a (id number, name varchar2(30));\n' > "$DDL/a.sql"
 run_snapshot_once
-[ "$(snapshot_count_local)" -eq 1 ]
-[ "$(snapshot_count_root)" -eq 1 ]
-zip_a2="$(latest_local_zip)"
-[[ "$(basename -- "$zip_a2")" =~ ^[0-9]{8}-[0-9]{4}\.zip$ ]]
-assert_one_sql_zip "$zip_a2" 'a.sql'
-unzip -p "$zip_a2" a.sql | grep -Fq 'name varchar2(30)'
-cmp -s -- "$zip_a2" "$CODE_ROOT/$(basename -- "$zip_a2")"
+checksum_after="$(sha256sum "$DDL/a.zip" | awk '{print $1}')"
+[ "$checksum_before" = "$checksum_after" ]
+unzip -p "$DDL/a.zip" a.sql | grep -Fq 'create table a (id number);'
+! unzip -p "$DDL/a.zip" a.sql | grep -Fq 'name varchar2(30)'
 
-# 3) Arquivo vazio não gera snapshot nem assinatura.
+# 3) Arquivo vazio e arquivo não-SQL não geram ZIP.
 printf '   \n\t\n' > "$DDL/b.sql"
+printf 'nao compactar\n' > "$DDL/nao-sql.txt"
 run_snapshot_once
-[ "$(snapshot_count_local)" -eq 1 ]
-! grep -Fq "$DDL/b.sql" "$STATE_DIR/sql-snapshot-signatures.tsv"
+[ ! -e "$DDL/b.zip" ]
+[ ! -e "$DDL/nao-sql.zip" ]
 
-# 4) Assim que b.sql recebe conteúdo real, ele é compactado imediatamente.
+# 4) Assim que b.sql recebe conteúdo real, gera exatamente b.zip.
 printf 'create table b (id number);\n' > "$DDL/b.sql"
 run_snapshot_once
-[ "$(snapshot_count_local)" -eq 1 ]
-[ "$(snapshot_count_root)" -eq 1 ]
-zip_b="$(latest_local_zip)"
-assert_one_sql_zip "$zip_b" 'b.sql'
-unzip -p "$zip_b" b.sql | grep -Fq 'create table b'
+[ -f "$DDL/b.zip" ]
+assert_one_sql_zip "$DDL/b.zip" 'b.sql'
+unzip -p "$DDL/b.zip" b.sql | grep -Fq 'create table b'
 
-# 5) Repetir sem alteração é idempotente.
-checksum_before="$(sha256sum "$zip_b" | awk '{print $1}')"
+# 5) Nome escolhido pelo usuário é preservado literalmente no ZIP.
+printf 'create table backup_escolhido (id number);\n' > "$DDL/meu-backup-2026.sql"
 run_snapshot_once
-checksum_after="$(sha256sum "$(latest_local_zip)" | awk '{print $1}')"
-[ "$checksum_before" = "$checksum_after" ]
-[ "$(snapshot_count_local)" -eq 1 ]
-[ "$(snapshot_count_root)" -eq 1 ]
+[ -f "$DDL/meu-backup-2026.zip" ]
+assert_one_sql_zip "$DDL/meu-backup-2026.zip" 'meu-backup-2026.sql'
 
-grep -Fq 'ZIP DDL:' "$LOG"
-printf 'OK: Oracle DDL = novo/alterado compacta imediatamente em YYYYMMDD-HHMM.zip; vazio ignora; repetição é idempotente\n'
+# 6) Se o ZIP correspondente já existir, ele é ignorado sem ser validado/alterado.
+printf 'create table existente (id number);\n' > "$DDL/existente.sql"
+printf 'zip-preexistente-nao-tocar\n' > "$DDL/existente.zip"
+existing_before="$(sha256sum "$DDL/existente.zip" | awk '{print $1}')"
+run_snapshot_once
+existing_after="$(sha256sum "$DDL/existente.zip" | awk '{print $1}')"
+[ "$existing_before" = "$existing_after" ]
+
+grep -Fq 'ZIP DDL: a.zip' "$LOG"
+grep -Fq 'ZIP DDL: b.zip' "$LOG"
+grep -Fq 'ZIP DDL: meu-backup-2026.zip' "$LOG"
+printf 'OK: Oracle DDL = <nome>.sql -> <nome>.zip, 1 SQL por ZIP, ZIP existente é ignorado\n'

@@ -184,20 +184,19 @@ sql_snapshot_zip_is_single_sql() {
 }
 
 next_sql_snapshot_path() {
-  local folder="$1"
   local sql_file="$2"
-  local stamp
+  local sql_dir sql_name sql_stem
 
-  # Padrão deliberadamente simples: YYYYMMDD-HHMM.zip.
-  # Se o mesmo SQL mudar novamente no mesmo minuto, o ZIP daquele minuto é atualizado.
-  stamp="$(date '+%Y%m%d-%H%M')"
-  printf '%s/%s.zip\n' "$folder" "$stamp"
+  sql_dir="$(dirname -- "$sql_file")"
+  sql_name="$(basename -- "$sql_file")"
+  sql_stem="${sql_name%.*}"
+  printf '%s/%s.zip\n' "$sql_dir" "$sql_stem"
 }
 
-sql_snapshot_timestamp_name() {
+sql_snapshot_archive_name() {
   local name
   name="$(basename -- "$1")"
-  [[ "$name" =~ ^[0-9]{8}-[0-9]{4}\.zip$ ]]
+  [[ "${name,,}" == *.zip ]]
 }
 
 latest_valid_sql_snapshot_path() {
@@ -206,7 +205,7 @@ latest_valid_sql_snapshot_path() {
 
   while IFS= read -r candidate || [ -n "$candidate" ]; do
     [ -n "$candidate" ] || continue
-    sql_snapshot_timestamp_name "$candidate" || continue
+    sql_snapshot_archive_name "$candidate" || continue
     if sql_snapshot_zip_is_single_sql "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
@@ -229,6 +228,12 @@ mirror_sql_snapshot_as_latest() {
   mkdir -p "$STATE_DIR" || return 1
   previous="$(cat "$SQL_SNAPSHOT_MIRROR_FILE" 2>/dev/null || true)"
 
+  # Nunca sobrescreve um ZIP já existente na raiz Code. Com nomes definidos
+  # pelo usuário, isso também evita colisão destrutiva com backups de projetos.
+  if [ -e "$mirror_zip" ] && [ "$mirror_zip" != "$previous" ]; then
+    return 0
+  fi
+
   # Compatibilidade: remove somente snapshots do padrão antigo desta rotina.
   local legacy_prefix
   legacy_prefix="$(sql_snapshot_archive_prefix "$folder")"
@@ -236,7 +241,7 @@ mirror_sql_snapshot_as_latest() {
 
   # Com o nome puro não dá para varrer todos os ZIPs da raiz Code com segurança.
   # Remove apenas o espelho anterior que esta própria rotina registrou.
-  if [ -n "$previous" ] && [ "$previous" != "$mirror_zip" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_timestamp_name "$previous"; then
+  if [ -n "$previous" ] && [ "$previous" != "$mirror_zip" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_archive_name "$previous"; then
     rm -f -- "$previous"
   fi
 
@@ -265,7 +270,7 @@ sync_latest_sql_snapshot_to_code_root() {
   if [ -z "$latest" ]; then
     find "$CODE_ROOT" -maxdepth 1 -type f -name "${legacy_prefix}-*.zip" -delete 2>/dev/null || true
     previous="$(cat "$SQL_SNAPSHOT_MIRROR_FILE" 2>/dev/null || true)"
-    if [ -n "$previous" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_timestamp_name "$previous"; then
+    if [ -n "$previous" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_archive_name "$previous"; then
       rm -f -- "$previous"
     fi
     rm -f -- "$SQL_SNAPSHOT_MIRROR_FILE"
@@ -278,35 +283,29 @@ sync_latest_sql_snapshot_to_code_root() {
 snapshot_sql_file() {
   local folder="$1"
   local sql_file="$2"
-  local signature saved_signature final_zip mirror_zip temp_zip
+  local final_zip temp_zip rel_sql
 
   [ -f "$sql_file" ] || {
     forget_sql_snapshot_signature "$sql_file" || true
     return 0
   }
 
-  # Arquivo vazio (inclusive só whitespace) nunca gera ZIP e, se ainda não tem
-  # baseline, continua sem baseline. Assim arquivo novo criado vazio e preenchido
-  # logo depois continua sendo tratado como NOVO na primeira gravação útil.
+  final_zip="$(next_sql_snapshot_path "$folder" "$sql_file")"
+
+  # O nome do SQL é a identidade do backup. Se <nome>.zip já existe, não toca
+  # nem no SQL nem no ZIP; para criar outro backup, basta salvar outro *.sql.
+  [ ! -e "$final_zip" ] || return 0
+
+  # Arquivo vazio (inclusive só whitespace) nunca gera ZIP.
   if ! sql_file_has_content "$sql_file"; then
     return 0
   fi
 
-  signature="$(sql_file_snapshot_signature "$sql_file")" || return 1
-  saved_signature="$(sql_snapshot_saved_signature "$sql_file")"
-
-  # Novo OU alterado gera ZIP. Assinatura serve somente para impedir repetição
-  # quando nenhum conteúdo mudou desde o último snapshot confirmado.
-  [ "$saved_signature" != "$signature" ] || return 0
-
   ensure_archive_output_dir || return 1
-  final_zip="$(next_sql_snapshot_path "$folder" "$sql_file")"
-  mirror_zip="$CODE_ROOT/$(basename -- "$final_zip")"
   temp_zip="$(mktemp '/tmp/auto-code-sql-snapshot-XXXXXX.zip')" || return 1
 
   taskbar_status zip "$(basename -- "$sql_file")"
 
-  local rel_sql
   rel_sql="${sql_file#"$folder"/}"
   rm -f -- "$temp_zip"
   if ! (
@@ -324,22 +323,14 @@ snapshot_sql_file() {
     return 1
   fi
 
-  if ! cp -f -- "$temp_zip" "$final_zip"; then
+  if ! mv -- "$temp_zip" "$final_zip"; then
     log "ERRO: snapshot SQL não pôde ser gravado em $final_zip; fonte mantido."
-    rm -f -- "$temp_zip" "$final_zip"
+    rm -f -- "$temp_zip"
     return 1
   fi
-  rm -f -- "$temp_zip"
 
   if ! mirror_sql_snapshot_as_latest "$folder" "$final_zip"; then
-    log "ERRO: snapshot criado localmente, mas não pôde virar o único ZIP DDL em $CODE_ROOT."
-    rm -f -- "$final_zip"
-    return 1
-  fi
-
-  if ! save_sql_snapshot_signature "$sql_file" "$signature"; then
-    log "ERRO: snapshot criado, mas não foi possível salvar a assinatura de idempotência: $sql_file"
-    rm -f -- "$final_zip" "$mirror_zip"
+    log "ERRO: snapshot criado localmente, mas não pôde ser espelhado em $CODE_ROOT."
     return 1
   fi
 
@@ -439,13 +430,11 @@ process_dirty_work() {
   return "$failed"
 }
 
-# Legado explícito: chamado apenas por --sql-zip-once. Mantém a semântica antiga
-# de consolidar SQLs soltos no ZIP do minuto e apagar somente após validação.
+# Modo explícito: chamado apenas por --sql-zip-once. Cada <nome>.sql gera
+# somente <nome>.zip; ZIP existente é ignorado e o SQL original é preservado.
 zip_sql_folder() {
   local folder="$1"
-  local stamp final_zip temp_dir temp_zip sql_file sql_name
-  local -a sql_files=()
-  local -a sql_names=()
+  local sql_file sql_name sql_stem final_zip temp_zip failed=0
 
   if [ ! -d "$folder" ]; then
     log "Pasta SQL ainda não existe: $folder"
@@ -453,83 +442,60 @@ zip_sql_folder() {
   fi
 
   while IFS= read -r -d '' sql_file; do
-    if stable_file "$sql_file"; then
-      sql_files+=("$sql_file")
-    else
+    if ! stable_file "$sql_file"; then
       log "SQL ainda está sendo gravado: $sql_file"
+      continue
     fi
+
+    sql_name="$(basename -- "$sql_file")"
+    sql_stem="${sql_name%.*}"
+    final_zip="$folder/$sql_stem.zip"
+
+    # Regra simples: <nome>.sql -> <nome>.zip. Se já existe, ignora.
+    [ ! -e "$final_zip" ] || continue
+
+    temp_zip="$(mktemp '/tmp/auto-code-folder-sql-XXXXXX.zip')" || {
+      failed=1
+      continue
+    }
+
+    taskbar_status zip "$sql_name"
+    rm -f -- "$temp_zip"
+    if ! (
+      cd "$folder" || exit 1
+      zip -q "$temp_zip" -- "$sql_name"
+    ); then
+      log "ERRO: falha ao compactar $sql_file; fonte mantido."
+      rm -f -- "$temp_zip"
+      failed=1
+      continue
+    fi
+
+    if ! sql_snapshot_zip_is_single_sql "$temp_zip"; then
+      log "ERRO: ZIP SQL inválido; fonte mantido: $sql_file"
+      rm -f -- "$temp_zip"
+      failed=1
+      continue
+    fi
+
+    if ! mv -- "$temp_zip" "$final_zip"; then
+      log "ERRO: não foi possível gravar o ZIP final; fonte mantido: $final_zip"
+      rm -f -- "$temp_zip"
+      failed=1
+      continue
+    fi
+
+    LOG_CONTEXT=ddl_zip log "◆ ZIP DDL: $(basename -- "$final_zip") — $sql_name"
   done < <(
     find "$folder" \
       -maxdepth 1 \
       -type f \
       -iname '*.sql' \
       ! -name '*:Zone.Identifier' \
-      -print0 2>/dev/null
+      -print0 2>/dev/null | sort -z
   )
 
-  [ "${#sql_files[@]}" -gt 0 ] || return 0
-
-  taskbar_status zip "$(basename -- "$folder")"
-  stamp="$(date '+%Y%m%d-%H%M')"
-  final_zip="$folder/$stamp.zip"
-  temp_dir="$(mktemp -d '/tmp/auto-code-folder-sql-zip-XXXXXX')"
-  temp_zip="$temp_dir/$stamp.zip"
-
-  if [ -f "$final_zip" ]; then
-    if ! unzip -tq "$final_zip" >/dev/null 2>&1; then
-      log "ERRO: ZIP existente inválido; SQLs mantidos: $final_zip"
-      rm -rf -- "$temp_dir"
-      return 1
-    fi
-    cp -f -- "$final_zip" "$temp_zip" || {
-      log "ERRO: não foi possível preparar o ZIP existente: $final_zip"
-      rm -rf -- "$temp_dir"
-      return 1
-    }
-  fi
-
-  for sql_file in "${sql_files[@]}"; do
-    sql_name="$(basename -- "$sql_file")"
-    sql_names+=("$sql_name")
-    cp -f -- "$sql_file" "$temp_dir/$sql_name" || {
-      log "ERRO: não foi possível preparar o SQL: $sql_file"
-      rm -rf -- "$temp_dir"
-      return 1
-    }
-  done
-
-  (
-    cd "$temp_dir" || exit 1
-    zip -q "$temp_zip" -- "${sql_names[@]}"
-  ) || {
-    log "ERRO: falha ao gerar ZIP de SQLs em $folder; SQLs mantidos."
-    rm -rf -- "$temp_dir"
-    return 1
-  }
-
-  if [ ! -s "$temp_zip" ] || ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
-    log "ERRO: validação do ZIP de SQLs falhou; SQLs mantidos: $folder"
-    rm -rf -- "$temp_dir"
-    return 1
-  fi
-
-  if ! mv -f -- "$temp_zip" "$final_zip"; then
-    log "ERRO: não foi possível instalar o ZIP final; SQLs mantidos: $final_zip"
-    rm -rf -- "$temp_dir"
-    return 1
-  fi
-
-  for sql_file in "${sql_files[@]}"; do
-    if ! rm -f -- "$sql_file" || [ -e "$sql_file" ]; then
-      log "ERRO: ZIP válido, mas o SQL não foi apagado: $sql_file"
-      rm -rf -- "$temp_dir"
-      return 1
-    fi
-  done
-
-  rm -rf -- "$temp_dir"
-  log "OK SQL ZIP: $final_zip (${#sql_files[@]} arquivo(s)); SQLs apagados."
-  return 0
+  return "$failed"
 }
 
 zip_configured_sql_folders() {
