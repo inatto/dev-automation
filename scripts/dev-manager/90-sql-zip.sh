@@ -126,8 +126,8 @@ prune_missing_sql_snapshot_signatures() {
     fi
 
     if [[ "$key" == "$folder/"* ]] && [[ "${key,,}" == *.sql ]]; then
-      # Arquivo apagado/renomeado deixa de ter baseline. Se reaparecer, é novo e
-      # não gera ZIP na primeira gravação.
+      # Arquivo apagado/renomeado perde a assinatura. Se reaparecer com conteúdo,
+      # será tratado como novo e compactado imediatamente.
       [ -f "$key" ] || continue
     fi
 
@@ -186,34 +186,33 @@ sql_snapshot_zip_is_single_sql() {
 next_sql_snapshot_path() {
   local folder="$1"
   local sql_file="$2"
-  local prefix token stamp candidate suffix=0
+  local stamp
 
-  prefix="$(sql_snapshot_archive_prefix "$folder")"
-  token="$(sql_snapshot_file_token "$folder" "$sql_file")"
-  stamp="$(date '+%Y%m%d-%H%M%S')"
-  candidate="$folder/${prefix}-${token}-${stamp}.zip"
+  # Padrão deliberadamente simples: YYYYMMDD-HHMM.zip.
+  # Se o mesmo SQL mudar novamente no mesmo minuto, o ZIP daquele minuto é atualizado.
+  stamp="$(date '+%Y%m%d-%H%M')"
+  printf '%s/%s.zip\n' "$folder" "$stamp"
+}
 
-  while [ -e "$candidate" ] || [ -e "$CODE_ROOT/$(basename -- "$candidate")" ]; do
-    suffix=$((suffix + 1))
-    candidate="$folder/${prefix}-${token}-${stamp}-$(printf '%02d' "$suffix").zip"
-  done
-
-  printf '%s\n' "$candidate"
+sql_snapshot_timestamp_name() {
+  local name
+  name="$(basename -- "$1")"
+  [[ "$name" =~ ^[0-9]{8}-[0-9]{4}\.zip$ ]]
 }
 
 latest_valid_sql_snapshot_path() {
   local folder="$1"
-  local prefix candidate
-  prefix="$(sql_snapshot_archive_prefix "$folder")"
+  local candidate
 
   while IFS= read -r candidate || [ -n "$candidate" ]; do
     [ -n "$candidate" ] || continue
+    sql_snapshot_timestamp_name "$candidate" || continue
     if sql_snapshot_zip_is_single_sql "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done < <(
-    find "$folder" -maxdepth 1 -type f -name "${prefix}-*.zip" -printf '%T@\t%p\n' 2>/dev/null |
+    find "$folder" -maxdepth 1 -type f -name '*.zip' -printf '%T@\t%p\n' 2>/dev/null |
       sort -nr | cut -f2-
   )
 
@@ -223,16 +222,22 @@ latest_valid_sql_snapshot_path() {
 mirror_sql_snapshot_as_latest() {
   local folder="$1"
   local local_zip="$2"
-  local prefix mirror_zip temp_mirror root_count
+  local mirror_zip temp_mirror previous=""
 
   ensure_archive_output_dir || return 1
-  prefix="$(sql_snapshot_archive_prefix "$folder")"
   mirror_zip="$CODE_ROOT/$(basename -- "$local_zip")"
+  mkdir -p "$STATE_DIR" || return 1
+  previous="$(cat "$SQL_SNAPSHOT_MIRROR_FILE" 2>/dev/null || true)"
 
-  # Se já existe exatamente a cópia correta no Code, não toca no arquivo.
-  root_count="$(find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" | wc -l | tr -d ' ')"
-  if [ "$root_count" -eq 1 ] && [ -s "$mirror_zip" ] && cmp -s -- "$local_zip" "$mirror_zip" && sql_snapshot_zip_is_single_sql "$mirror_zip"; then
-    return 0
+  # Compatibilidade: remove somente snapshots do padrão antigo desta rotina.
+  local legacy_prefix
+  legacy_prefix="$(sql_snapshot_archive_prefix "$folder")"
+  find "$CODE_ROOT" -maxdepth 1 -type f -name "${legacy_prefix}-*.zip" -delete 2>/dev/null || true
+
+  # Com o nome puro não dá para varrer todos os ZIPs da raiz Code com segurança.
+  # Remove apenas o espelho anterior que esta própria rotina registrou.
+  if [ -n "$previous" ] && [ "$previous" != "$mirror_zip" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_timestamp_name "$previous"; then
+    rm -f -- "$previous"
   fi
 
   temp_mirror="$(mktemp "$CODE_ROOT/.auto-code-ddl-latest-XXXXXX.zip")" || return 1
@@ -240,9 +245,6 @@ mirror_sql_snapshot_as_latest() {
     rm -f -- "$temp_mirror"
     return 1
   fi
-
-  # Regra do Code: somente UM snapshot DDL deste projeto, sempre o mais recente.
-  find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" -delete 2>/dev/null || true
   if ! mv -f -- "$temp_mirror" "$mirror_zip"; then
     rm -f -- "$temp_mirror"
     return 1
@@ -250,18 +252,23 @@ mirror_sql_snapshot_as_latest() {
 
   cmp -s -- "$local_zip" "$mirror_zip" || return 1
   sql_snapshot_zip_is_single_sql "$mirror_zip" || return 1
+  printf '%s\n' "$mirror_zip" > "$SQL_SNAPSHOT_MIRROR_FILE"
   return 0
 }
 
 sync_latest_sql_snapshot_to_code_root() {
   local folder="$1"
-  local prefix latest
-  prefix="$(sql_snapshot_archive_prefix "$folder")"
-
+  local latest previous="" legacy_prefix
+  legacy_prefix="$(sql_snapshot_archive_prefix "$folder")"
   latest="$(latest_valid_sql_snapshot_path "$folder" 2>/dev/null || true)"
+
   if [ -z "$latest" ]; then
-    # Não deixa snapshot antigo/múltiplo na raiz Code contrariar a regra nova.
-    find "$CODE_ROOT" -maxdepth 1 -type f -name "${prefix}-*.zip" -delete 2>/dev/null || true
+    find "$CODE_ROOT" -maxdepth 1 -type f -name "${legacy_prefix}-*.zip" -delete 2>/dev/null || true
+    previous="$(cat "$SQL_SNAPSHOT_MIRROR_FILE" 2>/dev/null || true)"
+    if [ -n "$previous" ] && [[ "$previous" == "$CODE_ROOT/"* ]] && sql_snapshot_timestamp_name "$previous"; then
+      rm -f -- "$previous"
+    fi
+    rm -f -- "$SQL_SNAPSHOT_MIRROR_FILE"
     return 0
   fi
 
@@ -288,13 +295,8 @@ snapshot_sql_file() {
   signature="$(sql_file_snapshot_signature "$sql_file")" || return 1
   saved_signature="$(sql_snapshot_saved_signature "$sql_file")"
 
-  # Primeira vez que um SQL preenchido aparece = baseline. Arquivo novo não gera ZIP.
-  if [ -z "$saved_signature" ]; then
-    save_sql_snapshot_signature "$sql_file" "$signature" || return 1
-    LOG_CONTEXT=backup log "DDL novo registrado sem ZIP: $sql_file"
-    return 0
-  fi
-
+  # Novo OU alterado gera ZIP. Assinatura serve somente para impedir repetição
+  # quando nenhum conteúdo mudou desde o último snapshot confirmado.
   [ "$saved_signature" != "$signature" ] || return 0
 
   ensure_archive_output_dir || return 1
@@ -341,7 +343,7 @@ snapshot_sql_file() {
     return 1
   fi
 
-  log "OK SQL SNAPSHOT: $final_zip -> $mirror_zip (1 SQL: $(basename -- "$sql_file")); SQL preservado."
+  LOG_CONTEXT=ddl_zip log "◆ ZIP DDL: $(basename -- "$final_zip") — $(basename -- "$sql_file")"
   return 0
 }
 

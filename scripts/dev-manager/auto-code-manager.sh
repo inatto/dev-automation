@@ -15,10 +15,10 @@ maybe_exec_ncurses_tui() {
   [ "${AUTO_CODE_TUI:-clipper}" != "off" ] || return 0
   [ "$#" -eq 0 ] || return 0
   [ -t 0 ] && [ -t 1 ] || return 0
-  [ -f "$SCRIPT_DIR/tui.py" ] || return 0
+  [ -f "$SCRIPT_DIR/dev-manager-tui.py" ] || return 0
   command -v python3 >/dev/null 2>&1 || return 0
   python3 -c 'import curses' >/dev/null 2>&1 || return 0
-  exec python3 "$SCRIPT_DIR/tui.py" "$SCRIPT_PATH"
+  exec python3 "$SCRIPT_DIR/dev-manager-tui.py" "$SCRIPT_PATH"
 }
 
 maybe_exec_ncurses_tui "$@"

@@ -71,6 +71,7 @@ MONITOR_LOCK_OWNED=false
 declare -A DIRTY_BACKUP_TARGETS=()
 declare -A DIRTY_SQL_SNAPSHOT_FOLDERS=()
 SQL_SNAPSHOT_SIGNATURES_FILE="$STATE_DIR/sql-snapshot-signatures.tsv"
+SQL_SNAPSHOT_MIRROR_FILE="$STATE_DIR/sql-snapshot-latest-mirror.path"
 
 # Detecção de plataforma centralizada. Zone.Identifier é resíduo de Windows/WSL;
 # no Linux nativo não deve gerar scans, etapas ou eventos especiais.

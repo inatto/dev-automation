@@ -373,6 +373,20 @@ import_one_zip() {
 
   log "IMPORTAÇÃO CONCLUÍDA"
   log "Destino confirmado: $project_dir"
+
+  # Autoatualização: quando o próprio dev-automation é importado, os wrappers
+  # globais podem apontar para caminhos movidos nesta mesma versão. Reinstala-os
+  # imediatamente para o próximo `dev-manager` já nascer correto.
+  if [ "$(readlink -f -- "$project_dir" 2>/dev/null || printf '%s' "$project_dir")" = "$(readlink -f -- "$PROJECT_ROOT" 2>/dev/null || printf '%s' "$PROJECT_ROOT")" ]; then
+    if [ -x "$PROJECT_ROOT/deploy/local/install-commands.sh" ]; then
+      if "$PROJECT_ROOT/deploy/local/install-commands.sh" >/dev/null 2>&1; then
+        LOG_CONTEXT=ok log "COMANDOS GLOBAIS ATUALIZADOS após importar dev-automation."
+      else
+        LOG_CONTEXT=warning log "AVISO: dev-automation importado, mas não foi possível atualizar os comandos globais automaticamente."
+      fi
+    fi
+  fi
+
   signal_auto_deploys_after_import "$project" "$runtime_scope"
   soft_beep
   line

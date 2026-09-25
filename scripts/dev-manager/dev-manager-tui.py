@@ -22,9 +22,9 @@ SYSTEM_METRIC_SECONDS = 1.0
 MAX_LOG_LINES = 4000
 THEMES = ("classic", "matrix")
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BUILD_VERSION_FILE = PROJECT_ROOT / "VERSION"
-DEV_MANAGER_WRAPPER = PROJECT_ROOT / "scripts" / "dev-manager.sh"
+DEV_MANAGER_WRAPPER = PROJECT_ROOT / "scripts" / "dev-manager" / "dev-manager.sh"
 
 
 def read_build_version():
@@ -391,6 +391,7 @@ class Dashboard:
                 ok = self.color_number(118, curses.COLOR_GREEN)
                 error = self.color_number(196, curses.COLOR_RED)
                 sql = self.color_number(48, curses.COLOR_CYAN)
+                ddl_zip = self.color_number(208, curses.COLOR_YELLOW)
                 muted = self.color_number(22, curses.COLOR_GREEN)
                 download = self.color_number(31, curses.COLOR_CYAN)
                 file_inserted = self.color_number(255, curses.COLOR_WHITE)
@@ -410,6 +411,7 @@ class Dashboard:
                 ok = self.color_number(84, curses.COLOR_GREEN)
                 error = self.color_number(203, curses.COLOR_RED)
                 sql = self.color_number(213, curses.COLOR_MAGENTA)
+                ddl_zip = self.color_number(208, curses.COLOR_YELLOW)
                 muted = self.color_number(110, curses.COLOR_CYAN)
                 download = self.color_number(75, curses.COLOR_CYAN)
                 file_inserted = self.color_number(255, curses.COLOR_WHITE)
@@ -438,6 +440,7 @@ class Dashboard:
                 (14, file_inserted, bg),
                 (15, file_changed, bg),
                 (16, file_removed, bg),
+                (17, ddl_zip, bg),
             )
             for pair, fg, bg_color in pairs:
                 try:
@@ -462,6 +465,7 @@ class Dashboard:
             "file_inserted": curses.color_pair(14) | curses.A_BOLD,
             "file_changed": curses.color_pair(15) | curses.A_BOLD,
             "file_removed": curses.color_pair(16) | curses.A_BOLD,
+            "ddl_zip": curses.color_pair(17) | curses.A_BOLD,
         }
         self.stdscr.bkgd(" ", self.colors["base"])
         for win in self.windows.values():
@@ -987,6 +991,7 @@ class Dashboard:
                 "file_removed": self.colors["file_removed"],
                 "cycle": self.colors["highlight"],
                 "sql": self.colors["sql"],
+                "ddl_zip": self.colors["ddl_zip"],
                 "zone": self.colors["warning"],
                 "wait": self.colors["muted"],
                 "ok": self.colors["ok"],

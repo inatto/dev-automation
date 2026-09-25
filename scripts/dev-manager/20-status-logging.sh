@@ -14,6 +14,7 @@ color_code() {
     file_changed) printf '1;32' ;;  # verde: arquivo alterado
     file_removed) printf '1;31' ;;  # vermelho: arquivo removido
     sql) printf '1;35' ;;      # magenta
+    ddl_zip) printf '1;38;5;208' ;; # laranja: ZIP DDL criado/atualizado
     zone) printf '1;33' ;;     # amarelo
     backup) printf '1;32' ;;   # verde
     wait) printf '2;37' ;;     # cinza
