@@ -58,4 +58,15 @@ CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/dev-manager/aut
 blocked_after="$(sha256sum "$TMP/code/one/bloqueado.zip" | awk '{print $1}')"
 test "$blocked_before" = "$blocked_after"
 
-echo 'OK: folder SQL ZIP = um ZIP por SQL, mesmo nome-base, existente ignorado'
+# now.sql vazio é ignorado; com conteúdo gera YYYYMMDD-HHMM.zip.
+printf '   \n\t\n' > "$TMP/code/two/now.sql"
+CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/dev-manager/auto-code-manager.sh" --sql-zip-once
+test "$(find "$TMP/code/two" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' | wc -l | tr -d ' ')" -eq 0
+printf 'create table now_shortcut (id number);\n' > "$TMP/code/two/now.sql"
+CODE_ROOT="$TMP/code" STABLE_WAIT=1 "$TMP/dev-automation/scripts/dev-manager/auto-code-manager.sh" --sql-zip-once
+now_zip="$(find "$TMP/code/two" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' -print -quit)"
+test -n "$now_zip"
+unzip -Z1 "$now_zip" | grep -Fx 'now.sql' >/dev/null
+unzip -p "$now_zip" now.sql | grep -Fq 'create table now_shortcut'
+
+echo 'OK: folder SQL ZIP = <nome>.sql -> <nome>.zip; now.sql -> YYYYMMDD-HHMM.zip; vazios ignorados'

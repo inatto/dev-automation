@@ -91,4 +91,23 @@ existing_after="$(sha256sum "$DDL/existente.zip" | awk '{print $1}')"
 grep -Fq 'ZIP DDL: a.zip' "$LOG"
 grep -Fq 'ZIP DDL: b.zip' "$LOG"
 grep -Fq 'ZIP DDL: meu-backup-2026.zip' "$LOG"
-printf 'OK: Oracle DDL = <nome>.sql -> <nome>.zip, 1 SQL por ZIP, ZIP existente é ignorado\n'
+
+# 7) now.sql vazio não gera ZIP; com conteúdo gera YYYYMMDD-HHMM.zip.
+printf '   \n\t\n' > "$DDL/now.sql"
+run_snapshot_once
+now_count_before="$(find "$DDL" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' | wc -l | tr -d ' ')"
+[ "$now_count_before" -eq 0 ]
+printf 'create table now_backup (id number);\n' > "$DDL/now.sql"
+run_snapshot_once
+now_zip="$(find "$DDL" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' -print -quit)"
+[ -n "$now_zip" ]
+assert_one_sql_zip "$now_zip" 'now.sql'
+unzip -p "$now_zip" now.sql | grep -Fq 'create table now_backup'
+
+# Mesmo conteúdo de now.sql não cria outro backup em nova reconciliação.
+now_count_before="$(find "$DDL" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' | wc -l | tr -d ' ')"
+run_snapshot_once
+now_count_after="$(find "$DDL" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9]{8}-[0-9]{4}\.zip' | wc -l | tr -d ' ')"
+[ "$now_count_before" -eq "$now_count_after" ]
+
+printf 'OK: Oracle DDL = <nome>.sql -> <nome>.zip; now.sql -> YYYYMMDD-HHMM.zip; vazios ignorados\n'

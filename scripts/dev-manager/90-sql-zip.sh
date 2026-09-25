@@ -189,6 +189,14 @@ next_sql_snapshot_path() {
 
   sql_dir="$(dirname -- "$sql_file")"
   sql_name="$(basename -- "$sql_file")"
+
+  # Atalho explícito: now.sql recebe o horário atual no nome do ZIP.
+  # Qualquer outro SQL mantém literalmente o próprio nome-base.
+  if [[ "${sql_name,,}" == "now.sql" ]]; then
+    printf '%s/%s.zip\n' "$sql_dir" "$(date '+%Y%m%d-%H%M')"
+    return 0
+  fi
+
   sql_stem="${sql_name%.*}"
   printf '%s/%s.zip\n' "$sql_dir" "$sql_stem"
 }
@@ -290,16 +298,27 @@ snapshot_sql_file() {
     return 0
   }
 
-  final_zip="$(next_sql_snapshot_path "$folder" "$sql_file")"
-
-  # O nome do SQL é a identidade do backup. Se <nome>.zip já existe, não toca
-  # nem no SQL nem no ZIP; para criar outro backup, basta salvar outro *.sql.
-  [ ! -e "$final_zip" ] || return 0
-
   # Arquivo vazio (inclusive só whitespace) nunca gera ZIP.
   if ! sql_file_has_content "$sql_file"; then
     return 0
   fi
+
+  # now.sql funciona como atalho de nome. Depois de compactado, o mesmo
+  # conteúdo não cria outro ZIP só porque o manager reiniciou ou o minuto mudou.
+  if [[ "$(basename -- "$sql_file" | tr '[:upper:]' '[:lower:]')" == "now.sql" ]]; then
+    local current_signature saved_signature
+    current_signature="$(sql_file_snapshot_signature "$sql_file")"
+    saved_signature="$(sql_snapshot_saved_signature "$sql_file")"
+    if [ -n "$current_signature" ] && [ "$current_signature" = "$saved_signature" ]; then
+      return 0
+    fi
+  fi
+
+  final_zip="$(next_sql_snapshot_path "$folder" "$sql_file")"
+
+  # O nome do SQL é a identidade do backup. Para now.sql, a identidade do ZIP
+  # é YYYYMMDD-HHMM. Em ambos os casos, ZIP existente nunca é sobrescrito.
+  [ ! -e "$final_zip" ] || return 0
 
   ensure_archive_output_dir || return 1
   temp_zip="$(mktemp '/tmp/auto-code-sql-snapshot-XXXXXX.zip')" || return 1
@@ -332,6 +351,10 @@ snapshot_sql_file() {
   if ! mirror_sql_snapshot_as_latest "$folder" "$final_zip"; then
     log "ERRO: snapshot criado localmente, mas não pôde ser espelhado em $CODE_ROOT."
     return 1
+  fi
+
+  if [[ "$(basename -- "$sql_file" | tr '[:upper:]' '[:lower:]')" == "now.sql" ]]; then
+    save_sql_snapshot_signature "$sql_file" "$(sql_file_snapshot_signature "$sql_file")" || true
   fi
 
   LOG_CONTEXT=ddl_zip log "◆ ZIP DDL: $(basename -- "$final_zip") — $(basename -- "$sql_file")"
@@ -447,11 +470,18 @@ zip_sql_folder() {
       continue
     fi
 
+    # Arquivo vazio (inclusive só whitespace) nunca gera ZIP.
+    sql_file_has_content "$sql_file" || continue
+
     sql_name="$(basename -- "$sql_file")"
     sql_stem="${sql_name%.*}"
-    final_zip="$folder/$sql_stem.zip"
+    if [[ "${sql_name,,}" == "now.sql" ]]; then
+      final_zip="$folder/$(date '+%Y%m%d-%H%M').zip"
+    else
+      final_zip="$folder/$sql_stem.zip"
+    fi
 
-    # Regra simples: <nome>.sql -> <nome>.zip. Se já existe, ignora.
+    # ZIP existente nunca é sobrescrito.
     [ ! -e "$final_zip" ] || continue
 
     temp_zip="$(mktemp '/tmp/auto-code-folder-sql-XXXXXX.zip')" || {
