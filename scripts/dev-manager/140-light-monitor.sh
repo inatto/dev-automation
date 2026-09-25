@@ -208,7 +208,10 @@ for project, root in projects:
         for name in files:
             full = os.path.join(current, name)
             rel = os.path.relpath(full, root).replace(os.sep, '/')
-            if os.path.abspath(full) == version_file:
+            abs_full = os.path.abspath(full)
+            if abs_full == version_file:
+                continue
+            if os.path.dirname(abs_full) == project_root and os.path.basename(abs_full).startswith('.VERSION-'):
                 continue
             if ignored_by_rules(rel, name, file_rules):
                 continue
