@@ -10,6 +10,9 @@ color_code() {
     cycle) printf '1;36' ;;    # ciano forte
     downloads) printf '1;34' ;;# azul
     download_done) printf '1;94' ;; # azul brilhante para conclusão de downloads
+    file_inserted) printf '1;97' ;; # branco: arquivo novo
+    file_changed) printf '1;32' ;;  # verde: arquivo alterado
+    file_removed) printf '1;31' ;;  # vermelho: arquivo removido
     sql) printf '1;35' ;;      # magenta
     zone) printf '1;33' ;;     # amarelo
     backup) printf '1;32' ;;   # verde

@@ -50,7 +50,7 @@ prepare_removal_markers() {
 
     printf '%s\0' "$target_rel" >> "$manifest"
     rm -f -- "$marker" || return 1
-    log "REMOVER AGENDADO: $target_rel"
+    LOG_CONTEXT=file_removed log "− REMOVER AGENDADO: $target_rel"
   done < <(find "$source_root" -type f -name '*.remover' -print0 2>/dev/null)
 
   return 0
@@ -85,7 +85,7 @@ apply_removal_manifest() {
 
     if [ ! -e "$target" ] && [ ! -L "$target" ]; then
       rm -f -- "$marker" 2>/dev/null || true
-      log "REMOVIDO: $rel (alvo já ausente)"
+      LOG_CONTEXT=file_removed log "− REMOVIDO: $rel (alvo já ausente)"
       continue
     fi
 
@@ -136,7 +136,7 @@ apply_removal_manifest() {
 
   for rel in "${moved_rels[@]}"; do
     rm -f -- "$project_dir/$rel.remover" 2>/dev/null || true
-    log "REMOVIDO: $rel"
+    LOG_CONTEXT=file_removed log "− REMOVIDO: $rel"
   done
 
   if ! rm -rf -- "$quarantine"; then

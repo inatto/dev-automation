@@ -392,7 +392,10 @@ class Dashboard:
                 error = self.color_number(196, curses.COLOR_RED)
                 sql = self.color_number(48, curses.COLOR_CYAN)
                 muted = self.color_number(22, curses.COLOR_GREEN)
-                download = self.color_number(51, curses.COLOR_CYAN)
+                download = self.color_number(31, curses.COLOR_CYAN)
+                file_inserted = self.color_number(255, curses.COLOR_WHITE)
+                file_changed = self.color_number(118, curses.COLOR_GREEN)
+                file_removed = self.color_number(196, curses.COLOR_RED)
                 warning = self.color_number(226, curses.COLOR_YELLOW)
                 metric_cpu = self.color_number(51, curses.COLOR_CYAN)
                 metric_memory = self.color_number(201, curses.COLOR_MAGENTA)
@@ -408,7 +411,10 @@ class Dashboard:
                 error = self.color_number(203, curses.COLOR_RED)
                 sql = self.color_number(213, curses.COLOR_MAGENTA)
                 muted = self.color_number(110, curses.COLOR_CYAN)
-                download = self.color_number(117, curses.COLOR_CYAN)
+                download = self.color_number(75, curses.COLOR_CYAN)
+                file_inserted = self.color_number(255, curses.COLOR_WHITE)
+                file_changed = self.color_number(84, curses.COLOR_GREEN)
+                file_removed = self.color_number(203, curses.COLOR_RED)
                 warning = self.color_number(220, curses.COLOR_YELLOW)
                 metric_cpu = self.color_number(51, curses.COLOR_CYAN)
                 metric_memory = self.color_number(213, curses.COLOR_MAGENTA)
@@ -429,6 +435,9 @@ class Dashboard:
                 (11, metric_memory, bg),
                 (12, metric_disk, bg),
                 (13, metric_network, bg),
+                (14, file_inserted, bg),
+                (15, file_changed, bg),
+                (16, file_removed, bg),
             )
             for pair, fg, bg_color in pairs:
                 try:
@@ -450,6 +459,9 @@ class Dashboard:
             "metric_memory": curses.color_pair(11) | curses.A_BOLD,
             "metric_disk": curses.color_pair(12) | curses.A_BOLD,
             "metric_network": curses.color_pair(13) | curses.A_BOLD,
+            "file_inserted": curses.color_pair(14) | curses.A_BOLD,
+            "file_changed": curses.color_pair(15) | curses.A_BOLD,
+            "file_removed": curses.color_pair(16) | curses.A_BOLD,
         }
         self.stdscr.bkgd(" ", self.colors["base"])
         for win in self.windows.values():
@@ -970,6 +982,9 @@ class Dashboard:
                 "backup": self.colors["ok"],
                 "downloads": self.colors["download"],
                 "download_done": self.colors["download"],
+                "file_inserted": self.colors["file_inserted"],
+                "file_changed": self.colors["file_changed"],
+                "file_removed": self.colors["file_removed"],
                 "cycle": self.colors["highlight"],
                 "sql": self.colors["sql"],
                 "zone": self.colors["warning"],

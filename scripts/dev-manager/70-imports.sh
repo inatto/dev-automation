@@ -10,7 +10,7 @@ import_one_zip() {
   local parent_config_files=0 parent_config_checked=0
   local nested_zip nested_project nested_count=0 nested_index expected child_name
   local -a nested_zips=() nested_projects=() expected_children=()
-  local -A nested_seen=() expected_targets=()
+  local -A nested_seen=() expected_targets=() import_action=()
 
   zip_name="$(basename "$zip_file")"
   project="$(project_for_zip "$zip_name")"
@@ -276,7 +276,21 @@ import_one_zip() {
   fi
 
   log "Arquivos diretos extraídos: $total_files"
-  find "$source_dir" -type f -printf '  EXTRAÍDO: %P\n'
+
+  # Classifica a ação antes do rsync. A TUI usa contexto estruturado, então
+  # caminhos contendo palavras como "removido"/"alterado" nunca definem cor.
+  while IFS= read -r -d '' rel; do
+    destination="$project_dir/$rel"
+    if [ ! -e "$destination" ] && [ ! -L "$destination" ]; then
+      import_action["$rel"]="inserted"
+    elif [ -f "$destination" ] \
+      && cmp -s -- "$source_dir/$rel" "$destination" \
+      && [ "$(stat -Lc '%a' -- "$source_dir/$rel" 2>/dev/null || true)" = "$(stat -Lc '%a' -- "$destination" 2>/dev/null || true)" ]; then
+      import_action["$rel"]="unchanged"
+    else
+      import_action["$rel"]="changed"
+    fi
+  done < <(find "$source_dir" -type f -printf '%P\0')
 
   log "Copiando arquivos diretos para o destino..."
   if ! rsync -a --checksum --delay-updates --itemize-changes -- "$source_dir/" "$project_dir/" | sed 's/^/  RSYNC: /'; then
@@ -302,7 +316,11 @@ import_one_zip() {
       return 1
     fi
     checked_files=$((checked_files + 1))
-    log "CONFIRMADO [$checked_files/$total_files]: $destination"
+    case "${import_action[$rel]:-unchanged}" in
+      inserted) LOG_CONTEXT=file_inserted log "+ INSERIDO [$checked_files/$total_files]: $destination" ;;
+      changed) LOG_CONTEXT=file_changed log "~ ALTERADO [$checked_files/$total_files]: $destination" ;;
+      *) LOG_CONTEXT=downloads log "✓ CONFIRMADO [$checked_files/$total_files]: $destination" ;;
+    esac
   done < <(find "$source_dir" -type f -printf '%P\0')
 
   if [ "$checked_files" -ne "$total_files" ]; then
