@@ -80,45 +80,11 @@ mkdir -p -- "$RUNNING_PROJECTS_DIR"
 STATE_FILE="$RUNNING_PROJECTS_DIR/$$.state"
 REQUEST_FILE="$STATE_FILE.request"
 CHILD_PID=""
-API_PID=""
-WEB_PID=""
 RESTART_REQUESTED=0
 RESTART_SCOPE="both"
 STOP_REQUESTED=0
 IDLE_PID=""
 SUPERVISION_MODE="single"
-API_SCRIPT=""
-WEB_SCRIPT=""
-
-can_split_canonical_action() {
-  local api_name web_name ref refs
-  [[ "$ACTION" == "setup" || "$ACTION" == "start" ]] || return 1
-  API_SCRIPT="$PROJECT_DIR/deploy/local/${ACTION}-api.sh"
-  WEB_SCRIPT="$PROJECT_DIR/deploy/local/${ACTION}-web.sh"
-  [[ -f "$API_SCRIPT" && -f "$WEB_SCRIPT" ]] || return 1
-
-  api_name="$(basename -- "$API_SCRIPT")"
-  web_name="$(basename -- "$WEB_SCRIPT")"
-  grep -Fq "$api_name" "$SCRIPT_PATH" || return 1
-  grep -Fq "$web_name" "$SCRIPT_PATH" || return 1
-  grep -Eq 'wait[[:space:]]+-n' "$SCRIPT_PATH" || return 1
-
-  # Só divide orquestradores canônicos que referenciam os dois scripts de
-  # camada e nenhum terceiro .sh. Se houver worker/preparo extra, preserva o
-  # setup/start agregado original em vez de adivinhar comportamento.
-  refs="$(grep -oE '[A-Za-z0-9._-]+\.sh' "$SCRIPT_PATH" 2>/dev/null | sort -u || true)"
-  while IFS= read -r ref; do
-    [[ -n "$ref" ]] || continue
-    [[ "$ref" == "$api_name" || "$ref" == "$web_name" ]] || return 1
-  done <<< "$refs"
-
-  return 0
-}
-
-if [[ "$DEPLOY_MODE" == "local" ]] && can_split_canonical_action; then
-  SUPERVISION_MODE="split"
-  printf '[%s] supervisão por camada ativa: API e Web independentes.\n' "$PROJECT_NAME"
-fi
 
 write_state() {
   local temp="$STATE_FILE.tmp.$$"
@@ -131,8 +97,6 @@ write_state() {
     printf 'AUTO_MODE=%s\n' "$AUTO_MODE"
     printf 'MODE=%s\n' "$SUPERVISION_MODE"
     printf 'CHILD_PID=%s\n' "${CHILD_PID:-}"
-    printf 'API_PID=%s\n' "${API_PID:-}"
-    printf 'WEB_PID=%s\n' "${WEB_PID:-}"
   } > "$temp"
   mv -f -- "$temp" "$STATE_FILE"
 }
@@ -171,28 +135,14 @@ read_restart_scope() {
 on_restart() {
   RESTART_SCOPE="$(read_restart_scope)"
   RESTART_REQUESTED=1
-  printf '\n[%s] ZIP concluído; reinício solicitado: %s.\n' "$PROJECT_NAME" "$RESTART_SCOPE"
-
-  if [[ "$SUPERVISION_MODE" == "split" ]]; then
-    case "$RESTART_SCOPE" in
-      api) stop_pid "$API_PID" ;;
-      web) stop_pid "$WEB_PID" ;;
-      both) stop_pid "$API_PID"; stop_pid "$WEB_PID" ;;
-    esac
-  else
-    stop_pid "$CHILD_PID"
-  fi
+  printf '\n[%s] ZIP concluído; reinício solicitado (%s); preservando o deploy canônico completo.\n' "$PROJECT_NAME" "$RESTART_SCOPE"
+  stop_pid "$CHILD_PID"
   stop_pid "$IDLE_PID"
 }
 
 on_stop() {
   STOP_REQUESTED=1
-  if [[ "$SUPERVISION_MODE" == "split" ]]; then
-    stop_pid "$API_PID"
-    stop_pid "$WEB_PID"
-  else
-    stop_pid "$CHILD_PID"
-  fi
+  stop_pid "$CHILD_PID"
   stop_pid "$IDLE_PID"
 }
 
@@ -218,55 +168,6 @@ wait_for_auto_restart() {
 if ((AUTO_MODE == 1)); then
   printf '[%s] AUTO ativo: ./deploy/%s/%s.sh será reexecutado somente após ZIP importado pelo Dev Automation.\n' \
     "$PROJECT_NAME" "$DEPLOY_MODE" "$ACTION"
-fi
-
-if [[ "$SUPERVISION_MODE" == "split" ]]; then
-  start_api
-  start_web
-
-  while true; do
-    RESTART_REQUESTED=0
-    wait -n "$API_PID" "$WEB_PID"
-    status=$?
-
-    if ((STOP_REQUESTED == 1)); then
-      exit 130
-    fi
-
-    if ((RESTART_REQUESTED == 1)); then
-      case "$RESTART_SCOPE" in
-        api)
-          wait "$API_PID" 2>/dev/null || true
-          API_PID=""
-          start_api
-          ;;
-        web)
-          wait "$WEB_PID" 2>/dev/null || true
-          WEB_PID=""
-          start_web
-          ;;
-        both)
-          wait "$API_PID" 2>/dev/null || true
-          wait "$WEB_PID" 2>/dev/null || true
-          API_PID=""
-          WEB_PID=""
-          start_api
-          start_web
-          ;;
-      esac
-      printf '[%s] reinício concluído: %s.\n' "$PROJECT_NAME" "$RESTART_SCOPE"
-      continue
-    fi
-
-    # Um serviço terminar faz o orquestrador canônico terminar também; mantém o
-    # mesmo contrato e garante aviso sonoro mesmo se a saída inesperada for 0.
-    stop_pid "$API_PID"
-    stop_pid "$WEB_PID"
-    printf '[%s] ERRO: uma camada local encerrou inesperadamente (código %d).\n' "$PROJECT_NAME" "$status" >&2
-    play_error_sound
-    ((status == 0)) && status=1
-    exit "$status"
-  done
 fi
 
 while true; do

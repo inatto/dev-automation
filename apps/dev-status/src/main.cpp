@@ -46,6 +46,12 @@ enum class StatusCode : std::uint32_t {
     Error = 7,
     Paused = 8,
     Exit = 9,
+    DownloadDone = 10,
+    FileInserted = 11,
+    FileChanged = 12,
+    FileRemoved = 13,
+    DdlZip = 14,
+    Warning = 15,
 };
 
 struct StatusPacket {
@@ -82,6 +88,12 @@ bool TryParseState(const std::wstring& raw, StatusCode& state) {
     else if (value == L"zip" || value == L"compress") state = StatusCode::Zip;
     else if (value == L"sync") state = StatusCode::Sync;
     else if (value == L"clean") state = StatusCode::Clean;
+    else if (value == L"download_done") state = StatusCode::DownloadDone;
+    else if (value == L"file_inserted") state = StatusCode::FileInserted;
+    else if (value == L"file_changed") state = StatusCode::FileChanged;
+    else if (value == L"file_removed") state = StatusCode::FileRemoved;
+    else if (value == L"ddl_zip") state = StatusCode::DdlZip;
+    else if (value == L"warning") state = StatusCode::Warning;
     else if (value == L"done" || value == L"ok") state = StatusCode::Done;
     else if (value == L"error" || value == L"fail") state = StatusCode::Error;
     else if (value == L"paused" || value == L"pause") state = StatusCode::Paused;
@@ -107,6 +119,12 @@ std::wstring StateLabel(StatusCode state) {
         case StatusCode::Zip: return L"Compactando";
         case StatusCode::Sync: return L"Sincronizando";
         case StatusCode::Clean: return L"Limpando";
+        case StatusCode::DownloadDone: return L"Download concluído";
+        case StatusCode::FileInserted: return L"Arquivo inserido";
+        case StatusCode::FileChanged: return L"Arquivo alterado";
+        case StatusCode::FileRemoved: return L"Arquivo removido";
+        case StatusCode::DdlZip: return L"ZIP DDL";
+        case StatusCode::Warning: return L"Aviso";
         case StatusCode::Done: return L"Concluído";
         case StatusCode::Error: return L"Erro";
         case StatusCode::Paused: return L"Pausado";
@@ -123,6 +141,12 @@ wchar_t StateGlyph(StatusCode state) {
         case StatusCode::Zip: return L'Z';
         case StatusCode::Sync: return L'S';
         case StatusCode::Clean: return L'C';
+        case StatusCode::DownloadDone: return L'D';
+        case StatusCode::FileInserted: return L'I';
+        case StatusCode::FileChanged: return L'A';
+        case StatusCode::FileRemoved: return L'R';
+        case StatusCode::DdlZip: return L'D';
+        case StatusCode::Warning: return L'!';
         case StatusCode::Done: return L'V';
         case StatusCode::Error: return L'!';
         case StatusCode::Paused: return L'P';
@@ -140,6 +164,12 @@ COLORREF StateColor(StatusCode state) {
         case StatusCode::Zip: return RGB(255, 0, 220);       // 1;35 magenta
         case StatusCode::Clean: return RGB(255, 220, 0);     // 1;33 amarelo
         case StatusCode::Backup: return RGB(0, 230, 0);      // 1;32 verde
+        case StatusCode::DownloadDone: return RGB(92, 157, 255); // 1;94 azul brilhante
+        case StatusCode::FileInserted: return RGB(245, 245, 245); // 1;97 branco
+        case StatusCode::FileChanged: return RGB(0, 230, 118);    // 1;32 verde
+        case StatusCode::FileRemoved: return RGB(255, 70, 70);    // 1;31 vermelho
+        case StatusCode::DdlZip: return RGB(255, 140, 0);         // laranja
+        case StatusCode::Warning: return RGB(255, 214, 0);        // amarelo
         case StatusCode::Error: return RGB(255, 70, 70);     // 1;31 vermelho
         case StatusCode::Paused: return RGB(255, 170, 0);    // pausa
         case StatusCode::Idle: return RGB(145, 145, 145);    // 2;37 cinza
@@ -297,6 +327,11 @@ void ApplyStatus(HWND hwnd, AppState& app, const StatusPacket& packet) {
         case StatusCode::Zip:
         case StatusCode::Sync:
         case StatusCode::Clean:
+        case StatusCode::DownloadDone:
+        case StatusCode::FileInserted:
+        case StatusCode::FileChanged:
+        case StatusCode::FileRemoved:
+        case StatusCode::DdlZip:
             app.lastWorkState = packet.state;
             break;
         default:

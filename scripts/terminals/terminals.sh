@@ -98,9 +98,15 @@ project_display_name() {
   printf '%s\n' "$out"
 }
 
+terminal_session_shell() {
+  local command_name="$1" quoted_command
+  printf -v quoted_command '%q' "$command_name"
+  printf 'export PATH="$HOME/.local/bin:$PATH"; %s; _dev_status=$?; printf "\n[terminals] comando encerrado (código %%d); terminal mantido aberto.\n" "$_dev_status"; exec "${SHELL:-/bin/bash}" -i' "$quoted_command"
+}
+
 terminal_exec_string() {
   local command_name="$1" command_line
-  printf -v command_line 'export PATH="$HOME/.local/bin:$PATH"; exec %q' "$command_name"
+  command_line="$(terminal_session_shell "$command_name")"
   printf 'bash -lc %q\n' "$command_line"
 }
 
@@ -120,24 +126,23 @@ launch_terminal_window() {
       ;;
     gnome-terminal)
       if [[ -n "$command_name" ]]; then
-        # `gnome-terminal --tab` chamado pelo controlador externo não possui a
-        # identidade da janela recém-criada e pode abrir outra janela. Quando
-        # existe Remote, agendamos a criação da segunda aba DE DENTRO da primeira
-        # aba. O processo herda GNOME_TERMINAL_SERVICE/GNOME_TERMINAL_SCREEN e o
-        # GNOME Terminal consegue anexar a aba à janela correta mesmo em Wayland.
+        # A aba roda o comando como filho do shell. Ctrl+C encerra somente o
+        # comando e o shell interativo assume a mesma aba; a janela não some.
         if [[ -n "$second_command" ]]; then
-          printf -v second_shell 'export PATH="$HOME/.local/bin:$PATH"; exec %q' "$second_command"
+          second_shell="$(terminal_session_shell "$second_command")"
           printf -v second_argv '%q ' \
             "$terminal" --tab --working-directory="$working_dir" --title="$second_title" -- \
             bash -lc "$second_shell"
+          first_shell="$(terminal_session_shell "$command_name")"
           printf -v first_shell \
-            'nohup bash -c %q >/dev/null 2>&1 & export PATH="$HOME/.local/bin:$PATH"; exec %q' \
-            "sleep $TAB_INTERVAL_SECONDS; $second_argv" "$command_name"
+            'nohup bash -c %q >/dev/null 2>&1 & %s' \
+            "sleep $TAB_INTERVAL_SECONDS; $second_argv" "$first_shell"
           nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- \
             bash -lc "$first_shell" >/dev/null 2>&1 &
         else
+          first_shell="$(terminal_session_shell "$command_name")"
           nohup "$terminal" --window --working-directory="$working_dir" --title="$title" -- \
-            bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+            bash -lc "$first_shell" >/dev/null 2>&1 &
         fi
       else
         nohup "$terminal" --window --working-directory="$working_dir" ${title:+--title="$title"} >/dev/null 2>&1 &
@@ -160,14 +165,15 @@ launch_terminal_window() {
 }
 
 launch_terminal_tab() {
-  local backend="$1" terminal="$2" working_dir="$3" title="$4" command_name="$5" exec_string
+  local backend="$1" terminal="$2" working_dir="$3" title="$4" command_name="$5" exec_string tab_shell
   exec_string="$(terminal_exec_string "$command_name")"
   case "$backend" in
     ptyxis)
       nohup "$terminal" --tab --working-directory="$working_dir" --title="$title" --execute "$exec_string" >/dev/null 2>&1 &
       ;;
     gnome-terminal)
-      nohup "$terminal" --tab --working-directory="$working_dir" --title="$title" -- bash -lc "export PATH=\"\$HOME/.local/bin:\$PATH\"; exec $command_name" >/dev/null 2>&1 &
+      tab_shell="$(terminal_session_shell "$command_name")"
+      nohup "$terminal" --tab --working-directory="$working_dir" --title="$title" -- bash -lc "$tab_shell" >/dev/null 2>&1 &
       ;;
     *) return 2 ;;
   esac

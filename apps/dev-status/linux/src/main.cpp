@@ -27,7 +27,8 @@ namespace fs = std::filesystem;
 namespace {
 
 enum class StatusCode {
-    Idle, Backup, Unzip, Zip, Sync, Clean, Done, Error, Paused, Exit
+    Idle, Backup, Unzip, Zip, Sync, Clean, Done, Error, Paused, Exit,
+    DownloadDone, FileInserted, FileChanged, FileRemoved, DdlZip, Warning
 };
 
 struct StatusPacket {
@@ -78,6 +79,12 @@ bool ParseState(const std::string& raw, StatusCode& state) {
     else if (value == "zip" || value == "compress") state = StatusCode::Zip;
     else if (value == "sync") state = StatusCode::Sync;
     else if (value == "clean") state = StatusCode::Clean;
+    else if (value == "download_done") state = StatusCode::DownloadDone;
+    else if (value == "file_inserted") state = StatusCode::FileInserted;
+    else if (value == "file_changed") state = StatusCode::FileChanged;
+    else if (value == "file_removed") state = StatusCode::FileRemoved;
+    else if (value == "ddl_zip") state = StatusCode::DdlZip;
+    else if (value == "warning") state = StatusCode::Warning;
     else if (value == "done" || value == "ok") state = StatusCode::Done;
     else if (value == "error" || value == "fail") state = StatusCode::Error;
     else if (value == "paused" || value == "pause") state = StatusCode::Paused;
@@ -94,6 +101,12 @@ const char* StateLabel(StatusCode state) {
         case StatusCode::Zip: return "Compactando";
         case StatusCode::Sync: return "Sincronizando";
         case StatusCode::Clean: return "Limpando";
+        case StatusCode::DownloadDone: return "Download concluído";
+        case StatusCode::FileInserted: return "Arquivo inserido";
+        case StatusCode::FileChanged: return "Arquivo alterado";
+        case StatusCode::FileRemoved: return "Arquivo removido";
+        case StatusCode::DdlZip: return "ZIP DDL";
+        case StatusCode::Warning: return "Aviso";
         case StatusCode::Done: return "Concluído";
         case StatusCode::Error: return "Erro";
         case StatusCode::Paused: return "Pausado";
@@ -110,6 +123,12 @@ const char* StateIcon(StatusCode state) {
         case StatusCode::Zip: return "dev-status-zip";
         case StatusCode::Sync: return "dev-status-sync";
         case StatusCode::Clean: return "dev-status-clean";
+        case StatusCode::DownloadDone: return "dev-status-download-done";
+        case StatusCode::FileInserted: return "dev-status-file-inserted";
+        case StatusCode::FileChanged: return "dev-status-file-changed";
+        case StatusCode::FileRemoved: return "dev-status-file-removed";
+        case StatusCode::DdlZip: return "dev-status-ddl-zip";
+        case StatusCode::Warning: return "dev-status-warning";
         case StatusCode::Done: return "dev-status-done";
         case StatusCode::Error: return "dev-status-error";
         case StatusCode::Paused: return "dev-status-paused";
@@ -183,7 +202,8 @@ void UpdateIndicator(AppState* app, const StatusPacket& packet) {
     if (!app) return;
     app->current = packet;
     if (packet.state != StatusCode::Idle && packet.state != StatusCode::Paused &&
-        packet.state != StatusCode::Done && packet.state != StatusCode::Exit) {
+        packet.state != StatusCode::Done && packet.state != StatusCode::Exit &&
+        packet.state != StatusCode::Warning) {
         app->lastWorkState = packet.state;
     }
 

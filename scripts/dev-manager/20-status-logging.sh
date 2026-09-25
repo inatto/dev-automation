@@ -51,6 +51,13 @@ log() {
     context="ok"
   fi
 
+  # Eventos coloridos pontuais também mudam imediatamente o ícone da taskbar.
+  case "$context" in
+    download_done|file_inserted|file_changed|file_removed|ddl_zip|warning|ok)
+      taskbar_status "$(tray_state_for_context "$context")" "$message"
+      ;;
+  esac
+
   if [ "$TUI_ACTIVE" = true ]; then
     tui_log_line "$context" "$message"
     return 0
@@ -88,10 +95,17 @@ tray_state_for_context() {
   case "$1" in
     cycle) printf 'sync' ;;
     downloads) printf 'unzip' ;;
+    download_done) printf 'download_done' ;;
+    file_inserted) printf 'file_inserted' ;;
+    file_changed) printf 'file_changed' ;;
+    file_removed) printf 'file_removed' ;;
     sql) printf 'zip' ;;
+    ddl_zip) printf 'ddl_zip' ;;
     zone) printf 'clean' ;;
     backup) printf 'backup' ;;
     wait) printf 'idle' ;;
+    warning) printf 'warning' ;;
+    ok) printf 'done' ;;
     error) printf 'error' ;;
     *) printf 'idle' ;;
   esac

@@ -97,7 +97,7 @@ wait_count() {
 wait_count "$TEMP/api.count" 1
 wait_count "$TEMP/web.count" 1
 state_file="$(find "$STATE/running-projects" -maxdepth 1 -type f -name '*.state' -print -quit)"
-grep -Fxq 'MODE=split' "$state_file"
+grep -Fxq 'MODE=single' "$state_file"
 grep -Fxq 'AUTO_MODE=1' "$state_file"
 
 make_zip() {
@@ -122,19 +122,19 @@ import_zip() {
 make_zip api
 import_zip
 wait_count "$TEMP/api.count" 2
-[[ "$(cat "$TEMP/web.count")" == 1 ]]
+wait_count "$TEMP/web.count" 2
 grep -Fq 'Escopo de runtime detectado: api' "$TEMP/import.log"
 
 make_zip web
 import_zip
-wait_count "$TEMP/web.count" 2
-[[ "$(cat "$TEMP/api.count")" == 2 ]]
+wait_count "$TEMP/api.count" 3
+wait_count "$TEMP/web.count" 3
 grep -Fq 'Escopo de runtime detectado: web' "$TEMP/import.log"
 
 make_zip both
 import_zip
-wait_count "$TEMP/api.count" 3
-wait_count "$TEMP/web.count" 3
+wait_count "$TEMP/api.count" 4
+wait_count "$TEMP/web.count" 4
 grep -Fq 'Escopo de runtime detectado: both' "$TEMP/import.log"
 
 # A extração acontece em /tmp e deve desaparecer antes de o import retornar.
@@ -143,4 +143,4 @@ if find /tmp -maxdepth 1 -type d -name 'auto-code-import-alpha-app-*' -print -qu
   exit 1
 fi
 
-printf 'OK: modo auto reinicia seletivamente API/Web somente após ZIP confirmado e limpa temporários\n'
+printf 'OK: modo auto preserva setup.sh e reinicia o deploy canônico completo somente após ZIP confirmado\n'
