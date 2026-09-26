@@ -19,17 +19,17 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 17\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
-cat > "$TMP/bin/ptyxis" <<'FAKE'
+cat > "$TMP/bin/gnome-terminal" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=16
+version=17
 controller=1
 floating-label=0
 window-placement=1
@@ -82,8 +82,7 @@ watcher=$!
 out="$(env HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=GNOME \
   AUTO_CODE_STATE_DIR="$TMP/state" PROJECTS_FILE="$TMP/projects" CODE_ROOT="$TMP/code" \
   TERMINALS_TEST_LOG="$TMP/terminal.log" TERMINALS_OPEN_INTERVAL_SECONDS=0 \
-  TERMINALS_WORKSPACE_SETTLE_SECONDS=0 TERMINALS_AUTO_INSTALL_GNOME_TERMINAL=0 TERMINALS_ALLOW_PTYXIS_FALLBACK=1 \
-  "$ROOT/scripts/terminals/terminals.sh")"
+  TERMINALS_WORKSPACE_SETTLE_SECONDS=0 TERMINALS_AUTO_INSTALL_GNOME_TERMINAL=0   "$ROOT/scripts/terminals/terminals.sh")"
 wait "$watcher"
 
 [[ "$(cat "$TMP/actions.log")" == $'status\nreconcile' ]]

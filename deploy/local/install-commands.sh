@@ -51,6 +51,37 @@ LRDP2_SOURCE="${LRDP2_SOURCE:-$LRDP_DIR/lrdp2}"
 log() { printf '[install-commands] %s\n' "$*"; }
 fail() { printf '[install-commands] ERRO: %s\n' "$*" >&2; exit 1; }
 
+normalize_ubuntu_terminal() {
+  # O Dev Automation usa deliberadamente um único emulador gráfico:
+  # GNOME Terminal. Ele é necessário para manter as abas Local/Remote visíveis.
+  command -v apt-get >/dev/null 2>&1 || return 0
+  command -v dpkg-query >/dev/null 2>&1 || return 0
+  command -v sudo >/dev/null 2>&1 || return 0
+
+  local can_sudo=0
+  if [[ -t 0 && -t 1 ]]; then
+    can_sudo=1
+  elif sudo -n true >/dev/null 2>&1; then
+    can_sudo=1
+  fi
+  [[ "$can_sudo" == 1 ]] || {
+    log 'AVISO: sem sudo interativo; normalização do terminal foi adiada.'
+    return 0
+  }
+
+  if ! dpkg-query -W -f='${Status}' gnome-terminal 2>/dev/null | grep -Fq 'install ok installed'; then
+    log 'instalando terminal padrão do Dev Automation: GNOME Terminal...'
+    sudo apt-get install -y gnome-terminal
+  fi
+
+  # Ptyxis é o terminal concorrente que vinha ficando instalado em paralelo no
+  # Ubuntu. A remoção é idempotente e só ocorre quando o pacote realmente existe.
+  if dpkg-query -W -f='${Status}' ptyxis 2>/dev/null | grep -Fq 'install ok installed'; then
+    log 'removendo terminal duplicado: Ptyxis...'
+    sudo apt-get purge -y ptyxis
+  fi
+}
+
 cleanup_legacy_google_drive_worker() {
   local state_dir marker remote_ok=1
   local -a units=(
@@ -146,6 +177,7 @@ cleanup_legacy_google_drive_worker() {
 [[ -f "$LRDP2_SOURCE" ]] || fail "script não encontrado: $LRDP2_SOURCE"
 
 mkdir -p "$TARGET_DIR"
+normalize_ubuntu_terminal
 cleanup_legacy_google_drive_worker
 chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$GLOBAL_SHORTCUTS_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 

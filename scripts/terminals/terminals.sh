@@ -20,7 +20,6 @@ COMMAND_INTERVAL_SECONDS="${TERMINALS_COMMAND_INTERVAL_SECONDS:-$OPEN_INTERVAL_S
 CAPTURE_TIMEOUT_TENTHS="${TERMINALS_CAPTURE_TIMEOUT_TENTHS:-200}"
 WORKSPACE_SETTLE_SECONDS="${TERMINALS_WORKSPACE_SETTLE_SECONDS:-4}"
 AUTO_INSTALL_GNOME_TERMINAL="${TERMINALS_AUTO_INSTALL_GNOME_TERMINAL:-1}"
-ALLOW_PTYXIS_FALLBACK="${TERMINALS_ALLOW_PTYXIS_FALLBACK:-0}"
 
 log(){ printf '[terminals] %s\n' "$*"; }
 warn(){ printf '[terminals] AVISO: %s\n' "$*" >&2; }
@@ -53,14 +52,12 @@ load_projects() {
 
 terminal_backend() {
   local path
-  # GNOME Terminal é preferido deliberadamente: com duas abas ele mantém a
-  # barra de abas visível. O Ptyxis do Ubuntu 26 usa overview e não oferece
-  # a mesma barra persistente.
-  if path="$(command -v gnome-terminal 2>/dev/null)"; then printf 'gnome-terminal\t%s\n' "$path"; return 0; fi
-  if [[ "$ALLOW_PTYXIS_FALLBACK" == 1 ]] && path="$(command -v ptyxis 2>/dev/null)"; then printf 'ptyxis\t%s\n' "$path"; return 0; fi
-  if path="$(command -v kgx 2>/dev/null)"; then printf 'kgx\t%s\n' "$path"; return 0; fi
-  if path="$(command -v xdg-terminal-exec 2>/dev/null)"; then printf 'xdg-terminal-exec\t%s\n' "$path"; return 0; fi
-  if path="$(command -v x-terminal-emulator 2>/dev/null)"; then printf 'x-terminal-emulator\t%s\n' "$path"; return 0; fi
+  # Backend único do Dev Automation. GNOME Terminal é obrigatório porque
+  # suporta as abas Local/Remote visíveis usadas pelo fluxo gerenciado.
+  if path="$(command -v gnome-terminal 2>/dev/null)"; then
+    printf 'gnome-terminal\t%s\n' "$path"
+    return 0
+  fi
   return 1
 }
 
@@ -327,7 +324,7 @@ case "${1:-}" in
     printf 'Uso: terminals | terminals --reset | terminals --diagnose\n'
     printf 'Fluxo único: ativa cada workspace e abre uma janela por projeto. Projetos com deploy local/remoto recebem abas AUTO no mesmo terminal.\n'
     printf 'Aba local: <Projeto> Auto. Aba remota: Remote <Projeto> Auto. Os tempos podem ser separados para terminal simples, aba e terminal com comando.\n'
-    printf 'No Ubuntu 26, o fluxo prefere GNOME Terminal porque o Ptyxis não mantém a barra clássica de abas visível.\n'
+    printf 'Backend único: GNOME Terminal, necessário para as abas Local/Remote visíveis.\n'
     printf 'Subprojetos dentro de <projeto>/apps/... não recebem workspace próprio. LAZER (workspace 1) não recebe terminal automático; lrdp1/lrdp2 recebem os dois últimos terminais simples.\n'
     exit 0
     ;;
@@ -347,8 +344,6 @@ esac
   fail "tempo de estabilização GNOME inválido: $WORKSPACE_SETTLE_SECONDS"
 [[ "$AUTO_INSTALL_GNOME_TERMINAL" =~ ^[01]$ ]] || \
   fail "TERMINALS_AUTO_INSTALL_GNOME_TERMINAL deve ser 0 ou 1"
-[[ "$ALLOW_PTYXIS_FALLBACK" =~ ^[01]$ ]] || \
-  fail "TERMINALS_ALLOW_PTYXIS_FALLBACK deve ser 0 ou 1"
 
 acquire_lock
 ensure_workspaces_on_all_monitors
@@ -360,10 +355,7 @@ if reuse_previous_managed_batch; then
 fi
 
 if ! ensure_visible_tabs_terminal; then
-  if [[ "$ALLOW_PTYXIS_FALLBACK" != 1 ]]; then
-    fail "GNOME Terminal não está instalado e não foi possível instalá-lo. O Ptyxis cria abas, mas não mantém a barra clássica visível. Instale uma vez com: sudo apt install -y gnome-terminal"
-  fi
-  warn 'GNOME Terminal indisponível; usando Ptyxis como fallback. As abas existem, mas a barra persistente pode não aparecer.'
+  fail "GNOME Terminal não está instalado e não foi possível instalá-lo. Instale uma vez com: sudo apt install -y gnome-terminal"
 fi
 IFS=$'\t' read -r terminal_kind terminal < <(terminal_backend) || \
   fail 'nenhum terminal compatível encontrado. Rode: terminals --diagnose'

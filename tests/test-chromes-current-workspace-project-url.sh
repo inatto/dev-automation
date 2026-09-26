@@ -3,9 +3,9 @@ set -euo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 TMP="$(mktemp -d /tmp/chromes-current-workspace-test-XXXXXX)"
 trap 'rm -rf -- "$TMP"' EXIT
-mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Profile 7" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/state/desktops"
+mkdir -p "$TMP/bin" "$TMP/home/.config/google-chrome/Profile 7" "$TMP/home/.config/google-chrome/Profile 3" "$TMP/home/.config/google-chrome/Profile 12" "$TMP/state/desktops"
 cat > "$TMP/home/.config/google-chrome/Local State" <<'JSON'
-{"profile":{"info_cache":{"Profile 7":{"name":"danielmaiax"},"Profile 3":{"name":"Sindicatto"}}}}
+{"profile":{"info_cache":{"Profile 7":{"name":"danielmaiax"},"Profile 3":{"name":"Sindicatto"},"Profile 12":{"name":"Clientes Sindicatto","user_name":"sindicatto.clientes@gmail.com"}}}}
 JSON
 cat > "$TMP/projects" <<'PROJECTS'
 bots/dev-automation
@@ -32,7 +32,7 @@ case "${1:-}" in info) printf '  Version: 11\n  State: ACTIVE\n' ;; esac
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=16
+version=17
 controller=1
 floating-label=0
 window-placement=1
@@ -48,8 +48,8 @@ READY
       # Sem CHROMES_TARGET_WORKSPACE: o controlador informa que o workspace atual é o 4 (inst-app).
       printf '%s\tworkspace=4\tmonitor=0\tmaximize=1\n' "$token" > "$TMP/state/desktops/chromes.ready"
       for _ in $(seq 1 160); do
-        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 2 ]]; then
-          printf '%s\tbrowsers=2\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
+        if [[ "$(wc -l < "$TMP/chrome.log")" -ge 3 ]]; then
+          printf '%s\tbrowsers=3\tnautilus=0\n' "$token" > "$TMP/state/desktops/chromes.result"
           exit 0
         fi
         sleep 0.05
@@ -64,6 +64,7 @@ out="$(HOME="$TMP/home" PATH="$TMP/bin:$PATH" XDG_SESSION_TYPE=wayland AUTO_CODE
 wait "$watcher"
 grep -Fq -- '--profile-directory=Profile 7 --new-window https://chatgpt.com/' "$TMP/chrome.log"
 grep -Fq -- '--profile-directory=Profile 3 --new-window https://anpprev.localhost/ https://sinproprev.localhost/' "$TMP/chrome.log"
+grep -Fq -- '--profile-directory=Profile 12 --new-window https://anpprev.localhost/ https://sinproprev.localhost/' "$TMP/chrome.log"
 grep -Fq 'Projeto: inst-app -> https://anpprev.localhost/ https://sinproprev.localhost/' <<< "$out"
 grep -Fq 'Destino: workspace atual 4, monitor mais à esquerda, maximizado.' <<< "$out"
 echo 'OK: chromes manual usa o workspace atual para resolver projeto/URLs, igual ao chromes-all.'

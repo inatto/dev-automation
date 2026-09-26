@@ -28,17 +28,17 @@ FAKE
 cat > "$TMP/bin/gnome-extensions" <<'FAKE'
 #!/usr/bin/env bash
 case "${1:-}" in
-  info) printf '  Version: 16\n  State: ACTIVE\n' ;;
+  info) printf '  Version: 17\n  State: ACTIVE\n' ;;
   enable) ;;
 esac
 FAKE
-cat > "$TMP/bin/ptyxis" <<'FAKE'
+cat > "$TMP/bin/gnome-terminal" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$TERMINALS_TEST_LOG"
 FAKE
 chmod +x "$TMP/bin/"*
 cat > "$TMP/state/desktops/extension.ready" <<'READY'
-version=16
+version=17
 controller=1
 floating-label=0
 window-placement=1
@@ -79,11 +79,11 @@ READY
         printf '%s\tplaced=0\texpected=1\tcomplete=0\n' "$token" > "$TMP/state/desktops/terminals.result"
 
         for _ in $(seq 1 200); do
-          current="$(grep -c -- '--new-window' "$TMP/terminal.log" || true)"
+          current="$(grep -c -- '--window' "$TMP/terminal.log" || true)"
           (( current >= handled )) && break
           sleep 0.02
         done
-        [[ "$(grep -c -- '--new-window' "$TMP/terminal.log" || true)" -eq "$handled" ]]
+        [[ "$(grep -c -- '--window' "$TMP/terminal.log" || true)" -eq "$handled" ]]
         printf '%s\tplaced=1\texpected=1\tcomplete=1\tworkspace=%s\tmonitor=2\n' "$token" "$workspace" > "$TMP/state/desktops/terminals.result"
         (( handled == count )) && exit 0
         ;;
@@ -106,23 +106,23 @@ common_env=(
   TERMINALS_OPEN_INTERVAL_SECONDS=0
   TERMINALS_WORKSPACE_SETTLE_SECONDS=0
   TERMINALS_AUTO_INSTALL_GNOME_TERMINAL=0
-  TERMINALS_ALLOW_PTYXIS_FALLBACK=1
+  
 )
 
 out="$(env "${common_env[@]}" "$ROOT/scripts/terminals/terminals.sh")"
 wait "$watcher"
 
 [[ "$(wc -l < "$TMP/terminal.log")" -eq 6 ]]
-[[ "$(grep -c -- '--new-window' "$TMP/terminal.log")" -eq 5 ]]
+[[ "$(grep -c -- '--window' "$TMP/terminal.log")" -eq 5 ]]
 [[ "$(grep -c -- '--tab' "$TMP/terminal.log")" -eq 1 ]]
 [[ "$(cat "$TMP/actions.log")" == $'direct\t2\t1\ndirect\t3\t2\ndirect\t4\t3\ndirect\t5\t4\ndirect\t6\t5' ]]
-mapfile -t windows < <(grep -- '--new-window' "$TMP/terminal.log")
+mapfile -t windows < <(grep -- '--window' "$TMP/terminal.log")
 printf '%s\n' "${windows[0]}" | grep -Fq -- "--working-directory=$TMP/code/bots/dev-automation"
 printf '%s\n' "${windows[1]}" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-app"
 printf '%s\n' "${windows[2]}" | grep -Fq -- "--working-directory=$TMP/code/orgs/orbital/orbital-ui"
 printf '%s\n' "${windows[3]}" | grep -Fq -- "--working-directory=$TMP/home"
 printf '%s\n' "${windows[4]}" | grep -Fq -- "--working-directory=$TMP/home"
-grep -- '--new-window' "$TMP/terminal.log" | grep -F -- "--title=Orbital App Auto" | grep -Fq -- 'orbital-app-auto'
+grep -- '--window' "$TMP/terminal.log" | grep -F -- "--title=Orbital App Auto" | grep -Fq -- 'orbital-app-auto'
 grep -- '--tab' "$TMP/terminal.log" | grep -F -- "--title=Remote Orbital App Auto" | grep -Fq -- 'remote-orbital-app-auto'
 
 grep -Fq 'FLUXO ÚNICO' <<<"$out"

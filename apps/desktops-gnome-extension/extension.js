@@ -20,7 +20,7 @@ const TERMINALS_RESULT_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.result
 const TERMINALS_BATCH_PATH = GLib.build_filenamev([STATE_DIR, 'terminals.batch']);
 const EXTENSION_READY_PATH = GLib.build_filenamev([STATE_DIR, 'extension.ready']);
 const EXTENSION_RELOAD_REQUIRED_PATH = GLib.build_filenamev([STATE_DIR, 'extension.reload-required']);
-const EXTENSION_VERSION = 16;
+const EXTENSION_VERSION = 17;
 
 const BROWSER_RE = /google[-_. ]?chrome|chromium/i;
 const NAUTILUS_RE = /org\.gnome\.nautilus|nautilus/i;
@@ -311,7 +311,7 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 const validWorkspace = Number.isInteger(workspace) && workspace <= global.workspace_manager.n_workspaces &&
                     ((workspace === 1 && project === '@lazer') || workspace >= 2);
                 if (fields.length !== 3 || !project || keys.has(project) || workspaces.has(workspace) ||
-                    !validWorkspace || ![1, 2].includes(expected))
+                    !validWorkspace || ![1, 2, 3].includes(expected))
                     return null;
                 keys.add(project);
                 workspaces.add(workspace);

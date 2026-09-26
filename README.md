@@ -269,7 +269,7 @@ genérica por nome.
 ### `chromes` e `chromes-all`
 
 `chromes` abre o Chrome Daniel/danielmaiax no ChatGPT e, se o projeto tiver URLs
-locais em `services.csv`, o Chrome Sindicatto com essas URLs em abas. Mantém os
+locais em `services.csv`, abre Chrome Sindicatto e Chrome Clientes Sindicatto com essas mesmas URLs em abas. Mantém os
 perfis existentes, o monitor esquerdo e as janelas maximizadas no GNOME/Wayland.
 
 `chromes-all` segue a ordem dos projetos raiz da configuração da máquina
@@ -309,7 +309,7 @@ chromes-all --register-existing
 ```
 
 Esse comando só registra: não abre, fecha ou move. Exige a quantidade exata de
-janelas por projeto (uma Daniel/ChatGPT e outra Sindicatto quando houver URL local).
+janelas por projeto (uma Daniel/ChatGPT e, quando houver URL local, Sindicatto + Clientes Sindicatto).
 Confira também os perfis/abas antes do registro; a contagem não identifica o
 conteúdo. Depois, `chromes-all` restaura as posições automaticamente.
 

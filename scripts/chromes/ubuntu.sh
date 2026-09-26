@@ -145,6 +145,19 @@ resolve_daniel_profile() {
   printf 'Default\n'
 }
 
+resolve_clientes_sindicatto_profile() {
+  local user_data_dir="$1" resolved
+  if [[ -n "${CHROMES_CLIENTES_SINDICATTO_PROFILE:-}" ]]; then
+    printf '%s\n' "$CHROMES_CLIENTES_SINDICATTO_PROFILE"
+    return 0
+  fi
+  if resolved="$(profile_metadata "$user_data_dir" resolve 'Clientes Sindicatto' 2>/dev/null)" && [[ -n "$resolved" ]]; then
+    printf '%s\n' "$resolved"
+    return 0
+  fi
+  return 1
+}
+
 resolve_sindicatto_profile() {
   local user_data_dir="$1" resolved
   if [[ -n "${CHROMES_SINDICATTO_PROFILE:-}" ]]; then
@@ -232,7 +245,7 @@ case "${1:-}" in
   --help|-h|help)
     printf 'Uso: chromes | chromes --diagnose\n'
     printf 'Abre ChatGPT + URL(s) local(is) do projeto do workspace atual; monitor esquerdo e maximizado.\n'
-    printf 'Overrides de perfil: CHROMES_USER_DATA_DIR=/caminho CHROMES_DANIEL_PROFILE="Default" CHROMES_SINDICATTO_PROFILE="Profile 1"\n'
+    printf 'Overrides de perfil: CHROMES_USER_DATA_DIR=/caminho CHROMES_DANIEL_PROFILE="Default" CHROMES_SINDICATTO_PROFILE="Profile 1" CHROMES_CLIENTES_SINDICATTO_PROFILE="Profile 12"\n'
     exit 0
     ;;
   "") ;;
@@ -246,6 +259,7 @@ log "Ubuntu backend: $mode -> $chrome"
 user_data_dir="$(chrome_user_data_dir "$mode" "$chrome")"
 daniel_profile="$(resolve_daniel_profile "$user_data_dir")"
 sindicatto_profile="$(resolve_sindicatto_profile "$user_data_dir")"
+clientes_sindicatto_profile="$(resolve_clientes_sindicatto_profile "$user_data_dir" || true)"
 
 placement_active=0
 target_workspace="${CHROMES_TARGET_WORKSPACE:-}"
@@ -256,7 +270,7 @@ if [[ "${XDG_SESSION_TYPE:-}" == wayland ]] && command -v gnome-shell >/dev/null
     [[ "$CHROMES_TARGET_WORKSPACE" =~ ^[1-9][0-9]*$ ]] || fail 'CHROMES_TARGET_WORKSPACE deve ser inteiro positivo.'
     placement_fields="workspace=$CHROMES_TARGET_WORKSPACE"$'\t'"$placement_fields"
   fi
-  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[12]$ ]]; then
+  if [[ -n "${CHROMES_MANAGED_PROJECT:-}" && "${CHROMES_MANAGED_EXPECTED:-0}" =~ ^[123]$ ]]; then
     placement_fields+=$'\t'"project=$CHROMES_MANAGED_PROJECT"$'\t'"expected=$CHROMES_MANAGED_EXPECTED"
   fi
   gnome_placement_prepare chromes default "$placement_fields" || fail 'não foi possível preparar o monitor esquerdo no GNOME/Wayland.'
@@ -314,6 +328,14 @@ if (( ! skip_second )); then
   log "Abrindo Chrome Sindicatto ($sindicatto_profile) -> ${local_urls[*]}"
   run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$sindicatto_profile" --new-window "${local_urls[@]}"
   expected_browsers=2
+  if [[ -n "$clientes_sindicatto_profile" ]]; then
+    sleep 1
+    log "Abrindo Chrome Clientes Sindicatto ($clientes_sindicatto_profile) -> ${local_urls[*]}"
+    run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$clientes_sindicatto_profile" --new-window "${local_urls[@]}"
+    expected_browsers=3
+  else
+    log 'Chrome Clientes Sindicatto ignorado: perfil não encontrado no Local State.'
+  fi
 else
   if [[ -n "$project_entry" ]]; then
     log "Chrome Sindicatto ignorado: $(basename -- "$project_entry") não possui URL local configurada."

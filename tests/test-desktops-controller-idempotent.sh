@@ -14,11 +14,11 @@ cat > "$TARGET/metadata.json" <<'JSON'
   "name": "Dev Automation Workspace Controller",
   "description": "Controla workspaces e posicionamento explícito de janelas sem criar indicador visual duplicado.",
   "shell-version": ["50"],
-  "version": 16
+  "version": 17
 }
 JSON
 cat > "$TMP/home/.local/state/dev-automation/desktops/extension.ready" <<'READY'
-version=16
+version=17
 controller=1
 floating-label=0
 window-placement=1
@@ -49,5 +49,5 @@ for _ in 1 2 3; do
     "$ROOT/scripts/desktops/desktops.sh" >/dev/null
 done
 [[ ! -s "$TMP/ext.calls" ]]
-grep -Fqx 'version=16' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
+grep -Fqx 'version=17' "$TMP/home/.local/state/dev-automation/desktops/extension.ready"
 echo 'OK: controlador GNOME é idempotente; execuções repetidas não fazem enable/disable nem apagam o marker.'

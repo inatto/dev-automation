@@ -19,7 +19,7 @@ DESKTOPS_CLOSE_READY="$DESKTOPS_STATE_DIR/close.ready"
 DESKTOPS_CLOSE_RESULT="$DESKTOPS_STATE_DIR/close.result"
 DESKTOPS_EXTENSION_READY="$DESKTOPS_STATE_DIR/extension.ready"
 DESKTOPS_EXTENSION_RELOAD_REQUIRED="$DESKTOPS_STATE_DIR/extension.reload-required"
-GNOME_EXTENSION_VERSION=16
+GNOME_EXTENSION_VERSION=17
 
 log() { printf '[desktops] %s\n' "$*"; }
 warn() { printf '[desktops] AVISO: %s\n' "$*" >&2; }
