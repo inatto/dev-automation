@@ -62,7 +62,9 @@ G512_SKIP_HARDWARE_CHECK=1 \
 [ ! -f "$UNIT_DIR/g512-rgb.service" ]
 grep -Fq 'RestartSec=5' "$UNIT_DIR/dev-automation-g512-rgb.service"
 grep -Fq 'StartLimitBurst=5' "$UNIT_DIR/dev-automation-g512-rgb.service"
+grep -Fq 'WantedBy=default.target' "$UNIT_DIR/dev-automation-g512-rgb.service"
 grep -Fq -- '--user disable --now g512-rgb.service' "$LOG_FILE"
+grep -Fq -- '--user enable dev-automation-g512-rgb.service' "$LOG_FILE"
 grep -Fq -- '--user restart dev-automation-g512-rgb.service' "$LOG_FILE"
 
-printf 'OK: G512 legado migra para dev-automation, troca a unit e limita reinícios\n'
+printf 'OK: G512 migra, habilita autostart no login e limita reinícios\n'

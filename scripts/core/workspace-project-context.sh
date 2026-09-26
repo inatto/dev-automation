@@ -8,6 +8,7 @@ WORKSPACE_CONTEXT_ROOT="$(cd -- "$WORKSPACE_CONTEXT_DIR/../.." && pwd -P)"
 source "$WORKSPACE_CONTEXT_ROOT/scripts/core/project-config.sh"
 PROJECTS_FILE="${PROJECTS_FILE:-$(dev_projects_file "$WORKSPACE_CONTEXT_ROOT")}"
 SERVICES_FILE="${SERVICES_FILE:-$WORKSPACE_CONTEXT_ROOT/config/services.csv}"
+CHATGPT_PROJECTS_FILE="${CHATGPT_PROJECTS_FILE:-$WORKSPACE_CONTEXT_ROOT/config/chatgpt-projects.urls}"
 
 declare -ag WORKSPACE_PROJECTS=()
 declare -Ag WORKSPACE_SERVICE_URLS=()
@@ -83,4 +84,27 @@ workspace_context_urls_for_workspace() {
   local workspace="$1" entry
   entry="$(workspace_context_project_for_workspace "$workspace")" || return 1
   workspace_context_urls_for_project "$entry"
+}
+
+
+workspace_context_chatgpt_url_for_project() {
+  local entry="$1" key value entry_base
+  [[ -f "$CHATGPT_PROJECTS_FILE" ]] || return 1
+  entry_base="$(basename -- "$entry")"
+
+  while IFS='|' read -r key value _ || [[ -n "${key:-}${value:-}" ]]; do
+    key="${key%$'\r'}"
+    value="${value%$'\r'}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    [[ -n "$key" && "$key" != \#* && -n "$value" ]] || continue
+    if [[ "$key" == "$entry" || "$key" == "$entry_base" ]]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done < "$CHATGPT_PROJECTS_FILE"
+
+  return 1
 }

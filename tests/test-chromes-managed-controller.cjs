@@ -218,4 +218,18 @@ test('nova requisição cancela reposicionamento pendente do pedido anterior', (
     const before = e.state.moves.length; e.drain();
     assert.equal(e.state.moves.length, before);
 });
+
+
+test('LAZER pode fazer parte do plano gerenciado sem duplicar na reexecução', () => {
+    const e = environment(), c = e.controller();
+    e.put('chromes.plan', '@lazer\t1\t1\nbots/a\t2\t1\norgs/b\t3\t2\n');
+    assert.equal(e.request(c, 'status').missing, '4');
+    assert.equal(e.request(c, 'default', {project: '@lazer', expected: '1', workspace: '1', maximize: '1'}).valid, '1');
+    const leisure = e.window(1001, 4); c._inspectNewWindow(leisure, 0); e.drain();
+    assert.equal(leisure.workspace, 0); assert.equal(leisure.monitor, 2); assert.ok(leisure.maximized);
+    assert.equal(e.request(c, 'default', {project: '@lazer', expected: '1', workspace: '1'}).valid, '0');
+    assert.equal(e.request(c, 'status').managed, '1');
+    assert.equal(e.request(c, 'status').missing, '3');
+});
+
 console.log(`${tests} cenários do controlador Chrome aprovados.`);

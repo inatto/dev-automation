@@ -96,6 +96,7 @@ if action == "list":
 
 if action == "resolve":
     wanted = norm(needle)
+    wanted_compact = wanted.replace(" ", "")
     best = None
     for key, meta in cache.items():
         values = [
@@ -105,10 +106,12 @@ if action == "resolve":
             meta.get("shortcut_name"),
         ]
         normalized = [norm(v) for v in values if v]
+        compact = [value.replace(" ", "") for value in normalized]
         score = 0
-        if wanted in normalized:
+        if wanted in normalized or (wanted_compact and wanted_compact in compact):
             score = 100
-        elif any(wanted and wanted in value for value in normalized):
+        elif any(wanted and wanted in value for value in normalized) or \
+                any(wanted_compact and wanted_compact in value for value in compact):
             score = 80
         elif wanted and wanted in norm(key):
             score = 60
@@ -273,6 +276,7 @@ fi
 
 local_urls=()
 project_entry=''
+chatgpt_url='https://chatgpt.com/'
 if [[ -n "${CHROMES_LOCAL_URLS:-}" ]]; then
   mapfile -t local_urls < <(printf '%s\n' "$CHROMES_LOCAL_URLS" | sed '/^[[:space:]]*$/d')
 elif [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_load_projects >/dev/null 2>&1; then
@@ -287,9 +291,14 @@ elif [[ "$target_workspace" =~ ^[1-9][0-9]*$ ]] && declare -F workspace_context_
   fi
 fi
 
+if [[ -n "$project_entry" ]] && declare -F workspace_context_chatgpt_url_for_project >/dev/null 2>&1; then
+  mapped_chatgpt_url="$(workspace_context_chatgpt_url_for_project "$project_entry" 2>/dev/null || true)"
+  [[ -z "$mapped_chatgpt_url" ]] || chatgpt_url="$mapped_chatgpt_url"
+fi
+
 common=(--no-first-run)
-log "Abrindo Chrome Daniel ($daniel_profile) -> ChatGPT..."
-run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window 'https://chatgpt.com/'
+log "Abrindo Chrome Daniel ($daniel_profile) -> $chatgpt_url"
+run_chrome "$mode" "$chrome" "${common[@]}" --profile-directory="$daniel_profile" --new-window "$chatgpt_url"
 expected_browsers=1
 
 skip_second=0

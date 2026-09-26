@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Executa `chromes` uma vez em cada workspace de projeto.
-# Workspace 1 = LAZER; projetos começam no workspace 2.
+# Executa `chromes` no LAZER e uma vez em cada workspace de projeto.
+# Workspace 1 = LAZER (Chrome Daniel); projetos começam no workspace 2.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -29,9 +29,10 @@ Uso: chromes-all | chromes-all --register-existing
 
 No GNOME/Wayland, janelas já registradas são apenas reposicionadas por projeto.
 Não fecha/reinicia navegadores nem abre janelas quando há um lote parcial/ambíguo.
-Sem janelas de projeto abertas, executa `chromes` em cada workspace de projeto.
+Sem janelas gerenciadas abertas, executa `chromes` no LAZER e em cada workspace de projeto.
 O próprio `chromes` resolve o projeto/URL do workspace e abre:
-  - Chrome 1: Daniel/danielmaiax -> https://chatgpt.com/
+  - Workspace 1 / LAZER: Chrome Daniel/danielmaiax -> https://chatgpt.com/
+  - Projetos: Chrome Daniel/danielmaiax -> Project ChatGPT mapeado (fallback https://chatgpt.com/)
   - Chrome 2: Sindicatto -> URL(s) local(is), somente quando existirem
   - monitor esquerdo, maximizado
 Intervalo entre desktops na abertura: 1s.
@@ -70,6 +71,9 @@ if (( managed_mode )); then
   plan="$GNOME_PLACEMENT_STATE_DIR/chromes.plan"
   plan_tmp="$(mktemp "$plan.XXXXXX")"
   trap 'rm -f -- "$plan_tmp"' EXIT
+  # LAZER também faz parte do lote gerenciado. A chave reservada @lazer
+  # não representa projeto em disco; identifica somente a janela Daniel do workspace 1.
+  printf '%s\t%s\t%s\n' '@lazer' '1' '1' >> "$plan_tmp"
   for ((i=0; i<${#WORKSPACE_PROJECTS[@]}; i++)); do
     entry="${WORKSPACE_PROJECTS[$i]}"
     [[ "$entry" != *$'\t'* && "$entry" != *$'\n'* && "$entry" != *$'\r'* ]] || fail 'projeto com separadores inválidos.'
@@ -115,7 +119,22 @@ if (( managed_mode )); then
   fi
 fi
 
-log "Projetos: ${#WORKSPACE_PROJECTS[@]}; intervalo: 1s; monitor: esquerdo; maximizado: sim."
+log "Workspaces Chrome: $(( ${#WORKSPACE_PROJECTS[@]} + 1 )) (LAZER + ${#WORKSPACE_PROJECTS[@]} projetos); intervalo: 1s; monitor: esquerdo; maximizado: sim."
+
+log 'workspace 1 [LAZER]: Chrome Daniel'
+PROJECTS_FILE="$PROJECTS_FILE" \
+SERVICES_FILE="$SERVICES_FILE" \
+CHROMES_TARGET_WORKSPACE=1 \
+CHROMES_MANAGED_PROJECT='@lazer' \
+CHROMES_MANAGED_EXPECTED=1 \
+CHROMES_SKIP_SECOND=1 \
+CHROMES_LOCAL_URLS='' \
+  "$CHROMES_COMMAND"
+
+if ((${#WORKSPACE_PROJECTS[@]} > 0)); then
+  sleep "$DESKTOP_DELAY_SECONDS"
+fi
+
 for ((i=0; i<${#WORKSPACE_PROJECTS[@]}; i++)); do
   entry="${WORKSPACE_PROJECTS[$i]}"
   name="$(basename -- "$entry")"

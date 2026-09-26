@@ -56,22 +56,23 @@ CHROMES_ALL_SLEEP_LOG="$TMP/sleep.log" \
 XDG_SESSION_TYPE=x11 \
   "$ROOT/scripts/chromes/chromes-all.sh" >/dev/null
 
-[[ "$(grep -c '^workspace=' "$TMP/chromes.log")" -eq 4 ]]
+[[ "$(grep -c '^workspace=' "$TMP/chromes.log")" -eq 5 ]]
+grep -Fqx 'workspace=1' "$TMP/chromes.log"
 grep -Fqx 'workspace=2' "$TMP/chromes.log"
 grep -Fqx 'workspace=3' "$TMP/chromes.log"
 grep -Fqx 'workspace=4' "$TMP/chromes.log"
 grep -Fqx 'workspace=5' "$TMP/chromes.log"
 
 # DRY: chromes-all só escolhe workspace; URL/maximização/Files pertencem ao chromes.
-[[ "$(grep -c '^local_urls=UNSET$' "$TMP/chromes.log")" -eq 4 ]]
-[[ "$(grep -c '^maximize=UNSET$' "$TMP/chromes.log")" -eq 4 ]]
-[[ "$(grep -c '^files=UNSET$' "$TMP/chromes.log")" -eq 4 ]]
+[[ "$(grep -c '^local_urls=UNSET$' "$TMP/chromes.log")" -eq 5 ]]
+[[ "$(grep -c '^maximize=UNSET$' "$TMP/chromes.log")" -eq 5 ]]
+[[ "$(grep -c '^files=UNSET$' "$TMP/chromes.log")" -eq 5 ]]
 
 # O subprojeto bots/dev-automation/apps/... não consome desktop.
 ! grep -Fq 'amazon-imap-bot' "$TMP/chromes.log"
 
-# Quatro desktops => três intervalos, sempre exatamente 1 segundo.
-[[ "$(grep -c '^sleep=1$' "$TMP/sleep.log")" -eq 3 ]]
-[[ "$(wc -l < "$TMP/sleep.log")" -eq 3 ]]
+# LAZER + quatro desktops de projeto => quatro intervalos, sempre exatamente 1 segundo.
+[[ "$(grep -c '^sleep=1$' "$TMP/sleep.log")" -eq 4 ]]
+[[ "$(wc -l < "$TMP/sleep.log")" -eq 4 ]]
 
-echo 'OK: chromes-all usa a mesma lista de desktops, ignora subprojetos e espera 1s entre projetos.' 
+echo 'OK: chromes-all inclui LAZER, usa a mesma lista de projetos, ignora subprojetos e espera 1s entre workspaces.' 

@@ -308,9 +308,10 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                 const [project, workspaceText, expectedText] = fields;
                 const workspace = Number(workspaceText);
                 const expected = Number(expectedText);
+                const validWorkspace = Number.isInteger(workspace) && workspace <= global.workspace_manager.n_workspaces &&
+                    ((workspace === 1 && project === '@lazer') || workspace >= 2);
                 if (fields.length !== 3 || !project || keys.has(project) || workspaces.has(workspace) ||
-                    !Number.isInteger(workspace) || workspace < 2 || workspace > global.workspace_manager.n_workspaces ||
-                    ![1, 2].includes(expected))
+                    !validWorkspace || ![1, 2].includes(expected))
                     return null;
                 keys.add(project);
                 workspaces.add(workspace);
@@ -348,8 +349,15 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
             // Sem nenhuma associação viva, a restauração da sessão pode ter
             // jogado TODO o lote no LAZER. Não presumir que sejam janelas manuais
             // para liberar duplicatas. Com um lote conhecido, LAZER é preservado.
-            untracked: windows.filter(window => !known.has(this._stableSequence(window)) &&
-                (assignments.length === 0 || (window.get_workspace?.()?.index?.() ?? -1) >= 1)).length,
+            untracked: windows.filter(window => {
+                if (known.has(this._stableSequence(window)))
+                    return false;
+                if (assignments.length === 0)
+                    return true;
+                const index = window.get_workspace?.()?.index?.() ?? -1;
+                const leisureManaged = plan.some(target => target.workspaceIndex === 0);
+                return index >= 1 || (leisureManaged && index === 0);
+            }).length,
         };
     }
 
@@ -397,8 +405,12 @@ export default class DevAutomationWorkspaceControllerExtension extends Extension
                     records.push({sequence, project: target.project});
                 }
             }
-            if (windows.some(window => (window.get_workspace?.()?.index?.() ?? -1) >= 1 &&
-                !assigned.has(this._stableSequence(window))))
+            const leisureManaged = plan.some(target => target.workspaceIndex === 0);
+            if (windows.some(window => {
+                const index = window.get_workspace?.()?.index?.() ?? -1;
+                return (index >= 1 || (leisureManaged && index === 0)) &&
+                    !assigned.has(this._stableSequence(window));
+            }))
                 status.valid = false;
             if (status.valid) {
                 const retained = status.registry.windows.filter(item => !assigned.has(item.sequence) &&
