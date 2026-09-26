@@ -131,18 +131,6 @@ tui_collect_metrics() {
   TUI_PROJECT_COUNT="$(backup_targets 2>/dev/null | sed '/^[[:space:]]*$/d' | wc -l | tr -d ' ')"
   TUI_ZIP_COUNT="$(find "$(archive_output_dir)" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
   TUI_DOWNLOAD_ZIPS=0
-  TUI_WORKER_TO="OFF"
-  TUI_WORKER_FROM="OFF"
-  TUI_WORKER_FROM_ZIPS=0
-  systemctl --user is-active --quiet dev-automation-worker-to.service 2>/dev/null && TUI_WORKER_TO="ON" || true
-  if systemctl --user is-active --quiet dev-automation-worker-from.timer 2>/dev/null && \
-     systemctl --user is-active --quiet dev-automation-worker-from-delete.service 2>/dev/null; then
-    TUI_WORKER_FROM="ON"
-  fi
-  if [ -d "$HOME/worker/from" ]; then
-    TUI_WORKER_FROM_ZIPS="$(find "$HOME/worker/from" -maxdepth 1 -type f -iname '*.zip' 2>/dev/null | wc -l | tr -d ' ')"
-    [[ "$TUI_WORKER_FROM_ZIPS" =~ ^[0-9]+$ ]] || TUI_WORKER_FROM_ZIPS=0
-  fi
   while IFS= read -r downloads || [ -n "$downloads" ]; do
     [ -n "$downloads" ] || continue
     if [ -d "$downloads" ]; then
@@ -170,7 +158,7 @@ tui_draw_static() {
   tui_write_split_row 2 "STATUS: $TUI_STATUS_STATE  $TUI_STATUS_DETAIL" "HORA: $now" '44;93;1'
   tui_write_split_row 3 "MODO: ${mode^^} · manager inotify: $manager_inotify" "PROJETOS: $TUI_PROJECT_COUNT · PENDENTES: $dirty · DL ZIPs: $TUI_DOWNLOAD_ZIPS" '44;97'
   tui_write_split_row 4 "INOTIFY INST: $TUI_INOTIFY_INSTANCES/$TUI_INOTIFY_MAX_INSTANCES" "WATCHES: $TUI_INOTIFY_WATCHES/$TUI_INOTIFY_MAX_WATCHES" '44;96;1'
-  tui_write_split_row 5 "WORKER TO: $TUI_WORKER_TO · WORKER FROM: $TUI_WORKER_FROM" "ZIPs FROM: $TUI_WORKER_FROM_ZIPS · ZIPs CODE: $TUI_ZIP_COUNT" '44;97;1'
+  tui_write_split_row 5 "ZIPs CODE: $TUI_ZIP_COUNT" "DL ZIPs: $TUI_DOWNLOAD_ZIPS" '44;97;1'
   tui_write_row 6 '44;96;1' "$(tui_border_text '╠' '╣' 'ÚLTIMA AÇÃO')"
   tui_write_box_row 7 "$TUI_LAST_ACTION" '44;93;1'
   tui_write_row 8 '44;96;1' "$(tui_border_text '╠' '╣' 'LOG · área rolável')"

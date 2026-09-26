@@ -148,19 +148,6 @@ def process_fd_metrics(pid):
     return used, limit
 
 
-def systemd_user_active(unit):
-    try:
-        return subprocess.run(
-            ["systemctl", "--user", "is-active", "--quiet", unit],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=0.2,
-            check=False,
-        ).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
 def count_zip_files(directory):
     if not directory:
         return 0
@@ -303,10 +290,6 @@ class Dashboard:
         self.manager_fd_limit = 0
         self.zip_count = 0
         self.download_zip_count = 0
-        self.worker_to = False
-        self.worker_from = False
-        self.worker_from_delete = False
-        self.worker_from_zip_count = 0
         self.last_metric_at = 0.0
         self.last_system_metric_at = 0.0
         self.cpu_percent = 0.0
@@ -644,10 +627,6 @@ class Dashboard:
             self.manager_fd_limit,
             self.zip_count,
             self.download_zip_count,
-            self.worker_to,
-            self.worker_from,
-            self.worker_from_delete,
-            self.worker_from_zip_count,
         )
         self.max_instances = read_int("/proc/sys/fs/inotify/max_user_instances")
         self.max_watches = read_int("/proc/sys/fs/inotify/max_user_watches")
@@ -656,10 +635,6 @@ class Dashboard:
         self.manager_fds, self.manager_fd_limit = process_fd_metrics(pid)
         self.zip_count = count_zip_files(self.output_dir)
         self.download_zip_count = count_zip_files(self.downloads)
-        self.worker_to = systemd_user_active("dev-automation-worker-to.service")
-        self.worker_from = systemd_user_active("dev-automation-worker-from.timer")
-        self.worker_from_delete = systemd_user_active("dev-automation-worker-from-delete.service")
-        self.worker_from_zip_count = count_zip_files(Path.home() / "worker" / "from")
         after = (
             self.max_instances,
             self.max_watches,
@@ -669,10 +644,6 @@ class Dashboard:
             self.manager_fd_limit,
             self.zip_count,
             self.download_zip_count,
-            self.worker_to,
-            self.worker_from,
-            self.worker_from_delete,
-            self.worker_from_zip_count,
         )
         if after != before:
             self.dirty = True
@@ -937,12 +908,7 @@ class Dashboard:
             )
             safe_add(header, 4, col2_x, f"DOWNLOADS ZIPs: {self.download_zip_count}", self.colors["base"], col2_w)
             safe_add(header, 5, col1_x, f"DOWNLOADS: {self.downloads} · ZIPs CODE: {self.zip_count}", self.colors["ok"], col1_w)
-            worker_from_ok = self.worker_from and self.worker_from_delete
-            safe_add(
-                header, 5, col2_x,
-                f"WORKER TO: {'ON' if self.worker_to else 'OFF'} · WORKER FROM: {'ON' if worker_from_ok else 'OFF'} · ZIPs FROM: {self.worker_from_zip_count}",
-                self.colors["ok"] if self.worker_to and worker_from_ok else self.colors["highlight"], col2_w,
-            )
+
 
             projects_text = f"PROJECTS: {self.projects_file or 'aguardando resolução...'}"
             projects_width = max(1, width - 4)

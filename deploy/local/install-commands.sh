@@ -82,62 +82,6 @@ normalize_ubuntu_terminal() {
   fi
 }
 
-cleanup_legacy_google_drive_worker() {
-  local state_dir marker remote_ok=1
-  local -a units=(
-    dev-automation-worker-to.service
-    dev-automation-worker-from.service
-    dev-automation-worker-from.timer
-    dev-automation-worker-from-delete.service
-    rclone-worker-to.service
-    rclone-worker-from.service
-    rclone-worker-from.timer
-  )
-
-  state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation"
-  marker="$state_dir/legacy-google-drive-worker-removed-v36"
-  [ ! -f "$marker" ] || return 0
-
-  mkdir -p "$state_dir"
-  log "removendo integração antiga worker/Google Drive..."
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user disable --now "${units[@]}" >/dev/null 2>&1 || true
-  fi
-  rm -f "$HOME/.config/systemd/user/dev-automation-worker-"*.service \
-        "$HOME/.config/systemd/user/dev-automation-worker-"*.timer \
-        "$HOME/.config/systemd/user/rclone-worker-"*.service \
-        "$HOME/.config/systemd/user/rclone-worker-"*.timer 2>/dev/null || true
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl --user daemon-reload >/dev/null 2>&1 || true
-    systemctl --user reset-failed >/dev/null 2>&1 || true
-  fi
-
-  rm -f "$TARGET_DIR/worker-sync" 2>/dev/null || true
-  rm -rf "$HOME/worker"
-
-  if command -v rclone >/dev/null 2>&1; then
-    remote_dirs="$(rclone lsf 'danielmaiax:' --dirs-only --max-depth 1 2>/dev/null)" || remote_ok=0
-    if [ "$remote_ok" -eq 1 ] && printf '%s\n' "$remote_dirs" | grep -Fxq 'worker/'; then
-      if rclone purge 'danielmaiax:worker'; then
-        log "Google Drive removido: danielmaiax:worker"
-      else
-        remote_ok=0
-        log "AVISO: não foi possível apagar danielmaiax:worker agora; a limpeza será tentada novamente."
-      fi
-    elif [ "$remote_ok" -eq 1 ]; then
-      log "Google Drive já não possui danielmaiax:worker."
-    else
-      log "AVISO: não foi possível consultar danielmaiax:; a limpeza remota será tentada novamente."
-    fi
-  else
-    remote_ok=0
-    log "AVISO: rclone não está disponível; serviços/pastas locais foram removidos, mas o remoto não pôde ser apagado."
-  fi
-
-  if [ "$remote_ok" -eq 1 ]; then
-    : > "$marker"
-  fi
-}
 
 [[ -f "$AUTO_SOURCE" ]] || fail "script não encontrado: $AUTO_SOURCE"
 [[ -f "$PROJECT_INSTALLER" ]] || fail "instalador não encontrado: $PROJECT_INSTALLER"
@@ -178,7 +122,6 @@ cleanup_legacy_google_drive_worker() {
 
 mkdir -p "$TARGET_DIR"
 normalize_ubuntu_terminal
-cleanup_legacy_google_drive_worker
 chmod +x "$GLOBAL_AUTO_RUNNER" "$VOICE_COMMANDS_SOURCE" "$GPT_CONSOLE_SOURCE" "$AMAZON_IMAP_BOT_SOURCE" "$AMAZON_IMAP_BOT_AUTO_STATUS_SOURCE" "$SCRIPT_DEV_AUTOMATION_SOURCE" "$G512_RGB_SOURCE" "$GLOBAL_SHORTCUTS_SOURCE" "$DEV_GITSETUP_SOURCE" "$AUTO_SOURCE" "$PROJECT_INSTALLER" "$PROJECT_RUNNER" "$PROJECT_SSH_RUNNER" "$PROJECT_ALL_RUNNER" "$CHROMES_SOURCE" "$CHROMES_ALL_SOURCE" "$FILES_SOURCE" "$FILES_ALL_SOURCE" "$TERMINALS_SOURCE" "$CHATGPTS_SOURCE" "$PHPSTORMS_SOURCE" "$PYCHARMS_SOURCE" "$PHPSTORM_DEV_SOURCE" "$DEV_MANAGER_SOURCE" "$DESKTOPS_SOURCE" "$LOCAL_NGINX_SOURCE" "$DEV_STATUS_SOURCE" "$CLEAR_TERMINAL_SOURCE" "$LRDP_TUI_SOURCE" "$LRDP1_SOURCE" "$LRDP2_SOURCE"
 
 rm -f "$AUTO_TARGET"

@@ -11,7 +11,6 @@ DESKTOPS_SCRIPT="${DEV_MANAGER_DESKTOPS_SCRIPT:-$PROJECT_ROOT/scripts/desktops/d
 LRDP_SCRIPT="${DEV_MANAGER_LRDP_SCRIPT:-$PROJECT_ROOT/apps/lrdp/lrdp}"
 DEV_STATUS_SCRIPT="${DEV_MANAGER_DEV_STATUS_SCRIPT:-$PROJECT_ROOT/scripts/dev-status/dev-status.sh}"
 G512_RGB_SCRIPT="${DEV_MANAGER_G512_RGB_SCRIPT:-$PROJECT_ROOT/scripts/g512/g512-rgb.sh}"
-WORKER_ENSURE="${DEV_MANAGER_WORKER_ENSURE:-$PROJECT_ROOT/apps/worker-sync/deploy/local/ensure.sh}"
 MONITOR_STATE_DIR="${AUTO_CODE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/dev-automation}"
 MONITOR_LOCK_FILE="$MONITOR_STATE_DIR/auto-code-manager.monitor.lock"
 if command -v powershell.exe >/dev/null 2>&1; then
@@ -70,22 +69,6 @@ dev_status_needs_build() {
   [[ -f "$DEV_STATUS_SOURCE" && "$DEV_STATUS_SOURCE" -nt "$DEV_STATUS_BINARY" ]] && return 0
   [[ -f "$DEV_STATUS_BUILD_FILE" && "$DEV_STATUS_BUILD_FILE" -nt "$DEV_STATUS_BINARY" ]] && return 0
   return 1
-}
-
-ensure_worker_sync() {
-  if [[ ! -f "$WORKER_ENSURE" ]]; then
-    printf '[dev-manager] AVISO: ensure do worker-sync ausente: %s\n' "$WORKER_ENSURE" >&2
-    return 0
-  fi
-
-  [[ -x "$WORKER_ENSURE" ]] || chmod +x "$WORKER_ENSURE"
-  printf '[dev-manager] garantindo worker-sync idempotente...\n'
-  if "$WORKER_ENSURE"; then
-    printf '[dev-manager] worker-sync verificado.\n'
-  else
-    printf '[dev-manager] AVISO: não foi possível garantir worker-sync; dev-manager seguirá normalmente.\n' >&2
-  fi
-  return 0
 }
 
 ensure_g512_rgb() {
@@ -328,7 +311,6 @@ case "$action" in
     # que um round-trip de ZIP nunca deixe ~/.local/bin apontando para scripts
     # sem permissão de execução.
     refresh_global_commands
-    ensure_worker_sync
     ensure_g512_rgb
     printf '[dev-manager] executando monitor em primeiro plano; para parar, pressione Ctrl+C.\n'
     exec "$AUTO_MANAGER" "$@"
@@ -341,7 +323,6 @@ case "$action" in
     ;;
   commands|refresh-commands|install-commands)
     refresh_global_commands
-    ensure_worker_sync
     ensure_g512_rgb
     ;;
   desktops)

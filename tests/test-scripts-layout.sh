@@ -6,7 +6,7 @@ if find "$ROOT/scripts" -maxdepth 1 -type f -print -quit | grep -q .; then
   find "$ROOT/scripts" -maxdepth 1 -type f -printf '%f\n' >&2
   exit 1
 fi
-required=(core chromes files pycharms phpstorms terminals desktops dev-manager dev-status project project-sync gitcrypt nginx g512 chatgpts amazon-imap-bot environment maintenance worker-sync 'Global Shortcuts')
+required=(core chromes files pycharms phpstorms terminals desktops dev-manager dev-status project project-sync gitcrypt nginx g512 chatgpts amazon-imap-bot environment maintenance 'Global Shortcuts')
 for dir in "${required[@]}"; do
   [[ -d "$ROOT/scripts/$dir" ]] || { echo "ERRO: pasta ausente: scripts/$dir" >&2; exit 1; }
 done
